@@ -1,13 +1,22 @@
 import { matchMaker, Room, ServerError, type Client, type Rewind } from "@colyseus/core";
 import {
   applyInput,
+  DROP_CHANCE,
   Enemy,
   ENEMY_RESPAWN_MS,
   EnemyState,
+  equipmentStats,
+  EQUIP_SLOTS,
   findGate,
   getArchetype,
+  getItem,
+  GROUND_ITEM_TTL_MS,
+  GroundItem,
   grownProficiency,
+  INVENTORY_SIZE,
   isInArc,
+  isItemId,
+  itemsOfRarity,
   GATE_ARRIVAL_OFFSET,
   GATE_RADIUS,
   getOstra,
@@ -15,10 +24,12 @@ import {
   isOstraId,
   MoveInput,
   MANA_REGEN_PER_SECOND,
+  PICKUP_RADIUS,
   PLAYER_MAX_HEALTH,
   PLAYER_MAX_MANA,
   PLAYER_RADIUS,
   PLAYER_RESPAWN_MS,
+  rollRarity,
   spellDamage,
   spellFromWire,
   staticColliders,
@@ -31,6 +42,8 @@ import {
   Player,
   ROOM_NAME,
   TICK_RATE,
+  type EquipSlot,
+  type Equipment,
   type Spell,
   type SpellId,
   type SpellProficiency,
@@ -68,6 +81,9 @@ interface Session {
   affinity: number;
   /** Live proficiency; written back to the store on save. */
   spells: SpellProficiency;
+  /** Carried items, and what is worn. Private: nobody else sees a bag. */
+  inventory: string[];
+  equipment: Equipment;
   /** Fractional mana carried between ticks, so a 30Hz regen of 5/s is not
    *  rounded away to nothing every step. */
   manaCarry: number;
@@ -102,6 +118,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   /** Position history, so a swing is judged against the world the attacker
    *  actually saw rather than the one that exists by the time it arrives. */
   private rewind!: Rewind;
+  /** When each dropped item expires, keyed as `state.ground`. Server-only:
+   *  clients have no use for the deadline, only for the item. */
+  private readonly groundExpiry = new Map<string, number>();
+  private nextGroundId = 0;
 
   onCreate(options: OstraRoomOptions): void {
     if (!isOstraId(options.ostraId)) {
@@ -135,6 +155,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     // move a player or a creature: positions change here, from buffered input
     // or from the AI, or not at all.
     this.onMessage("requestProfile", (client) => this.onRequestProfile(client));
+    this.onMessage("equip", (client, message: { itemId?: unknown }) =>
+      this.onEquip(client, message?.itemId));
+    this.onMessage("unequip", (client, message: { slot?: unknown }) =>
+      this.onUnequip(client, message?.slot));
 
     this.setFixedTimestep((ctx) => {
       // One snapshot for the whole tick, taken before anyone moves. Rebuilding
@@ -173,6 +197,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       this.regenerateMana(ctx.dt);
       this.stepEnemies(ctx.dt, world);
       this.processRespawns();
+      this.processGround();
     }, TICK_RATE);
   }
 
@@ -214,6 +239,15 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       health: character.health > 0 ? character.health : PLAYER_MAX_HEALTH,
     }));
 
+    // Gear is loaded before anything can read maxHealth, so the bars are right
+    // on the first frame rather than a patch later.
+    const stats = equipmentStats(character.equipment);
+    const joined = this.state.players.get(client.sessionId)!;
+    joined.maxHealth = PLAYER_MAX_HEALTH + stats.health;
+    joined.maxMana = PLAYER_MAX_MANA + stats.mana;
+    if (joined.health > joined.maxHealth) joined.health = joined.maxHealth;
+    joined.mana = joined.maxMana;
+
     this.sessions.set(client.sessionId, {
       characterId: character.id,
       // Covers arriving through a Gate and logging in on top of one alike.
@@ -222,6 +256,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       nextCastAt: {},
       affinity: character.affinity,
       spells: { ...character.spells },
+      inventory: [...character.inventory],
+      equipment: { ...character.equipment },
       manaCarry: 0,
       respawnAt: 0,
     });
@@ -256,6 +292,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         yaw: player.yaw,
         health: player.health,
         spells: session.spells,
+        inventory: session.inventory,
+        equipment: session.equipment,
       });
     }
 
@@ -423,7 +461,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   ): string[] {
     // Where this player saw the world when they cast, not where it is now.
     const seen = this.rewind.lastSeenBy(sessionId);
-    const damage = spellDamage(spell, session.spells[spell.id] ?? 0);
+    // Training scales the spell; gear adds on top. Two axes, kept separate
+    // so neither makes the other pointless.
+    const damage = spellDamage(spell, session.spells[spell.id] ?? 0)
+      + equipmentStats(session.equipment).damage;
 
     const caught: Array<{ id: string; enemy: Enemy; range: number }> = [];
 
@@ -461,6 +502,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
           brain.returning = false;
           brain.respawnAt = Date.now() + ENEMY_RESPAWN_MS;
         }
+        this.rollDrop(enemy);
       }
     }
 
@@ -478,16 +520,130 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     this.clients.getById(sessionId)?.send("profile", {
       affinity: session.affinity,
       spells: session.spells,
-      maxMana: PLAYER_MAX_MANA,
+      inventory: session.inventory,
+      equipment: session.equipment,
       manaNow: player.mana,
     });
+  }
+
+  /**
+   * Maybe leave something behind.
+   *
+   * Rarity is tilted by the Ostra's danger, so Barals pays better than Terra —
+   * without that, a harder place is pure downside and nobody would go.
+   */
+  private rollDrop(enemy: Enemy): void {
+    const chance = DROP_CHANCE[enemy.kind] ?? 0;
+    if (Math.random() >= chance) return;
+
+    const rarity = rollRarity(Math.random(), this.ostra.difficulty.health);
+    const pool = itemsOfRarity(rarity);
+    const item = pool[Math.floor(Math.random() * pool.length)];
+    if (!item) return;
+
+    const id = `g${this.nextGroundId++}`;
+    this.state.ground.set(id, new GroundItem({
+      itemId: item.id,
+      x: enemy.x,
+      y: enemy.y,
+      z: enemy.z,
+    }));
+    this.groundExpiry.set(id, Date.now() + GROUND_ITEM_TTL_MS);
+  }
+
+  /** Hand out anything a living player is standing on, and clear what has
+   *  lain too long. */
+  private processGround(): void {
+    if (this.state.ground.size === 0) return;
+    const now = Date.now();
+
+    for (const [groundId, dropped] of this.state.ground) {
+      if ((this.groundExpiry.get(groundId) ?? 0) <= now) {
+        this.state.ground.delete(groundId);
+        this.groundExpiry.delete(groundId);
+        continue;
+      }
+
+      for (const [sessionId, player] of this.state.players) {
+        if (player.health === 0) continue;
+        const session = this.sessions.get(sessionId);
+        if (!session || session.transferring) continue;
+        if (Math.hypot(player.x - dropped.x, player.z - dropped.z) > PICKUP_RADIUS) continue;
+
+        // A full bag leaves it lying there rather than silently eating it.
+        if (session.inventory.length >= INVENTORY_SIZE) {
+          this.clients.getById(sessionId)?.send("pickupFailed", { itemId: dropped.itemId });
+          continue;
+        }
+
+        session.inventory.push(dropped.itemId);
+        this.state.ground.delete(groundId);
+        this.groundExpiry.delete(groundId);
+        this.clients.getById(sessionId)?.send("picked", { itemId: dropped.itemId });
+        this.sendProfile(sessionId, session, player);
+        break;
+      }
+    }
+  }
+
+  private onEquip(client: Client, itemId: unknown): void {
+    const session = this.sessions.get(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    if (!session || !player || !isItemId(itemId)) return;
+
+    const index = session.inventory.indexOf(itemId);
+    if (index === -1) return;
+    const item = getItem(itemId);
+    if (!item) return;
+
+    session.inventory.splice(index, 1);
+    // Whatever was in that slot goes back in the bag rather than vanishing.
+    const displaced = session.equipment[item.slot];
+    if (displaced !== undefined) session.inventory.push(displaced);
+    session.equipment[item.slot] = itemId;
+
+    this.applyEquipment(client.sessionId, session, player);
+  }
+
+  private onUnequip(client: Client, slot: unknown): void {
+    const session = this.sessions.get(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    if (!session || !player) return;
+    if (typeof slot !== "string" || !EQUIP_SLOTS.includes(slot as EquipSlot)) return;
+
+    const worn = session.equipment[slot as EquipSlot];
+    if (worn === undefined) return;
+    if (session.inventory.length >= INVENTORY_SIZE) {
+      client.send("pickupFailed", { itemId: worn });
+      return;
+    }
+
+    delete session.equipment[slot as EquipSlot];
+    session.inventory.push(worn);
+    this.applyEquipment(client.sessionId, session, player);
+  }
+
+  /**
+   * Recompute the caps gear provides, and tell the owner.
+   *
+   * Current health and mana are clamped rather than scaled: taking off armour
+   * should not kill you, but it must not leave you above your new ceiling
+   * either.
+   */
+  private applyEquipment(sessionId: string, session: Session, player: Player): void {
+    const stats = equipmentStats(session.equipment);
+    player.maxHealth = PLAYER_MAX_HEALTH + stats.health;
+    player.maxMana = PLAYER_MAX_MANA + stats.mana;
+    if (player.health > player.maxHealth) player.health = player.maxHealth;
+    if (player.mana > player.maxMana) player.mana = player.maxMana;
+    this.sendProfile(sessionId, session, player);
   }
 
   /** Mana ticks back up whether or not you are fighting. */
   private regenerateMana(dt: number): void {
     for (const [sessionId, session] of this.sessions) {
       const player = this.state.players.get(sessionId);
-      if (!player || player.health === 0 || player.mana >= PLAYER_MAX_MANA) {
+      if (!player || player.health === 0 || player.mana >= player.maxMana) {
         if (player && player.health === 0) session.manaCarry = 0;
         continue;
       }
@@ -498,7 +654,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const whole = Math.floor(session.manaCarry);
       if (whole <= 0) continue;
       session.manaCarry -= whole;
-      player.mana = Math.min(PLAYER_MAX_MANA, player.mana + whole);
+      player.mana = Math.min(player.maxMana, player.mana + whole);
     }
   }
 
@@ -542,8 +698,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const spawn = this.ostra.spawn;
       player.x = spawn.x;
       player.z = spawn.z;
-      player.health = PLAYER_MAX_HEALTH;
-      player.mana = PLAYER_MAX_MANA;
+      player.health = player.maxHealth;
+      player.mana = player.maxMana;
       session.manaCarry = 0;
       // Whatever they were standing in when they died must not fire on arrival.
       session.suppressedGate = this.gateContaining(spawn.x, spawn.z)?.id;
@@ -609,6 +765,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         yaw: arrivalGate.exitYaw,
         health: player.health,
         spells: session.spells,
+        inventory: session.inventory,
+        equipment: session.equipment,
       });
 
       const reservation = await matchMaker.joinOrCreate(ROOM_NAME, {

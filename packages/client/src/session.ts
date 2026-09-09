@@ -13,6 +13,8 @@ import {
   EnemyState,
   getArchetype,
   INTERP_DELAY_MS,
+  getItem,
+  type GroundItem,
   isEnemyKind,
   SPELL_IDS,
   SPELLS,
@@ -32,7 +34,13 @@ import {
 import type { Hud } from "./hud.js";
 import type { KeyboardInput } from "./input.js";
 import { Nametags, type NametagTarget, type NametagVariant } from "./nametags.js";
-import { createCastArc, createEnemyMesh, createPlayerMesh, type World } from "./scene.js";
+import {
+  createCastArc,
+  createEnemyMesh,
+  createGroundItemMesh,
+  createPlayerMesh,
+  type World,
+} from "./scene.js";
 
 /**
  * Everything tied to being inside one Ostra's room: prediction, the input
@@ -125,6 +133,9 @@ export function createSession(
   // mana, so a client that lies to itself only lies about a picture.
   const nextCastAt = new Map<SpellId, number>();
   let wasDead = false;
+
+  /** Dropped items currently on the floor. */
+  const groundMeshes = new Map<string, TransformNode>();
   const nametags = new Nametags(document.getElementById("nametags") as HTMLElement);
   let selfPlayer: Player | undefined;
   // The reconciler works on a plain-data mirror of the input, not the Schema
@@ -216,6 +227,19 @@ export function createSession(
     enemyVariants.delete(enemyId);
     enemyHealth.delete(enemyId);
     enemyHitAt.delete(enemyId);
+  });
+
+  const offGroundAdd = $(room.state).ground.onAdd((dropped: GroundItem, groundId: string) => {
+    const item = getItem(dropped.itemId);
+    if (!item) return;
+    const mesh = createGroundItemMesh(world.scene, item.rarity);
+    mesh.position.set(dropped.x, dropped.y + 0.62, dropped.z);
+    groundMeshes.set(groundId, mesh);
+  });
+
+  const offGroundRemove = $(room.state).ground.onRemove((_dropped: GroundItem, groundId: string) => {
+    groundMeshes.get(groundId)?.dispose(false, true);
+    groundMeshes.delete(groundId);
   });
 
   const offRemove = $(room.state).players.onRemove((_player: Player, sessionId: string) => {
@@ -370,7 +394,7 @@ export function createSession(
       const z = predict.value(selfPlayer, "z");
 
       const alive = selfPlayer.health > 0;
-      hud.setHealth(selfPlayer.health);
+      hud.setHealth(selfPlayer.health, selfPlayer.maxHealth);
       if (alive === wasDead) {
         wasDead = !alive;
         hud.setDead(!alive, alive ? "" : "Returning to the Ostra's heart\u2026");
@@ -399,12 +423,22 @@ export function createSession(
         arc.rotation.y = cameraYaw();
       }
 
-      hud.setMana(selfPlayer.mana);
+      hud.setMana(selfPlayer.mana, selfPlayer.maxMana);
       hud.setCooldowns(now, nextCastAt);
       // Follow the *rendered* position, not the raw schema one, or the camera
       // judders by exactly the correction the reconciler is smoothing out.
       world.camera.target.set(x, y + PLAYER_HALF, z);
       hud.setGatePrompt(nearestGateLabel(x, z));
+    }
+
+    // Turn and bob the drops. Cheap, and a moving thing on a still floor is
+    // what makes loot noticeable without a marker.
+    if (groundMeshes.size > 0) {
+      const spin = now / 900;
+      for (const mesh of groundMeshes.values()) {
+        mesh.rotation.y = spin;
+        mesh.position.y = mesh.position.y * 0 + 0.62 + Math.sin(spin * 2) * 0.09;
+      }
     }
 
     hud.setStats(room.clock.smoothedRtt(), input.tickRate ?? TICK_RATE, input.pendingCount);
@@ -421,6 +455,8 @@ export function createSession(
     offRemove();
     offEnemyAdd();
     offEnemyRemove();
+    offGroundAdd();
+    offGroundRemove();
     reconciler?.dispose();
     predict.dispose();
     for (const mesh of meshes.values()) mesh.dispose(false, true);
@@ -432,6 +468,8 @@ export function createSession(
     enemyHitAt.clear();
     for (const arc of castArcs.values()) arc.dispose(false, true);
     castArcs.clear();
+    for (const mesh of groundMeshes.values()) mesh.dispose(false, true);
+    groundMeshes.clear();
     hud.setDead(false);
     nametags.clear();
     hud.setGatePrompt(undefined);

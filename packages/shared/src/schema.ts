@@ -40,6 +40,13 @@ export const Player = schema({
   /** Zero means dead and awaiting respawn. */
   health: t.uint16().default(PLAYER_MAX_HEALTH),
   mana: t.uint16().default(PLAYER_MAX_MANA),
+  /**
+   * Base plus whatever is worn. Replicated rather than derived client-side
+   * because equipment is private — without these the client could not draw
+   * its own bars, let alone anyone else's.
+   */
+  maxHealth: t.uint16().default(PLAYER_MAX_HEALTH),
+  maxMana: t.uint16().default(PLAYER_MAX_MANA),
 }, "Player");
 export type Player = SchemaType<typeof Player>;
 
@@ -62,11 +69,27 @@ export const Enemy = schema({
 }, "Enemy");
 export type Enemy = SchemaType<typeof Enemy>;
 
+/**
+ * An item lying on the ground.
+ *
+ * Public state rather than a private message, because everyone in the Ostra
+ * can see it — that is the point of loot dropping where a thing died.
+ */
+export const GroundItem = schema({
+  /** An `ItemDefinition` id. */
+  itemId: t.string().default(""),
+  x: t.float32().default(0),
+  y: t.float32().default(0),
+  z: t.float32().default(0),
+}, "GroundItem");
+export type GroundItem = SchemaType<typeof GroundItem>;
+
 export const WorldState = schema({
   /** Which Ostra this room is. One room per Ostra, so it never changes for
    *  the lifetime of the room — the client reads it to pick the palette. */
   ostraId: t.string().default(""),
   players: t.map(Player),
   enemies: t.map(Enemy),
+  ground: t.map(GroundItem),
 }, "WorldState");
 export type WorldState = SchemaType<typeof WorldState>;

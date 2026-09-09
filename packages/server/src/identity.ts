@@ -69,6 +69,8 @@ export function createCharacter(
     // ceiling.
     affinity: MIN_AFFINITY + Math.floor(Math.random() * (MAX_AFFINITY - MIN_AFFINITY + 1)),
     spells: {},
+    inventory: [],
+    equipment: {},
     createdAt: now,
     lastSeenAt: now,
   };

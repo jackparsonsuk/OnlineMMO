@@ -4,7 +4,13 @@ import type { Mesh } from "@babylonjs/core/Meshes/mesh.js";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import type { Scene } from "@babylonjs/core/scene.js";
-import { getArchetype, type EnemyKind, PLAYER_SIZE, type Spell } from "@mmo/shared";
+import {
+  getArchetype,
+  type EnemyKind,
+  PLAYER_SIZE,
+  type Rarity,
+  type Spell,
+} from "@mmo/shared";
 
 /**
  * The game's art style, in one place.
@@ -273,5 +279,53 @@ export function buildCastArc(scene: Scene, spell: Spell, colour: number): Transf
   sector.material = material;
 
   pivot.setEnabled(false);
+  return pivot;
+}
+
+/** Loot colours by rarity. Deliberately loud — a drop should catch the eye
+ *  across an Ostra, and rarity should be readable before you reach it. */
+export const RARITY_COLOURS: Record<Rarity, number> = {
+  common: 0xb8c4d0,
+  fine: 0x5ec2e8,
+  rare: 0xe8b13f,
+};
+
+/**
+ * A dropped item: a small faceted crystal that hovers and turns.
+ *
+ * An octahedron rather than a box, because nothing else in the world is one —
+ * loot has to be distinguishable from scenery at a glance, and silhouette does
+ * that faster than colour.
+ */
+export function buildGroundItem(scene: Scene, rarity: Rarity): TransformNode {
+  const pivot = new TransformNode("groundItem", scene);
+
+  const colour = hexColour(RARITY_COLOURS[rarity]);
+  const material = new StandardMaterial(`itemMaterial:${rarity}`, scene);
+  material.diffuseColor = colour.scale(0.4);
+  material.emissiveColor = colour;
+  material.specularColor = Color3.Black();
+
+  // Polyhedron type 1 is the octahedron: eight flat faces, already faceted.
+  const gem = MeshBuilder.CreatePolyhedron("itemGem", { type: 1, size: 0.22 }, scene);
+  gem.material = material;
+  gem.isPickable = false;
+  gem.parent = pivot;
+
+  // A flat glow beneath it, so a drop in long grass still reads from above.
+  const halo = MeshBuilder.CreateDisc("itemHalo", { radius: 0.5, tessellation: 12 }, scene);
+  halo.rotation.x = Math.PI / 2;
+  halo.position.y = -0.42;
+  halo.isPickable = false;
+  halo.parent = pivot;
+
+  const haloMaterial = new StandardMaterial(`itemHalo:${rarity}`, scene);
+  haloMaterial.diffuseColor = Color3.Black();
+  haloMaterial.specularColor = Color3.Black();
+  haloMaterial.emissiveColor = colour;
+  haloMaterial.alpha = 0.22;
+  haloMaterial.backFaceCulling = false;
+  halo.material = haloMaterial;
+
   return pivot;
 }

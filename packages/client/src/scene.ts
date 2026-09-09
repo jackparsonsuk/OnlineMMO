@@ -25,12 +25,14 @@ import {
   PLAYER_SIZE,
   type EnemyKind,
   type OstraDefinition,
+  type Rarity,
   type Spell,
 } from "@mmo/shared";
 import {
   buildEnemy,
   buildObstacle,
   buildCastArc,
+  buildGroundItem,
   buildPlayer,
   facet,
   flatMaterial,
@@ -232,4 +234,8 @@ export function createEnemyMesh(scene: Scene, kind: EnemyKind): TransformNode {
 
 export function createCastArc(scene: Scene, spell: Spell, colour: number): TransformNode {
   return buildCastArc(scene, spell, colour);
+}
+
+export function createGroundItemMesh(scene: Scene, rarity: Rarity): TransformNode {
+  return buildGroundItem(scene, rarity);
 }

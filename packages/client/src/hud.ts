@@ -1,10 +1,14 @@
 import {
+  EQUIP_SLOTS,
+  equipmentStats,
+  getItem,
+  INVENTORY_SIZE,
   MAX_AFFINITY,
-  PLAYER_MAX_HEALTH,
-  PLAYER_MAX_MANA,
   proficiencyMultiplier,
   SPELL_IDS,
   SPELLS,
+  type EquipSlot,
+  type Equipment,
   type OstraDefinition,
   type Player,
   type SpellId,
@@ -27,8 +31,19 @@ export class Hud {
   private manaText = document.getElementById("mana-text") as HTMLElement;
   private abilities = document.getElementById("abilities") as HTMLElement;
   private affinityText = document.getElementById("affinity") as HTMLElement;
+  private bag = document.getElementById("bag") as HTMLElement;
+  private bagSlots = document.getElementById("bag-slots") as HTMLElement;
+  private bagWorn = document.getElementById("bag-worn") as HTMLElement;
+  private bagTotals = document.getElementById("bag-totals") as HTMLElement;
+  private toast = document.getElementById("toast") as HTMLElement;
+  private toastTimer: number | undefined;
   private shownHealth = -1;
   private shownMana = -1;
+  private shownMaxHealth = -1;
+  private shownMaxMana = -1;
+  /** Set by main so a click in the bag can reach the server. */
+  onEquip: ((itemId: string) => void) | undefined;
+  onUnequip: ((slot: EquipSlot) => void) | undefined;
   private slots = new Map<SpellId, { root: HTMLElement; cool: HTMLElement; prof: HTMLElement }>();
 
   setOstra(ostra: OstraDefinition): void {
@@ -55,22 +70,24 @@ export class Hud {
   }
 
   /** Only touches the DOM when the number actually moved. */
-  setHealth(health: number): void {
-    if (health === this.shownHealth) return;
+  setHealth(health: number, max: number): void {
+    if (health === this.shownHealth && max === this.shownMaxHealth) return;
     this.shownHealth = health;
-    const fraction = Math.max(0, Math.min(1, health / PLAYER_MAX_HEALTH));
+    this.shownMaxHealth = max;
+    const fraction = Math.max(0, Math.min(1, health / Math.max(1, max)));
     this.healthFill.style.width = `${fraction * 100}%`;
-    this.healthText.textContent = `${health} / ${PLAYER_MAX_HEALTH}`;
+    this.healthText.textContent = `${health} / ${max}`;
     // Below a quarter the bar turns; you should not have to read a number to
     // know you are in trouble.
     this.healthFill.classList.toggle("low", fraction <= 0.25);
   }
 
-  setMana(mana: number): void {
-    if (mana === this.shownMana) return;
+  setMana(mana: number, max: number): void {
+    if (mana === this.shownMana && max === this.shownMaxMana) return;
     this.shownMana = mana;
-    this.manaFill.style.width = `${Math.max(0, Math.min(1, mana / PLAYER_MAX_MANA)) * 100}%`;
-    this.manaText.textContent = `${mana} / ${PLAYER_MAX_MANA}`;
+    this.shownMaxMana = max;
+    this.manaFill.style.width = `${Math.max(0, Math.min(1, mana / Math.max(1, max))) * 100}%`;
+    this.manaText.textContent = `${mana} / ${max}`;
 
     // Grey a spell you cannot currently afford, so the bar answers "why did
     // nothing happen?" before you have to ask it.
@@ -137,6 +154,77 @@ export class Hud {
     }
   }
 
+  toggleBag(): void {
+    this.bag.hidden = !this.bag.hidden;
+  }
+
+  /**
+   * Redraw the bag.
+   *
+   * Every entry shows what it would do, not just what it is: an item you
+   * cannot compare is an item you cannot choose between.
+   */
+  setInventory(inventory: string[], equipment: Equipment): void {
+    this.bagWorn.innerHTML = "";
+    for (const slot of EQUIP_SLOTS) {
+      const wornId = equipment[slot];
+      const item = wornId !== undefined ? getItem(wornId) : undefined;
+
+      const row = document.createElement("div");
+      row.className = `worn ${item ? item.rarity : "empty"}`;
+      row.innerHTML =
+        `<span class="slot">${slot}</span>` +
+        `<span class="what">${item ? item.name : "\u2014"}</span>` +
+        `<span class="stats">${item ? describeStats(item.stats) : ""}</span>`;
+
+      if (item) {
+        const off = document.createElement("button");
+        off.className = "take-off";
+        off.textContent = "remove";
+        off.onclick = () => this.onUnequip?.(slot);
+        row.appendChild(off);
+      }
+      this.bagWorn.appendChild(row);
+    }
+
+    this.bagSlots.innerHTML = "";
+    if (inventory.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "carried empty";
+      empty.textContent = "Nothing carried.";
+      this.bagSlots.appendChild(empty);
+    }
+
+    inventory.forEach((id) => {
+      const item = getItem(id);
+      if (!item) return;
+      const row = document.createElement("div");
+      row.className = `carried ${item.rarity}`;
+      row.innerHTML =
+        `<span class="what">${item.name}</span>` +
+        `<span class="slot">${item.slot}</span>` +
+        `<span class="stats">${describeStats(item.stats)}</span>` +
+        `<span class="flavour">${item.description}</span>`;
+      // The whole row is the button: fewer things to aim at mid-fight.
+      row.onclick = () => this.onEquip?.(id);
+      this.bagSlots.appendChild(row);
+    });
+
+    const total = equipmentStats(equipment);
+    this.bagTotals.textContent =
+      `Worn: +${total.damage} damage \u00b7 +${total.health} health \u00b7 ` +
+      `+${total.mana} mana \u00b7 ${inventory.length}/${INVENTORY_SIZE} carried`;
+  }
+
+  /** A line that fades. Used for pickups, which need acknowledging but not a
+   *  dialog. */
+  flash(text: string): void {
+    this.toast.textContent = text;
+    this.toast.hidden = false;
+    if (this.toastTimer !== undefined) window.clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => { this.toast.hidden = true; }, 2600);
+  }
+
   setDead(dead: boolean, detail = ""): void {
     this.death.hidden = !dead;
     this.deathDetail.textContent = detail;
@@ -156,6 +244,15 @@ export class Hud {
     });
     this.roster.innerHTML = rows.join("");
   }
+}
+
+/** "+5 damage · +10 mana", skipping whatever is zero. */
+function describeStats(stats: { damage?: number; health?: number; mana?: number }): string {
+  const parts: string[] = [];
+  if (stats.damage) parts.push(`+${stats.damage} damage`);
+  if (stats.health) parts.push(`+${stats.health} health`);
+  if (stats.mana) parts.push(`+${stats.mana} mana`);
+  return parts.join(" \u00b7 ");
 }
 
 function escapeHtml(value: string): string {

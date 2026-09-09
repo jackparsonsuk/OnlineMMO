@@ -28,8 +28,8 @@ the duplicate.
 | `npm run dev:server` / `npm run dev:client` | One side only |
 | `npm run typecheck` | Type-checks all three packages |
 
-Controls: **WASD** move, **Space / 1 / 2 / 3** cast, drag to orbit, scroll to
-zoom, walk into a Gate ring to travel.
+Controls: **WASD** move, **Space / 1 / 2 / 3** cast, **I** pack, drag to orbit,
+scroll to zoom, walk into a Gate ring to travel.
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
@@ -231,6 +231,33 @@ of palette:
 | Ascendant | ×1.0 | ×1.2 |
 | Barals | ×1.6 | ×1.5 |
 
+## Loot and equipment
+
+Creatures drop gear. It lands where they fell, hovers as a faceted crystal
+coloured by rarity, and is picked up by walking over it — no key, because one
+less thing between killing something and being rewarded for it. Press **I** for
+the pack; click a carried item to wear it.
+
+Three slots — weapon, armour, trinket — and three stats: flat `damage` added
+after proficiency scaling, plus `health` and `mana` added to your caps. Flat
+rather than percentages, so the numbers stay legible next to the ones already
+on screen ("+5 damage" against Strike's 18) instead of compounding into nonsense
+once there are more slots.
+
+**Gear is the fast axis, proficiency the slow one.** A lucky drop changes your
+numbers today; training a spell changes them over an evening. Keeping them
+separate means neither makes the other pointless — you cannot loot your way to a
+trained spell, and practice is no substitute for a better blade.
+
+Rarity odds are tilted by the Ostra's danger, so Barals pays better than Terra.
+Without that, a harder place is pure downside and nobody would go.
+
+`maxHealth` and `maxMana` are replicated on the player rather than derived
+client-side, because equipment itself is private — without them the client
+could not draw its own bars. Taking armour off clamps current health to the new
+ceiling rather than scaling it: it should never kill you, and never leave you
+above your cap.
+
 ## Ostras and Gates
 
 Each Ostra is one Colyseus room. There is a single `OstraRoom` class, and
@@ -276,8 +303,13 @@ Ordered roughly by how much they would hurt in production.
   characters in a loop and fill the database.
 - **SQLite means one process per realm.** The `CharacterStore` interface exists
   so Postgres can replace it; nothing else needs to change.
-- **No loot, no items, no economy.** Killing something gives you practice and
-  nothing else. Inventory is the obvious next reward layer.
+- **No economy.** Items drop and are worn; nothing buys, sells, repairs or
+  trades them, and there is nowhere to store them beyond twelve carried slots.
+- **No settlements and no NPCs.** Daso and Fanshona exist in the vault and
+  nowhere in the game, which means players still have no reason to be in the
+  same place at the same time.
+- **Loot has no ownership.** The first person to walk over a drop takes it,
+  whoever killed the creature.
 - **No threat or targeting.** Creatures always chase whoever is nearest; you
   cannot taunt, and there is no target selection — spells hit whatever is in the
   shape.

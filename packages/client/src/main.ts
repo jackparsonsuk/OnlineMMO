@@ -1,6 +1,8 @@
 import type { Room, SeatReservation } from "@colyseus/sdk";
 import { Client } from "@colyseus/sdk";
 import {
+  type Equipment,
+  getItem,
   getOstra,
   isOstraId,
   ROOM_NAME,
@@ -28,6 +30,13 @@ const hud = new Hud();
 const world = createWorld(canvas);
 const keyboard = new KeyboardInput();
 
+// The pack toggle is deliberately NOT part of KeyboardInput: that class feeds
+// the fixed-step simulation, and opening a bag is a UI action with no place on
+// the wire.
+window.addEventListener("keydown", (event) => {
+  if (event.code === "KeyI" && !event.repeat) hud.toggleBag();
+});
+
 /**
  * Heading the player should face, derived from where the camera is looking.
  *
@@ -45,7 +54,8 @@ function cameraYaw(): number {
 interface ProfileMessage {
   affinity: number;
   spells: SpellProficiency;
-  maxMana: number;
+  inventory: string[];
+  equipment: Equipment;
   manaNow: number;
 }
 
@@ -118,8 +128,15 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   // registered, which is the same trap the character id fell into.
   next.onMessage("profile", (payload: ProfileMessage) => {
     hud.setProfile(payload.affinity, payload.spells);
-    hud.setMana(payload.manaNow);
+    hud.setInventory(payload.inventory ?? [], payload.equipment ?? {});
   });
+  next.onMessage("picked", (payload: { itemId: string }) => {
+    hud.flash(`Picked up ${getItem(payload.itemId)?.name ?? "something"}`);
+  });
+  next.onMessage("pickupFailed", () => hud.flash("Your pack is full."));
+
+  hud.onEquip = (itemId) => next.send("equip", { itemId });
+  hud.onUnequip = (slot) => next.send("unequip", { slot });
   next.send("requestProfile");
 
   next.onMessage("gate", (payload: GateMessage) => {

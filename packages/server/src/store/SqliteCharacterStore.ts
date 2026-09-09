@@ -2,10 +2,14 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  EQUIP_SLOTS,
+  isItemId,
+  ITEMS,
   isOstraId,
   MIN_AFFINITY,
   PLAYER_MAX_HEALTH,
   STARTING_OSTRA,
+  type Equipment,
   type SpellProficiency,
 } from "@mmo/shared";
 import type { CharacterPosition, CharacterRecord, CharacterStore } from "./CharacterStore.js";
@@ -83,6 +87,14 @@ export class SqliteCharacterStore implements CharacterStore {
       // anything ever needs "who is best at Sunder".
       this.db.exec("ALTER TABLE characters ADD COLUMN spells TEXT NOT NULL DEFAULT '{}'");
     }
+
+    if (!columns.has("inventory")) {
+      this.db.exec("ALTER TABLE characters ADD COLUMN inventory TEXT NOT NULL DEFAULT '[]'");
+    }
+
+    if (!columns.has("equipment")) {
+      this.db.exec("ALTER TABLE characters ADD COLUMN equipment TEXT NOT NULL DEFAULT '{}'");
+    }
   }
 
   find(realmId: string, characterId: string): CharacterRecord | undefined {
@@ -96,8 +108,8 @@ export class SqliteCharacterStore implements CharacterStore {
     this.db.prepare(`
       INSERT INTO characters
         (id, realm_id, name, colour, ostra_id, x, y, z, yaw, health, affinity, spells,
-         created_at, last_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         inventory, equipment, created_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       character.id,
       character.realmId,
@@ -111,6 +123,8 @@ export class SqliteCharacterStore implements CharacterStore {
       character.health,
       character.affinity,
       JSON.stringify(character.spells),
+      JSON.stringify(character.inventory),
+      JSON.stringify(character.equipment),
       character.createdAt,
       character.lastSeenAt,
     );
@@ -120,7 +134,7 @@ export class SqliteCharacterStore implements CharacterStore {
     this.db.prepare(`
       UPDATE characters
          SET ostra_id = ?, x = ?, y = ?, z = ?, yaw = ?, health = ?, spells = ?,
-             last_seen_at = ?
+             inventory = ?, equipment = ?, last_seen_at = ?
        WHERE realm_id = ? AND id = ?
     `).run(
       position.ostraId,
@@ -130,6 +144,8 @@ export class SqliteCharacterStore implements CharacterStore {
       position.yaw,
       position.health,
       JSON.stringify(position.spells),
+      JSON.stringify(position.inventory),
+      JSON.stringify(position.equipment),
       Date.now(),
       realmId,
       characterId,
@@ -165,6 +181,38 @@ function parseSpells(raw: unknown): SpellProficiency {
   }
 }
 
+/** Only ids this build still knows survive a load — an item removed from the
+ *  table should vanish from a bag, not crash the room that opens it. */
+function parseInventory(raw: unknown): string[] {
+  const parsed = parseJson(raw);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((id): id is string => typeof id === "string" && isItemId(id));
+}
+
+function parseEquipment(raw: unknown): Equipment {
+  const parsed = parseJson(raw);
+  if (typeof parsed !== "object" || parsed === null) return {};
+  const result: Equipment = {};
+  for (const slot of EQUIP_SLOTS) {
+    const id = (parsed as Record<string, unknown>)[slot];
+    // The slot on the item must still match the slot it is stored under, or a
+    // renamed item could end up worn somewhere it was never meant to go.
+    if (typeof id === "string" && isItemId(id) && ITEMS[id]?.slot === slot) {
+      result[slot] = id;
+    }
+  }
+  return result;
+}
+
+function parseJson(raw: unknown): unknown {
+  if (typeof raw !== "string" || raw.length === 0) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
 function toRecord(row: Record<string, unknown>): CharacterRecord {
   const ostraId = row["ostra_id"];
   return {
@@ -183,6 +231,8 @@ function toRecord(row: Record<string, unknown>): CharacterRecord {
     health: Number(row["health"] ?? PLAYER_MAX_HEALTH),
     affinity: Number(row["affinity"] ?? MIN_AFFINITY),
     spells: parseSpells(row["spells"]),
+    inventory: parseInventory(row["inventory"]),
+    equipment: parseEquipment(row["equipment"]),
     createdAt: Number(row["created_at"]),
     lastSeenAt: Number(row["last_seen_at"]),
   };

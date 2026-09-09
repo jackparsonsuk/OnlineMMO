@@ -1,4 +1,4 @@
-import type { OstraId, SpellProficiency } from "@mmo/shared";
+import type { Equipment, OstraId, SpellProficiency } from "@mmo/shared";
 
 /**
  * A character as it survives between sessions. Position and Ostra live here
@@ -32,6 +32,10 @@ export interface CharacterRecord {
   affinity: number;
   /** Per-spell proficiency, keyed by SpellId. Absent means untrained. */
   spells: SpellProficiency;
+  /** Carried item ids, in pickup order. */
+  inventory: string[];
+  /** Worn item ids, by slot. */
+  equipment: Equipment;
   createdAt: number;
   lastSeenAt: number;
 }
@@ -39,8 +43,10 @@ export interface CharacterRecord {
 /** Where a character is, and in which Ostra — the part that changes constantly. */
 export type CharacterPosition =
   Pick<CharacterRecord, "ostraId" | "x" | "y" | "z" | "yaw" | "health"> & {
-    /** Written on every save; proficiency changes as you play. */
+    /** Written on every save; all three change as you play. */
     spells: SpellProficiency;
+    inventory: string[];
+    equipment: Equipment;
   };
 
 /**
