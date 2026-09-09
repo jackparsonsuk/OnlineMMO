@@ -1,0 +1,72 @@
+:root {
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0d1117;
+  color: #e6edf3;
+}
+
+#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  touch-action: none;
+}
+
+#hud, #hint {
+  position: fixed;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgb(13 17 23 / 72%);
+  border: 1px solid rgb(230 237 243 / 12%);
+  backdrop-filter: blur(6px);
+  font-size: 13px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+#hud { top: 12px; left: 12px; min-width: 190px; }
+#hint { bottom: 12px; left: 12px; color: #9aa7b4; }
+
+#status { font-weight: 600; }
+#status.error { color: #ff7b72; }
+
+#stats {
+  color: #9aa7b4;
+  font-variant-numeric: tabular-nums;
+}
+
+#roster { margin-top: 6px; }
+
+#roster div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+#roster i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: none;
+}
+
+#roster .self { font-weight: 600; }
+
+kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid rgb(230 237 243 / 22%);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+}
