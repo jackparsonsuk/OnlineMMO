@@ -12,6 +12,7 @@ import {
   getItem,
   GROUND_ITEM_TTL_MS,
   GroundItem,
+  LOOT_CLAIM_MS,
   grownProficiency,
   INVENTORY_SIZE,
   isInArc,
@@ -50,6 +51,7 @@ import {
   WorldState,
 } from "@mmo/shared";
 import { createBrain, stepEnemy, type AITarget, type EnemyBrain } from "../ai/enemyAI.js";
+import { verifyToken } from "../auth.js";
 import { getServerContext } from "../context.js";
 import { isCharacterId } from "../identity.js";
 import type { CharacterStore } from "../store/CharacterStore.js";
@@ -58,10 +60,16 @@ export interface OstraRoomOptions {
   /** Which Ostra this room is. Rooms are matched on it, so it is required. */
   ostraId: OstraId;
   /**
-   * The character the client claims. Always required — characters are minted
-   * over HTTP before the first join, so there is no "new player" path here.
+   * Which of the account's characters to play. Not a credential — the join is
+   * authorised by the session token, and this only selects among the
+   * characters that token already owns.
    */
   characterId: string;
+}
+
+/** What `onAuth` resolves and hands to `onJoin` as `client.auth`. */
+interface JoinAuth {
+  accountId: string;
 }
 
 /** Per-connection bookkeeping that doesn't belong in replicated state. */
@@ -121,6 +129,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   /** When each dropped item expires, keyed as `state.ground`. Server-only:
    *  clients have no use for the deadline, only for the item. */
   private readonly groundExpiry = new Map<string, number>();
+  /** When each drop stops belonging to whoever earned it. */
+  private readonly groundClaimUntil = new Map<string, number>();
   private nextGroundId = 0;
 
   onCreate(options: OstraRoomOptions): void {
@@ -201,15 +211,31 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     }, TICK_RATE);
   }
 
+  /**
+   * Authorise the connection before a seat is reserved.
+   *
+   * Static, and run during matchmaking, so an unauthenticated client never
+   * reaches a room at all. Returning a value puts it on `client.auth`.
+   */
+  static override async onAuth(token: string): Promise<JoinAuth> {
+    const claims = await verifyToken(token);
+    if (!claims) throw new ServerError(401, "Sign in first.");
+    return { accountId: claims.sub };
+  }
+
   onJoin(client: Client, options: OstraRoomOptions): void {
+    const auth = client.auth as JoinAuth | undefined;
+    if (!auth?.accountId) throw new ServerError(401, "Sign in first.");
+
     if (!isCharacterId(options.characterId)) {
       throw new ServerError(400, "A character id is required.");
     }
 
     const character = this.store.find(this.realmId, options.characterId);
-    if (!character) {
-      // A wiped database, or a character from another realm.
-      throw new ServerError(401, "Unknown character.");
+    // Same answer either way: a character that is not yours should be
+    // indistinguishable from one that does not exist.
+    if (!character || character.accountId !== auth.accountId) {
+      throw new ServerError(404, "No such character.");
     }
 
     // Two live connections sharing one character would fight over the save and
@@ -502,7 +528,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
           brain.returning = false;
           brain.respawnAt = Date.now() + ENEMY_RESPAWN_MS;
         }
-        this.rollDrop(enemy);
+        this.rollDrop(enemy, sessionId);
       }
     }
 
@@ -532,7 +558,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
    * Rarity is tilted by the Ostra's danger, so Barals pays better than Terra —
    * without that, a harder place is pure downside and nobody would go.
    */
-  private rollDrop(enemy: Enemy): void {
+  private rollDrop(enemy: Enemy, killerSessionId: string): void {
     const chance = DROP_CHANCE[enemy.kind] ?? 0;
     if (Math.random() >= chance) return;
 
@@ -544,11 +570,13 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     const id = `g${this.nextGroundId++}`;
     this.state.ground.set(id, new GroundItem({
       itemId: item.id,
+      claimedBy: killerSessionId,
       x: enemy.x,
       y: enemy.y,
       z: enemy.z,
     }));
     this.groundExpiry.set(id, Date.now() + GROUND_ITEM_TTL_MS);
+    this.groundClaimUntil.set(id, Date.now() + LOOT_CLAIM_MS);
   }
 
   /** Hand out anything a living player is standing on, and clear what has
@@ -561,7 +589,15 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       if ((this.groundExpiry.get(groundId) ?? 0) <= now) {
         this.state.ground.delete(groundId);
         this.groundExpiry.delete(groundId);
+        this.groundClaimUntil.delete(groundId);
         continue;
+      }
+
+      // The claim lapses on its own, so a drop nobody collects still becomes
+      // everyone's rather than lying there reserved forever.
+      if (dropped.claimedBy !== "" && (this.groundClaimUntil.get(groundId) ?? 0) <= now) {
+        dropped.claimedBy = "";
+        this.groundClaimUntil.delete(groundId);
       }
 
       for (const [sessionId, player] of this.state.players) {
@@ -569,6 +605,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         const session = this.sessions.get(sessionId);
         if (!session || session.transferring) continue;
         if (Math.hypot(player.x - dropped.x, player.z - dropped.z) > PICKUP_RADIUS) continue;
+        // Still someone else's.
+        if (dropped.claimedBy !== "" && dropped.claimedBy !== sessionId) continue;
 
         // A full bag leaves it lying there rather than silently eating it.
         if (session.inventory.length >= INVENTORY_SIZE) {
@@ -579,6 +617,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         session.inventory.push(dropped.itemId);
         this.state.ground.delete(groundId);
         this.groundExpiry.delete(groundId);
+        this.groundClaimUntil.delete(groundId);
         this.clients.getById(sessionId)?.send("picked", { itemId: dropped.itemId });
         this.sendProfile(sessionId, session, player);
         break;

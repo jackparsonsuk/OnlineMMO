@@ -237,6 +237,11 @@ export function createSession(
     groundMeshes.set(groundId, mesh);
   });
 
+  /** Someone else's drop, for as long as their claim lasts. */
+  function claimedByOther(dropped: GroundItem): boolean {
+    return dropped.claimedBy !== "" && dropped.claimedBy !== room.sessionId;
+  }
+
   const offGroundRemove = $(room.state).ground.onRemove((_dropped: GroundItem, groundId: string) => {
     groundMeshes.get(groundId)?.dispose(false, true);
     groundMeshes.delete(groundId);
@@ -435,10 +440,15 @@ export function createSession(
     // what makes loot noticeable without a marker.
     if (groundMeshes.size > 0) {
       const spin = now / 900;
-      for (const mesh of groundMeshes.values()) {
+      room.state.ground.forEach((dropped: GroundItem, groundId: string) => {
+        const mesh = groundMeshes.get(groundId);
+        if (!mesh) return;
         mesh.rotation.y = spin;
-        mesh.position.y = mesh.position.y * 0 + 0.62 + Math.sin(spin * 2) * 0.09;
-      }
+        mesh.position.y = 0.62 + Math.sin(spin * 2) * 0.09;
+        // Shrunk rather than hidden: you should see that something dropped and
+        // that it is not yet yours, not wonder where it went.
+        mesh.scaling.setAll(claimedByOther(dropped) ? 0.55 : 1);
+      });
     }
 
     hud.setStats(room.clock.smoothedRtt(), input.tickRate ?? TICK_RATE, input.pendingCount);

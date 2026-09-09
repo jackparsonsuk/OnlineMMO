@@ -13,6 +13,7 @@ import {
   type SpellProficiency,
 } from "@mmo/shared";
 import type { CharacterPosition, CharacterRecord, CharacterStore } from "./CharacterStore.js";
+import type { AccountRecord, AccountStore } from "./AccountStore.js";
 
 /**
  * SQLite-backed persistence, using Node's built-in `node:sqlite` so there is no
@@ -23,7 +24,7 @@ import type { CharacterPosition, CharacterRecord, CharacterStore } from "./Chara
  * when that day comes, implement `CharacterStore` over Postgres and change the
  * one line in `index.ts` that constructs this.
  */
-export class SqliteCharacterStore implements CharacterStore {
+export class SqliteCharacterStore implements CharacterStore, AccountStore {
   private readonly db: DatabaseSync;
 
   constructor(filename: string) {
@@ -48,6 +49,16 @@ export class SqliteCharacterStore implements CharacterStore {
         created_at  INTEGER NOT NULL,
         last_seen_at INTEGER NOT NULL,
         PRIMARY KEY (realm_id, id)
+      )
+    `);
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS accounts (
+        id            TEXT PRIMARY KEY,
+        email         TEXT NOT NULL UNIQUE,
+        password      TEXT NOT NULL,
+        created_at    INTEGER NOT NULL,
+        last_login_at INTEGER NOT NULL
       )
     `);
 
@@ -95,6 +106,64 @@ export class SqliteCharacterStore implements CharacterStore {
     if (!columns.has("equipment")) {
       this.db.exec("ALTER TABLE characters ADD COLUMN equipment TEXT NOT NULL DEFAULT '{}'");
     }
+
+    if (!columns.has("account_id")) {
+      // Nullable on purpose: characters made before accounts existed have no
+      // owner and cannot be claimed. They stay in the table, listed for nobody,
+      // and the server reports how many at boot rather than deleting anyone's
+      // save behind their back.
+      this.db.exec("ALTER TABLE characters ADD COLUMN account_id TEXT");
+    }
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_characters_account ON characters (realm_id, account_id)",
+    );
+  }
+
+  // --- accounts -------------------------------------------------------------
+
+  findAccountByEmail(email: string): AccountRecord | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM accounts WHERE email = ?")
+      .get(normaliseEmail(email)) as Record<string, unknown> | undefined;
+    return row ? toAccount(row) : undefined;
+  }
+
+  findAccountById(id: string): AccountRecord | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM accounts WHERE id = ?")
+      .get(id) as Record<string, unknown> | undefined;
+    return row ? toAccount(row) : undefined;
+  }
+
+  createAccount(account: AccountRecord): void {
+    this.db.prepare(`
+      INSERT INTO accounts (id, email, password, created_at, last_login_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(
+      account.id,
+      normaliseEmail(account.email),
+      account.password,
+      account.createdAt,
+      account.lastLoginAt,
+    );
+  }
+
+  touchLogin(id: string): void {
+    this.db.prepare("UPDATE accounts SET last_login_at = ? WHERE id = ?").run(Date.now(), id);
+  }
+
+  charactersForAccount(realmId: string, accountId: string): string[] {
+    const rows = this.db
+      .prepare("SELECT id FROM characters WHERE realm_id = ? AND account_id = ? ORDER BY created_at")
+      .all(realmId, accountId) as { id: string }[];
+    return rows.map((row) => row.id);
+  }
+
+  countOrphanedCharacters(): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS n FROM characters WHERE account_id IS NULL")
+      .get() as { n: number };
+    return row.n;
   }
 
   find(realmId: string, characterId: string): CharacterRecord | undefined {
@@ -107,12 +176,13 @@ export class SqliteCharacterStore implements CharacterStore {
   create(character: CharacterRecord): void {
     this.db.prepare(`
       INSERT INTO characters
-        (id, realm_id, name, colour, ostra_id, x, y, z, yaw, health, affinity, spells,
-         inventory, equipment, created_at, last_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, realm_id, account_id, name, colour, ostra_id, x, y, z, yaw, health,
+         affinity, spells, inventory, equipment, created_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       character.id,
       character.realmId,
+      character.accountId,
       character.name,
       character.colour,
       character.ostraId,
@@ -213,11 +283,28 @@ function parseJson(raw: unknown): unknown {
   }
 }
 
+/** One canonical form for an email, so "A@b.com " and "a@b.com" are one
+ *  account rather than two. */
+export function normaliseEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function toAccount(row: Record<string, unknown>): AccountRecord {
+  return {
+    id: String(row["id"]),
+    email: String(row["email"]),
+    password: String(row["password"]),
+    createdAt: Number(row["created_at"]),
+    lastLoginAt: Number(row["last_login_at"]),
+  };
+}
+
 function toRecord(row: Record<string, unknown>): CharacterRecord {
   const ostraId = row["ostra_id"];
   return {
     id: String(row["id"]),
     realmId: String(row["realm_id"]),
+    accountId: String(row["account_id"] ?? ""),
     name: String(row["name"]),
     colour: Number(row["colour"]),
     // A row could name an Ostra a later build removed. Falling back to the

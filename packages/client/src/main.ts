@@ -10,20 +10,33 @@ import {
   type SpellProficiency,
   WorldState,
 } from "@mmo/shared";
-import { resolveCharacter } from "./characters.js";
+import { AccountClient } from "./account.js";
+import { showTitleScreen } from "./titleScreen.js";
 import { Hud } from "./hud.js";
 import { KeyboardInput } from "./input.js";
 import { applyOstra, createWorld } from "./scene.js";
 import { createSession, type OstraSession } from "./session.js";
 
-const WS_ENDPOINT = import.meta.env.VITE_SERVER_URL ?? "ws://localhost:2567";
-/** The character endpoints are plain HTTP on the same origin as the socket. */
-const HTTP_ENDPOINT = WS_ENDPOINT.replace(/^ws/, "http");
+/**
+ * Where the server is.
+ *
+ * In production the server serves this very page, so the answer is "wherever
+ * this came from" — which means no build-time configuration, no CORS, and one
+ * deployable artifact. `import.meta.env` is inlined by Vite at BUILD time, so
+ * anything baked in there would pin a single deployment forever.
+ *
+ * In development Vite serves the page on its own port while the game server is
+ * elsewhere, so that case is named explicitly.
+ */
+function serverOrigin(): string {
+  const override = import.meta.env.VITE_SERVER_URL;
+  if (override) return override.replace(/\/$/, "");
+  if (import.meta.env.DEV) return "http://localhost:2567";
+  return location.origin;
+}
 
-const params = new URLSearchParams(location.search);
-/** Two tabs need two characters to test with; see `characters.ts`. */
-const slot = params.get("slot") ?? "1";
-const requestedName = params.get("name") ?? undefined;
+const HTTP_ENDPOINT = serverOrigin();
+const WS_ENDPOINT = HTTP_ENDPOINT.replace(/^http/, "ws");
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 const hud = new Hud();
@@ -74,12 +87,20 @@ let travelling = false;
 async function main(): Promise<void> {
   hud.setStatus("connecting…");
 
-  // The realm scopes stored character ids: point the client at a different
-  // server and it correctly has a different character there.
-  const health = await fetch(`${HTTP_ENDPOINT}/health`).then((r) => r.json() as Promise<{ realmId: string }>);
-  const character = await resolveCharacter(HTTP_ENDPOINT, health.realmId, slot, requestedName);
+  // The realm scopes the stored session: point the client at a different
+  // server and it correctly asks you to sign in again.
+  const health = await fetch(`${HTTP_ENDPOINT}/health`)
+    .then((r) => r.json() as Promise<{ realmId: string }>);
+
+  const account = new AccountClient(HTTP_ENDPOINT, health.realmId);
+  const character = await showTitleScreen(account);
 
   const client = new Client(WS_ENDPOINT);
+  // What actually authorises the join. The room's static onAuth verifies this
+  // before a seat is even reserved; the character id below only selects among
+  // the characters this token already owns.
+  client.auth.token = account.sessionToken ?? "";
+
   const joined = await client.joinOrCreate<WorldState>(
     ROOM_NAME,
     { ostraId: character.ostraId, characterId: character.id },

@@ -78,6 +78,9 @@ export type Enemy = SchemaType<typeof Enemy>;
 export const GroundItem = schema({
   /** An `ItemDefinition` id. */
   itemId: t.string().default(""),
+  /** Session id of whoever earned it, while the claim lasts; empty once it is
+   *  free for anyone. Replicated so the client can dim what isn't yours. */
+  claimedBy: t.string().default(""),
   x: t.float32().default(0),
   y: t.float32().default(0),
   z: t.float32().default(0),

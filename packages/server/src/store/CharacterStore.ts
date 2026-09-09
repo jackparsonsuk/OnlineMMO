@@ -6,8 +6,8 @@ import type { Equipment, OstraId, SpellProficiency } from "@mmo/shared";
  * last player leaves — the database is what makes the world persistent.
  */
 export interface CharacterRecord {
-  /** Random 128-bit id. Doubles as the bearer token the client presents on
-   *  join, which is NOT authentication — see the note in `identity.ts`. */
+  /** Random 128-bit id. Identifies the character; ownership is what makes it
+   *  yours, not knowledge of this value. */
   id: string;
   /**
    * Which realm (server) this character belongs to. Characters never move
@@ -15,6 +15,9 @@ export interface CharacterRecord {
    * because retrofitting a realm column onto live save data is miserable.
    */
   realmId: string;
+  /** The account that owns this character. Empty only for pre-accounts saves,
+   *  which are listed for nobody. */
+  accountId: string;
   name: string;
   colour: number;
   ostraId: OstraId;

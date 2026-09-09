@@ -13,7 +13,9 @@
     "dev": "npm run build:shared && concurrently -n shared,server,client -c magenta,blue,green \"npm run watch -w @mmo/shared\" \"npm run dev -w @mmo/server\" \"npm run dev -w @mmo/client\"",
     "dev:server": "npm run dev -w @mmo/server",
     "dev:client": "npm run dev -w @mmo/client",
-    "typecheck": "npm run build:shared && tsc -b packages/server packages/client"
+    "typecheck": "npm run build:shared && tsc -b packages/server packages/client",
+    "build": "npm run build:shared && npm run build -w @mmo/server && npm run build -w @mmo/client",
+    "start": "node packages/server/dist/index.js"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

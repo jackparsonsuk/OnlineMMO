@@ -18,9 +18,10 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:5173. Add `?slot=2` to play a second character in
-another tab — without it both tabs share one character and the server rejects
-the duplicate.
+Then open http://localhost:5173, make an account, and name a character. For two
+players locally, register a second account in another browser profile or a
+private window — the session lives in localStorage, so two normal tabs share
+one.
 
 | Script | What it does |
 | --- | --- |
@@ -33,7 +34,11 @@ scroll to zoom, walk into a Gate ring to travel.
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
+| `JWT_SECRET` | *(random per boot)* | Signs session tokens. **Required in production.** |
 | `PORT` | `2567` | Server port |
+| `NODE_ENV` | | `production` enables the strict checks and static client serving |
+| `ALLOWED_ORIGINS` | `http://localhost:5173` in dev | Extra CORS origins. Empty in production — the client is same-origin |
+| `CLIENT_DIST` | `packages/client/dist` | Where the built client lives |
 | `REALM_ID` | `local` | Which realm this process serves |
 | `DATABASE_FILE` | `data/ostracon.db` | SQLite file |
 | `VITE_SERVER_URL` | `ws://localhost:2567` | Where the client looks for the server |
@@ -252,11 +257,74 @@ trained spell, and practice is no substitute for a better blade.
 Rarity odds are tilted by the Ostra's danger, so Barals pays better than Terra.
 Without that, a harder place is pure downside and nobody would go.
 
+A drop belongs to whoever earned it for 25 seconds — drawn small until the claim
+lapses, so you can see something fell and that it is not yet yours. Without it,
+the first person to walk over a drop takes it whoever did the killing, which is
+fine alone and immediately unfair the moment two people fight the same camp.
+
 `maxHealth` and `maxMana` are replicated on the player rather than derived
 client-side, because equipment itself is private — without them the client
 could not draw its own bars. Taking armour off clamps current health to the new
 ceiling rather than scaling it: it should never kill you, and never leave you
 above your cap.
+
+## Accounts
+
+Sign in with an email and password; a session token (JWT, one week) authorises
+everything after that. **Accounts are global, characters are per-realm** — one
+login gets you into every realm and you have a separate character on each, which
+is what makes "different servers" mean something.
+
+Nothing here invents cryptography. Passwords go through `@colyseus/auth`'s
+scrypt `Hash`, and tokens through `jsonwebtoken`. A login hashes even when the
+account does not exist, so the failure path costs the same as the success path
+and the endpoint cannot be used to enumerate which addresses are registered.
+
+Authorisation happens twice, deliberately:
+
+1. **`static onAuth`** verifies the token during matchmaking, so an
+   unauthenticated client never reaches a room at all.
+2. **`onJoin`** checks the character belongs to that account, answering "not
+   yours" and "does not exist" identically so ids cannot be probed.
+
+A character id is therefore just a selector now — knowing one gets you nothing.
+`JWT_SECRET` is **required in production**: the server refuses to start without
+it, because a secret committed to a repository is the same as no secret.
+
+Characters created before accounts existed have no owner. They are listed for
+nobody and the server reports how many at boot, rather than deleting somebody's
+save without asking.
+
+## Deploying
+
+One artifact. The server serves the built client from its own origin, which
+means no CORS to configure, no server URL baked into the bundle at build time,
+and one certificate.
+
+```bash
+npm ci && npm run build
+JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))") \
+NODE_ENV=production npm start
+```
+
+Or with the included `Dockerfile`:
+
+```bash
+docker build -t ostracon .
+docker run -p 2567:2567 -v ostracon-data:/app/data --env-file .env ostracon
+```
+
+Copy `.env.example` to `.env` first. **Mount a volume on `/app/data`** or a
+restart loses every character in the realm.
+
+Two things the client works out for itself: `location.origin` in production (so
+it follows wherever it was served from), and `http://localhost:2567` in
+development, where Vite serves the page on its own port. `VITE_SERVER_URL`
+overrides both, but note Vite inlines it at *build* time — anything set there
+pins one deployment forever, which is why the default derives from the origin.
+
+Still needed before this is genuinely public: TLS in front of it for `wss://`,
+and rate limiting on the auth endpoints.
 
 ## Ostras and Gates
 
@@ -295,12 +363,13 @@ the same database still give players two separate worlds, which is how the
 
 Ordered roughly by how much they would hurt in production.
 
-- **There is no authentication.** The character id *is* the credential — anyone
-  who learns one can play as that character. `packages/server/src/identity.ts`
-  is deliberately the only file that assumes this, so accounts can replace it
-  without touching the rooms.
-- **`POST /characters` is unauthenticated and unthrottled.** Anyone can create
-  characters in a loop and fill the database.
+- **The auth endpoints are unthrottled.** Nothing stops someone hammering
+  `/auth/login` to guess a password, or registering accounts in a loop. Rate
+  limiting is the next security job and should land before this is public.
+- **No email verification and no password reset.** An address is never proved,
+  and a forgotten password is a lost account.
+- **No TLS.** Browsers refuse `wss://` from an HTTPS page, so a real deployment
+  needs a reverse proxy or a host that terminates it.
 - **SQLite means one process per realm.** The `CharacterStore` interface exists
   so Postgres can replace it; nothing else needs to change.
 - **No economy.** Items drop and are worn; nothing buys, sells, repairs or
@@ -308,8 +377,6 @@ Ordered roughly by how much they would hurt in production.
 - **No settlements and no NPCs.** Daso and Fanshona exist in the vault and
   nowhere in the game, which means players still have no reason to be in the
   same place at the same time.
-- **Loot has no ownership.** The first person to walk over a drop takes it,
-  whoever killed the creature.
 - **No threat or targeting.** Creatures always chase whoever is nearest; you
   cannot taunt, and there is no target selection — spells hit whatever is in the
   shape.

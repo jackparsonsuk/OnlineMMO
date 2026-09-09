@@ -1,10 +1,21 @@
 import { createServer } from "node:http";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
 import { matchMaker, Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { OSTRA_IDS, ROOM_NAME, unsafeSpawns } from "@mmo/shared";
 import { setServerContext } from "./context.js";
+import {
+  AuthError,
+  bearerFrom,
+  configureAuth,
+  loginAccount,
+  registerAccount,
+  verifyToken,
+} from "./auth.js";
 import { createCharacter, isCharacterId } from "./identity.js";
 import { OstraRoom } from "./rooms/OstraRoom.js";
 import { SqliteCharacterStore } from "./store/SqliteCharacterStore.js";
@@ -17,16 +28,63 @@ const port = Number(process.env["PORT"] ?? 2567);
  * which is how the "different servers" model is meant to work.
  */
 const realmId = process.env["REALM_ID"] ?? "local";
+
+/** Per account, per realm. */
+const MAX_CHARACTERS_PER_ACCOUNT = 5;
 const databaseFile = process.env["DATABASE_FILE"] ?? "data/ostracon.db";
+const isProduction = process.env["NODE_ENV"] === "production";
+
+/**
+ * Origins allowed to call the HTTP endpoints, comma separated.
+ *
+ * Empty means same-origin only, which is the production shape: the server
+ * serves the built client itself, so there is no cross-origin call to allow.
+ * In development Vite runs on its own port and needs naming.
+ */
+const allowedOrigins = (process.env["ALLOWED_ORIGINS"] ?? (isProduction ? "" : "http://localhost:5173"))
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter((origin) => origin.length > 0);
 
 const store = new SqliteCharacterStore(databaseFile);
 setServerContext({ realmId, store });
 
+configureAuth(process.env["JWT_SECRET"], isProduction);
+
 const app = express();
-// The Vite dev server runs on a different origin, so the matchmaking HTTP
-// calls that precede the websocket upgrade need CORS.
-app.use(cors());
+// Pinned rather than wide open. In development the Vite dev server is a
+// different origin and must be named; in production the client is served from
+// this same origin and the list is empty, which denies everyone else.
+app.use(cors({
+  origin: allowedOrigins.length > 0 ? allowedOrigins : false,
+  credentials: true,
+}));
 app.use(express.json({ limit: "4kb" }));
+
+/** Wrap a handler so a thrown AuthError becomes its status rather than a 500. */
+function handle(fn: (req: express.Request, res: express.Response) => Promise<void> | void) {
+  return (req: express.Request, res: express.Response): void => {
+    void (async () => {
+      try {
+        await fn(req, res);
+      } catch (error) {
+        if (error instanceof AuthError) {
+          res.status(error.status).json({ error: error.message });
+          return;
+        }
+        console.error("[http]", error);
+        res.status(500).json({ error: "Something went wrong." });
+      }
+    })();
+  };
+}
+
+/** Resolve the caller's account from their bearer token, or 401. */
+async function requireAccount(req: express.Request): Promise<string> {
+  const claims = await verifyToken(bearerFrom(req.headers.authorization));
+  if (!claims) throw new AuthError(401, "Sign in first.");
+  return claims.sub;
+}
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, realmId, ostras: OSTRA_IDS });
@@ -55,43 +113,111 @@ app.get("/debug/rooms", async (_req, res) => {
   }));
 });
 
+// --- accounts ---------------------------------------------------------------
+
+app.post("/auth/register", handle(async (req, res) => {
+  const body = req.body as { email?: unknown; password?: unknown } | undefined;
+  const { token, account } = await registerAccount(store, body?.email, body?.password);
+  res.status(201).json({ token, email: account.email });
+}));
+
+app.post("/auth/login", handle(async (req, res) => {
+  const body = req.body as { email?: unknown; password?: unknown } | undefined;
+  const { token, account } = await loginAccount(store, body?.email, body?.password);
+  res.json({ token, email: account.email });
+}));
+
+/** Confirms a token is still good, and says who it belongs to. */
+app.get("/auth/me", handle(async (req, res) => {
+  const accountId = await requireAccount(req);
+  const account = store.findAccountById(accountId);
+  if (!account) throw new AuthError(401, "That account no longer exists.");
+  res.json({ email: account.email });
+}));
+
+// --- characters -------------------------------------------------------------
+
 /**
- * Character creation and lookup happen over HTTP, before any room is joined.
+ * The character list for the signed-in account, in this realm.
  *
- * This is what a character-select screen would talk to. It also solves a
- * concrete problem: a returning player has to know which Ostra their character
- * is standing in before it can ask to join that Ostra's room, and the answer
- * lives in the database, not the browser.
- *
- * ⚠ Unauthenticated and unthrottled — anyone can create characters in a loop.
- * Fine while this is a prototype; both are listed in the README as things that
- * must land before it is public.
+ * This is what a character-select screen talks to. Ownership is checked here
+ * and again on room join — a character id is no longer a credential, so
+ * knowing one gets you nothing.
  */
-app.post("/characters", (req, res) => {
+app.get("/characters", handle(async (req, res) => {
+  const accountId = await requireAccount(req);
+  const characters = store
+    .charactersForAccount(realmId, accountId)
+    .map((id) => store.find(realmId, id))
+    .filter((character) => character !== undefined)
+    .map((character) => ({
+      id: character.id,
+      name: character.name,
+      ostraId: character.ostraId,
+      colour: character.colour,
+      affinity: character.affinity,
+    }));
+  res.json({ characters });
+}));
+
+app.post("/characters", handle(async (req, res) => {
+  const accountId = await requireAccount(req);
+
+  // A cap, so one account cannot fill the table on its own.
+  if (store.charactersForAccount(realmId, accountId).length >= MAX_CHARACTERS_PER_ACCOUNT) {
+    throw new AuthError(409, `An account may hold ${MAX_CHARACTERS_PER_ACCOUNT} characters.`);
+  }
+
   const body = req.body as { name?: unknown } | undefined;
-  const character = createCharacter(store, realmId, body?.name);
+  const character = createCharacter(store, realmId, accountId, body?.name);
   res.status(201).json({
     id: character.id,
     name: character.name,
     ostraId: character.ostraId,
   });
-});
+}));
 
-app.get("/characters/:id", (req, res) => {
+app.get("/characters/:id", handle(async (req, res) => {
+  const accountId = await requireAccount(req);
   const id = req.params.id;
-  if (!isCharacterId(id)) {
-    res.status(400).json({ error: "Malformed character id." });
-    return;
-  }
+  if (!isCharacterId(id)) throw new AuthError(400, "Malformed character id.");
+
   const character = store.find(realmId, id);
-  if (!character) {
-    res.status(404).json({ error: "Unknown character." });
-    return;
+  if (!character || character.accountId !== accountId) {
+    // Same answer for "does not exist" and "not yours", so the endpoint cannot
+    // be used to discover which character ids are real.
+    throw new AuthError(404, "No such character.");
   }
-  // The id is itself the credential, so anyone who can ask this already has
-  // everything it returns. Still: no position, no timestamps, nothing extra.
   res.json({ id: character.id, name: character.name, ostraId: character.ostraId });
-});
+}));
+
+/**
+ * Serve the built client from this same origin.
+ *
+ * This is what makes deployment one artifact instead of two. Same origin means
+ * no CORS to configure, no server URL baked into the client bundle at build
+ * time, and one certificate. A CDN would be faster, and at a few hundred
+ * concurrent players that difference is not worth a second deployment.
+ *
+ * Skipped when the bundle is absent, which is the normal development case —
+ * Vite is serving the client on its own port.
+ */
+const clientDist = process.env["CLIENT_DIST"]
+  ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../client/dist");
+
+if (existsSync(join(clientDist, "index.html"))) {
+  app.use(express.static(clientDist, { index: false }));
+  // Anything not matched above is the single page app.
+  app.get(/.*/, (_req, res) => {
+    res.sendFile(join(clientDist, "index.html"));
+  });
+  console.log(`[server] serving client from ${clientDist}`);
+} else if (isProduction) {
+  console.warn(
+    `[server] no client bundle at ${clientDist} — API only. ` +
+    "Run `npm run build` before starting in production.",
+  );
+}
 
 const httpServer = createServer(app);
 
@@ -108,6 +234,15 @@ gameServer.define(ROOM_NAME, OstraRoom).filterBy(["ostraId"]);
 // broken, and refusing to boot over level design would be worse.
 for (const problem of unsafeSpawns()) {
   console.warn(`[spawn] ${problem}`);
+}
+
+const orphans = store.countOrphanedCharacters();
+if (orphans > 0) {
+  console.warn(
+    `[accounts] ${orphans} character(s) predate accounts and have no owner. ` +
+    "They are listed for nobody and cannot be played. Delete them, or assign " +
+    "an account_id by hand.",
+  );
 }
 
 await gameServer.listen(port);

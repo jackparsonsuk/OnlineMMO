@@ -146,6 +146,16 @@ export const GROUND_ITEM_TTL_MS = 90_000;
 export const PICKUP_RADIUS = 1.4;
 
 /**
+ * How long a drop belongs to whoever earned it.
+ *
+ * Without this the first person to walk over a drop takes it, whoever did the
+ * killing — which is fine alone and immediately unfair the moment two people
+ * fight the same camp. Short enough that a claimed item nobody collects still
+ * becomes everyone's rather than rotting.
+ */
+export const LOOT_CLAIM_MS = 25_000;
+
+/**
  * Everything the worn set adds up to.
  *
  * Shared because both sides need it: the server to resolve damage and cap

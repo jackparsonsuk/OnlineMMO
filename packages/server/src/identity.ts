@@ -9,17 +9,12 @@ import {
 import type { CharacterRecord, CharacterStore } from "./store/CharacterStore.js";
 
 /**
- * ⚠ THIS IS NOT AUTHENTICATION.
+ * Making characters.
  *
- * A character is identified by a random 128-bit id that the client keeps in
- * localStorage and presents on join. Anyone who learns that id can play as that
- * character — there is no password, no session, and no way to recover one.
- *
- * That is a deliberate trade for a prototype with nothing worth stealing, and
- * it is confined to this file so it can be replaced without touching the rooms:
- * when accounts land, the room stops trusting `options.characterId` and starts
- * reading a verified identity instead. `@colyseus/auth` ships with Colyseus and
- * is the intended home for that. Do not ship a real product on this.
+ * Characters belong to accounts (see `auth.ts`). A character id is now just an
+ * identifier — knowing one gets you nothing, because every join checks that the
+ * character belongs to the authenticated account. This file used to carry a
+ * long warning that it was not authentication; that warning is retired.
  */
 
 /** Distinct, readable cube colours, handed out in turn as characters are made. */
@@ -47,6 +42,7 @@ export function isCharacterId(value: unknown): value is string {
 export function createCharacter(
   store: CharacterStore,
   realmId: string,
+  accountId: string,
   requestedName: unknown,
 ): CharacterRecord {
   const index = store.count(realmId);
@@ -56,6 +52,7 @@ export function createCharacter(
   const character: CharacterRecord = {
     id: randomBytes(16).toString("hex"),
     realmId,
+    accountId,
     name: sanitiseName(requestedName, `Traveller ${index + 1}`),
     colour: PALETTE[index % PALETTE.length]!,
     ostraId: STARTING_OSTRA,
