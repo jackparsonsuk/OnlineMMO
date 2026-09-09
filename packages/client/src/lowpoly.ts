@@ -4,7 +4,7 @@ import type { Mesh } from "@babylonjs/core/Meshes/mesh.js";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import type { Scene } from "@babylonjs/core/scene.js";
-import { getArchetype, type EnemyKind, PLAYER_SIZE } from "@mmo/shared";
+import { ATTACK_ARC, ATTACK_RANGE, getArchetype, type EnemyKind, PLAYER_SIZE } from "@mmo/shared";
 
 /**
  * The game's art style, in one place.
@@ -225,4 +225,46 @@ export function buildObstacle(
   pillar.position.y = height / 2;
   pillar.material = material;
   return pillar;
+}
+
+/**
+ * The swing: a flat sector on the ground showing exactly the arc the server
+ * tests against. Drawing the real shape rather than a generic flourish means
+ * a miss is legible — you can see the creature was outside the wedge.
+ *
+ * Returned as a pivot with the sector already oriented inside it, so the caller
+ * only has to set `rotation.y` to the attacker's yaw. Getting there needs one
+ * fixed correction, worked out once here rather than fudged by eye:
+ *
+ *   CreateDisc lays a sector in the XY plane from local +X, sweeping toward +Y.
+ *   Rotating +90 degrees about X maps local (x, y, 0) to world (x, 0, y), so a
+ *   local angle phi (from +X toward +Y) lands at world yaw atan2(cos phi, sin phi)
+ *   = PI/2 - phi. We want the sector's CENTRE at yaw 0, so phi_centre = PI/2.
+ *   The sector spans [z, z + arc], centred at z + arc/2, giving z = PI/2 - arc/2.
+ *   Babylon composes rotation as Y * X * Z, so that Z spin happens first, inside
+ *   the sector's own plane — which is exactly where it needs to apply.
+ */
+export function buildSwingArc(scene: Scene): TransformNode {
+  const pivot = new TransformNode("swingPivot", scene);
+
+  const sector = MeshBuilder.CreateDisc(
+    "swing",
+    { radius: ATTACK_RANGE, tessellation: 10, arc: ATTACK_ARC / (Math.PI * 2) },
+    scene,
+  );
+  sector.rotation.x = Math.PI / 2;
+  sector.rotation.z = Math.PI / 2 - ATTACK_ARC / 2;
+  sector.isPickable = false;
+  sector.parent = pivot;
+
+  const material = new StandardMaterial("swingMaterial", scene);
+  material.diffuseColor = Color3.Black();
+  material.specularColor = Color3.Black();
+  material.emissiveColor = hexColour(0xbfe4ff);
+  material.alpha = 0.34;
+  material.backFaceCulling = false;
+  sector.material = material;
+
+  pivot.setEnabled(false);
+  return pivot;
 }

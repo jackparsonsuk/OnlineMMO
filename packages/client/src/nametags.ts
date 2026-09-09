@@ -32,11 +32,12 @@ export interface NametagTarget {
 
 /** Which styling a label gets. `hunting` is how you tell, at a glance,
  *  that something has noticed you. */
-export type NametagVariant = "self" | "player" | "hostile" | "hunting";
+export type NametagVariant = "self" | "player" | "hostile" | "hunting" | "dead";
 
 export class Nametags {
   private readonly container: HTMLElement;
   private readonly tags = new Map<string, HTMLElement>();
+  private readonly bars = new Map<string, HTMLElement>();
   // Reused every frame; projecting allocates otherwise, 60 times a second.
   private readonly scratch = new Vector3();
   private readonly viewport = new Viewport(0, 0, 0, 0);
@@ -45,17 +46,42 @@ export class Nametags {
     this.container = container;
   }
 
-  add(sessionId: string, name: string, colour: number, variant: NametagVariant): void {
+  add(
+    sessionId: string,
+    name: string,
+    colour: number,
+    variant: NametagVariant,
+    withHealth = false,
+  ): void {
     this.remove(sessionId);
 
     const tag = document.createElement("div");
     tag.className = `nametag ${variant}`;
-    tag.textContent = name;
     tag.style.setProperty("--tag-colour", `#${colour.toString(16).padStart(6, "0")}`);
     tag.hidden = true;
 
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = name;
+    tag.appendChild(label);
+
+    if (withHealth) {
+      const bar = document.createElement("span");
+      bar.className = "bar";
+      const fill = document.createElement("i");
+      bar.appendChild(fill);
+      tag.appendChild(bar);
+      this.bars.set(sessionId, fill);
+    }
+
     this.container.appendChild(tag);
     this.tags.set(sessionId, tag);
+  }
+
+  /** @param fraction 0..1. Only call when it changes; this touches the DOM. */
+  setHealth(sessionId: string, fraction: number): void {
+    const fill = this.bars.get(sessionId);
+    if (fill) fill.style.width = `${Math.max(0, Math.min(1, fraction)) * 100}%`;
   }
 
   /** Restyle an existing label. Cheap enough to call per frame, but the
@@ -68,11 +94,13 @@ export class Nametags {
   remove(sessionId: string): void {
     this.tags.get(sessionId)?.remove();
     this.tags.delete(sessionId);
+    this.bars.delete(sessionId);
   }
 
   clear(): void {
     for (const tag of this.tags.values()) tag.remove();
     this.tags.clear();
+    this.bars.clear();
   }
 
   /**

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { getOstra, STARTING_OSTRA } from "@mmo/shared";
+import { getOstra, PLAYER_MAX_HEALTH, STARTING_OSTRA } from "@mmo/shared";
 import type { CharacterRecord, CharacterStore } from "./store/CharacterStore.js";
 
 /**
@@ -57,6 +57,7 @@ export function createCharacter(
     y: 0,
     z: spawn.z,
     yaw: 0,
+    health: PLAYER_MAX_HEALTH,
     createdAt: now,
     lastSeenAt: now,
   };

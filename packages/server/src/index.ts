@@ -3,7 +3,7 @@ import cors from "cors";
 import express from "express";
 import { matchMaker, Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
-import { OSTRA_IDS, ROOM_NAME } from "@mmo/shared";
+import { OSTRA_IDS, ROOM_NAME, unsafeSpawns } from "@mmo/shared";
 import { setServerContext } from "./context.js";
 import { createCharacter, isCharacterId } from "./identity.js";
 import { OstraRoom } from "./rooms/OstraRoom.js";
@@ -48,7 +48,8 @@ app.get("/debug/rooms", async (_req, res) => {
       clients: local ? local.clients.length : room.clients,
       players: (local?.state as { players?: { size: number } } | undefined)?.players?.size,
       names: local
-        ? [...((local.state as { players: Map<string, { name: string }> }).players).values()].map((p) => p.name)
+        ? [...((local.state as { players: Map<string, { name: string; health: number }> }).players)
+            .values()].map((p) => `${p.name}:${p.health}`)
         : undefined,
     };
   }));
@@ -102,6 +103,12 @@ const gameServer = new Server({
 // joinOrCreate("ostra", { ostraId: "barals" }) land in the Barals room rather
 // than whichever room happens to have a free seat.
 gameServer.define(ROOM_NAME, OstraRoom).filterBy(["ostraId"]);
+
+// Loud, not fatal: a badly placed camp makes the game miserable rather than
+// broken, and refusing to boot over level design would be worse.
+for (const problem of unsafeSpawns()) {
+  console.warn(`[spawn] ${problem}`);
+}
 
 await gameServer.listen(port);
 console.log(

@@ -19,6 +19,10 @@ export const EnemyState = {
   Chase: 2,
   /** Leashed: walking back to where it started, ignoring everyone. */
   Return: 3,
+  /** Killed. Stays in the state map so the client can play it falling, then
+   *  comes back at its spawn — removing and re-adding would churn the map and
+   *  rob the client of anything to animate. */
+  Dead: 4,
 } as const;
 export type EnemyState = (typeof EnemyState)[keyof typeof EnemyState];
 
@@ -44,6 +48,12 @@ export interface EnemyArchetype {
   /** Drawn height, for the label to float above. */
   height: number;
   maxHealth: number;
+  /** Damage per hit on a player. */
+  attackDamage: number;
+  /** Reach from its centre to the player's, ignoring radii — creatures are
+   *  already stopped by collision at roughly this distance. */
+  attackRange: number;
+  attackCooldownMs: number;
   /** 0xRRGGBB body colour. */
   colour: number;
   /** Seconds it stands around between wanders, roughly. */
@@ -67,6 +77,10 @@ export const ENEMY_ARCHETYPES: Record<EnemyKind, EnemyArchetype> = {
     radius: 0.6,
     height: 1.9,
     maxHealth: 60,
+    // Hits hard but slowly: being cornered by three is the danger, not one.
+    attackDamage: 11,
+    attackRange: 1.9,
+    attackCooldownMs: 1400,
     colour: 0x6f8f52,
     idleSeconds: 2.6,
   },
@@ -87,6 +101,10 @@ export const ENEMY_ARCHETYPES: Record<EnemyKind, EnemyArchetype> = {
     radius: 0.7,
     height: 0.85,
     maxHealth: 35,
+    // Fragile, but it lands three hits for every one a Risen manages.
+    attackDamage: 6,
+    attackRange: 1.6,
+    attackCooldownMs: 500,
     colour: 0x4a4266,
     idleSeconds: 1.1,
   },

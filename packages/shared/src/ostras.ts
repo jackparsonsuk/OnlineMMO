@@ -1,4 +1,4 @@
-import type { SpawnGroup } from "./enemies.js";
+import { getArchetype, type SpawnGroup } from "./enemies.js";
 import type { Collider } from "./movement.js";
 
 /**
@@ -128,9 +128,12 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     obstacleStyle: "pillar",
     // Kept away from spawn: a new traveller gets a moment before anything
     // notices them.
+    // Spread wide on purpose. Packed tighter than a Risen's aggro radius,
+    // every approach pulls the whole camp at once and a new player never gets
+    // a winnable first fight.
     spawns: [
-      { kind: "zombie", count: 4, x: 10, z: -20, radius: 7 },
-      { kind: "spider", count: 3, x: -22, z: -8, radius: 6 },
+      { kind: "zombie", count: 4, x: 14, z: -26, radius: 12 },
+      { kind: "spider", count: 3, x: -22, z: -8, radius: 8 },
     ],
   },
 
@@ -178,7 +181,10 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     name: "Barals Ostra",
     subtitle: "Realm of Fire and Pain",
     size: 60,
-    spawn: { x: 0, z: 0 },
+    // Deliberately north of every camp. At the origin this sat 10m from the
+    // zombies, inside their 13m aggro — you respawned straight into a death
+    // loop. `unsafeSpawns()` exists so that cannot come back unnoticed.
+    spawn: { x: 0, z: 24 },
     palette: {
       sky: "#140a08",
       ground: "#1f0f0b",
@@ -209,7 +215,7 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     obstacleStyle: "boulder",
     // The realm of fire and pain earns its name.
     spawns: [
-      { kind: "zombie", count: 6, x: -6, z: 8, radius: 9 },
+      { kind: "zombie", count: 6, x: -8, z: -2, radius: 9 },
       { kind: "zombie", count: 3, x: 16, z: -6, radius: 5 },
       { kind: "spider", count: 4, x: -18, z: -12, radius: 7 },
     ],
@@ -248,6 +254,40 @@ export function staticColliders(ostra: OstraDefinition): readonly Collider[] {
     staticColliderCache.set(ostra.id, cached);
   }
   return cached;
+}
+
+/**
+ * Ostras whose spawn point sits inside something's aggro radius.
+ *
+ * Found the hard way: Barals put new arrivals 10m from a camp of Risen that
+ * notice you at 13m, so dying meant respawning into the same creatures that
+ * had just killed you. The layout is hand-authored data, and hand-authored
+ * data drifts — so this is checked at boot rather than by eye.
+ *
+ * Returns a human-readable line per problem, empty when all is well.
+ */
+export function unsafeSpawns(): string[] {
+  const problems: string[] = [];
+
+  for (const ostra of Object.values(OSTRAS)) {
+    for (const group of ostra.spawns) {
+      const archetype = getArchetype(group.kind);
+      const centreDistance = Math.hypot(
+        group.x - ostra.spawn.x,
+        group.z - ostra.spawn.z,
+      );
+      // Worst case is a creature scattered to the near edge of its camp.
+      const nearest = Math.max(0, centreDistance - group.radius);
+      if (nearest <= archetype.aggroRadius) {
+        problems.push(
+          `${ostra.name}: ${archetype.name} camp can reach within ${nearest.toFixed(1)}m ` +
+          `of the spawn point, inside its ${archetype.aggroRadius}m aggro radius`,
+        );
+      }
+    }
+  }
+
+  return problems;
 }
 
 export function findGate(ostra: OstraDefinition, gateId: string): GateDefinition | undefined {

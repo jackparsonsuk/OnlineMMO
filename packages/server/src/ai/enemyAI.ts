@@ -39,6 +39,10 @@ export interface EnemyBrain {
    * it actually gets home.
    */
   returning: boolean;
+  /** Wall-clock ms when this creature may swing again. */
+  nextAttackAt: number;
+  /** Wall-clock ms when a felled creature gets back up. */
+  respawnAt: number;
 }
 
 /** Just enough of a player for the AI to hunt it. */
@@ -68,9 +72,19 @@ export function createBrain(x: number, z: number): EnemyBrain {
     timer: 0,
     quarry: undefined,
     returning: false,
+    nextAttackAt: 0,
+    respawnAt: 0,
   };
 }
 
+/**
+ * Advance one creature.
+ *
+ * @returns the session id it just hit, if it did. Damage is applied by the
+ *   room rather than here: death, respawn and persistence all live together
+ *   there, and threading them through the AI would spread that logic across
+ *   two files for no gain.
+ */
 export function stepEnemy(
   enemy: MoveState & { health: number; state: number },
   brain: EnemyBrain,
@@ -78,7 +92,11 @@ export function stepEnemy(
   dt: number,
   world: MoveWorld,
   targets: readonly AITarget[],
-): void {
+  now: number,
+): string | undefined {
+  // The dead do nothing. The room decides when they get back up.
+  if (enemy.state === EnemyState.Dead) return undefined;
+
   brain.timer -= dt;
 
   const fromHome = distance(enemy.x, enemy.z, brain.homeX, brain.homeZ);
@@ -116,6 +134,27 @@ export function stepEnemy(
   }
 
   advance(enemy, brain, archetype, dt, world);
+
+  return tryAttack(enemy, brain, archetype, targets, now);
+}
+
+/** Swing at the quarry if it is in reach and the cooldown has elapsed. */
+function tryAttack(
+  enemy: MoveState & { state: number },
+  brain: EnemyBrain,
+  archetype: EnemyArchetype,
+  targets: readonly AITarget[],
+  now: number,
+): string | undefined {
+  if (enemy.state !== EnemyState.Chase || brain.quarry === undefined) return undefined;
+  if (now < brain.nextAttackAt) return undefined;
+
+  const quarry = targets.find((target) => target.sessionId === brain.quarry);
+  if (!quarry) return undefined;
+  if (distance(enemy.x, enemy.z, quarry.x, quarry.z) > archetype.attackRange) return undefined;
+
+  brain.nextAttackAt = now + archetype.attackCooldownMs;
+  return quarry.sessionId;
 }
 
 /**

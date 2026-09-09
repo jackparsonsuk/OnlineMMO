@@ -1,3 +1,4 @@
+export * from "./combat.js";
 export * from "./constants.js";
 export * from "./enemies.js";
 export * from "./movement.js";

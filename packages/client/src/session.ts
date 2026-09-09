@@ -3,11 +3,13 @@ import type { Data } from "@colyseus/schema";
 import { getStateCallbacks, Predict, type Reconciler, type Room } from "@colyseus/sdk";
 import {
   applyInput,
+  ATTACK_COOLDOWN_MS,
   type Enemy,
   EnemyState,
   getArchetype,
   INTERP_DELAY_MS,
   isEnemyKind,
+  SWING_VISUAL_MS,
   MoveInput,
   type Collider,
   type MoveWorld,
@@ -22,7 +24,7 @@ import {
 import type { Hud } from "./hud.js";
 import type { KeyboardInput } from "./input.js";
 import { Nametags, type NametagTarget, type NametagVariant } from "./nametags.js";
-import { createEnemyMesh, createPlayerMesh, type World } from "./scene.js";
+import { createEnemyMesh, createPlayerMesh, createSwingArc, type World } from "./scene.js";
 
 /**
  * Everything tied to being inside one Ostra's room: prediction, the input
@@ -85,6 +87,19 @@ export function createSession(
   /** Last variant pushed to each creature's label, so the DOM is only
    *  touched when the AI actually changes its mind. */
   const enemyVariants = new Map<string, NametagVariant>();
+  /** Last health seen per creature, to spot a hit landing and to avoid
+   *  rewriting the bar every frame. */
+  const enemyHealth = new Map<string, number>();
+  /** performance.now() when each creature was last struck, for the flash. */
+  const enemyHitAt = new Map<string, number>();
+
+  const swingArc = createSwingArc(world.scene);
+  let swingShownAt = -Infinity;
+  // The client mirrors the server's cooldown so the swing draws on the
+  // frame you press, not a round trip later. Both read the same constant,
+  // so the two agree; the server is still the only thing that deals damage.
+  let nextSwingAt = 0;
+  let wasDead = false;
   const nametags = new Nametags(document.getElementById("nametags") as HTMLElement);
   let selfPlayer: Player | undefined;
   // The reconciler works on a plain-data mirror of the input, not the Schema
@@ -163,8 +178,10 @@ export function createSession(
   const offEnemyAdd = $(room.state).enemies.onAdd((enemy: Enemy, enemyId: string) => {
     const archetype = archetypeOf(enemy);
     enemyMeshes.set(enemyId, createEnemyMesh(world.scene, archetype.kind));
-    nametags.add(enemyId, archetype.name, archetype.colour, "hostile");
+    nametags.add(enemyId, archetype.name, archetype.colour, "hostile", true);
     enemyVariants.set(enemyId, "hostile");
+    enemyHealth.set(enemyId, enemy.health);
+    nametags.setHealth(enemyId, enemy.health / archetype.maxHealth);
   });
 
   const offEnemyRemove = $(room.state).enemies.onRemove((_enemy: Enemy, enemyId: string) => {
@@ -172,6 +189,8 @@ export function createSession(
     enemyMeshes.delete(enemyId);
     nametags.remove(enemyId);
     enemyVariants.delete(enemyId);
+    enemyHealth.delete(enemyId);
+    enemyHitAt.delete(enemyId);
   });
 
   const offRemove = $(room.state).players.onRemove((_player: Player, sessionId: string) => {
@@ -206,6 +225,7 @@ export function createSession(
       input.data.moveX = axes.x;
       input.data.moveZ = axes.z;
       input.data.yaw = cameraYaw();
+      input.data.attack = keyboard.attacking();
       // The reconciler is subscribed to this handle, so sending is also what
       // advances the local prediction — there's no second call to make.
       input.send();
@@ -266,16 +286,37 @@ export function createSession(
       if (!mesh) return;
       const archetype = archetypeOf(enemy);
 
+      const dead = enemy.state === EnemyState.Dead;
+
       mesh.position.set(
         predict.value(enemy, "x"),
         predict.value(enemy, "y"),
         predict.value(enemy, "z"),
       );
       mesh.rotation.y = predict.value(enemy, "yaw");
+      // Corpses lie on their side and sink slightly. No animation system yet,
+      // so a hard tip is the honest way to show it is down.
+      mesh.rotation.z = dead ? Math.PI / 2 : 0;
+      mesh.position.y += dead ? 0.12 : 0;
+
+      const previous = enemyHealth.get(enemyId);
+      if (previous !== enemy.health) {
+        if (previous !== undefined && enemy.health < previous) enemyHitAt.set(enemyId, now);
+        enemyHealth.set(enemyId, enemy.health);
+        nametags.setHealth(enemyId, enemy.health / archetype.maxHealth);
+      }
+
+      // A brief swell on the frame a hit lands: with no skeleton to flinch,
+      // scale is the cheapest thing that still reads as impact.
+      const sinceHit = now - (enemyHitAt.get(enemyId) ?? -Infinity);
+      const punch = sinceHit < 120 && !dead ? 1 + 0.16 * (1 - sinceHit / 120) : 1;
+      mesh.scaling.setAll(punch);
 
       // The one piece of AI state the player can see. A creature that has
       // noticed you should say so before it reaches you.
-      const wanted: NametagVariant = enemy.state === EnemyState.Chase ? "hunting" : "hostile";
+      const wanted: NametagVariant = dead
+        ? "dead"
+        : enemy.state === EnemyState.Chase ? "hunting" : "hostile";
       if (enemyVariants.get(enemyId) !== wanted) {
         enemyVariants.set(enemyId, wanted);
         nametags.setVariant(enemyId, wanted);
@@ -294,6 +335,26 @@ export function createSession(
       const x = predict.value(selfPlayer, "x");
       const y = predict.value(selfPlayer, "y");
       const z = predict.value(selfPlayer, "z");
+
+      const alive = selfPlayer.health > 0;
+      hud.setHealth(selfPlayer.health);
+      if (alive === wasDead) {
+        wasDead = !alive;
+        hud.setDead(!alive, alive ? "" : "Returning to the Ostra's heart\u2026");
+      }
+
+      if (alive && keyboard.attacking() && now >= nextSwingAt) {
+        nextSwingAt = now + ATTACK_COOLDOWN_MS;
+        swingShownAt = now;
+      }
+
+      // Sits just off the ground so it doesn't fight the grid for depth.
+      const showing = now - swingShownAt < SWING_VISUAL_MS;
+      swingArc.setEnabled(showing);
+      if (showing) {
+        swingArc.position.set(x, y + 0.08, z);
+        swingArc.rotation.y = cameraYaw();
+      }
       // Follow the *rendered* position, not the raw schema one, or the camera
       // judders by exactly the correction the reconciler is smoothing out.
       world.camera.target.set(x, y + PLAYER_HALF, z);
@@ -321,6 +382,10 @@ export function createSession(
     for (const mesh of enemyMeshes.values()) mesh.dispose(false, true);
     enemyMeshes.clear();
     enemyVariants.clear();
+    enemyHealth.clear();
+    enemyHitAt.clear();
+    swingArc.dispose(false, true);
+    hud.setDead(false);
     nametags.clear();
     hud.setGatePrompt(undefined);
   }

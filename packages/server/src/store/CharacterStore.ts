@@ -22,12 +22,15 @@ export interface CharacterRecord {
   y: number;
   z: number;
   yaw: number;
+  /** Persisted so logging out at 3 HP and back in is not a full heal. */
+  health: number;
   createdAt: number;
   lastSeenAt: number;
 }
 
 /** Where a character is, and in which Ostra — the part that changes constantly. */
-export type CharacterPosition = Pick<CharacterRecord, "ostraId" | "x" | "y" | "z" | "yaw">;
+export type CharacterPosition =
+  Pick<CharacterRecord, "ostraId" | "x" | "y" | "z" | "yaw" | "health">;
 
 /**
  * Storage behind a narrow interface so the SQLite implementation can be
@@ -40,7 +43,8 @@ export type CharacterPosition = Pick<CharacterRecord, "ostraId" | "x" | "y" | "z
 export interface CharacterStore {
   find(realmId: string, characterId: string): CharacterRecord | undefined;
   create(character: CharacterRecord): void;
-  /** Persist position, Ostra, and last-seen. Name and colour never change. */
+  /** Persist position, Ostra, health, and last-seen. Name and colour never
+   *  change. */
   savePosition(realmId: string, characterId: string, position: CharacterPosition): void;
   /** How many characters exist in this realm — used to hand out colours. */
   count(realmId: string): number;

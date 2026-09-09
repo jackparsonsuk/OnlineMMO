@@ -1,4 +1,5 @@
 import { schema, t, type SchemaType } from "@colyseus/schema";
+import { PLAYER_MAX_HEALTH } from "./combat.js";
 
 /**
  * One frame of player intent. The client never sends a position — only what
@@ -15,6 +16,12 @@ export const MoveInput = schema({
   moveZ: t.int8<-1 | 0 | 1>().default(0),
   /** Heading the player wants to face, radians. Driven by the camera. */
   yaw: t.angle().default(0),
+  /**
+   * Swinging this tick. Held rather than edge-triggered — the server gates it
+   * on a cooldown, so holding the key auto-attacks and a client that spams the
+   * flag every tick gains nothing.
+   */
+  attack: t.boolean().default(false),
 }, "MoveInput");
 export type MoveInput = SchemaType<typeof MoveInput>;
 
@@ -29,6 +36,8 @@ export const Player = schema({
   y: t.float32().default(0),
   z: t.float32().default(0),
   yaw: t.angle().default(0),
+  /** Zero means dead and awaiting respawn. */
+  health: t.uint16().default(PLAYER_MAX_HEALTH),
 }, "Player");
 export type Player = SchemaType<typeof Player>;
 

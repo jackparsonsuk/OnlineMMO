@@ -20,7 +20,14 @@ import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js"
 import { GridMaterial } from "@babylonjs/materials/grid/gridMaterial.js";
 import { Scene } from "@babylonjs/core/scene.js";
 import { GATE_RADIUS, getOstra, PLAYER_SIZE, type EnemyKind, type OstraDefinition } from "@mmo/shared";
-import { buildEnemy, buildObstacle, buildPlayer, facet, flatMaterial } from "./lowpoly.js";
+import {
+  buildEnemy,
+  buildObstacle,
+  buildPlayer,
+  buildSwingArc,
+  facet,
+  flatMaterial,
+} from "./lowpoly.js";
 
 export interface World {
   engine: Engine;
@@ -214,4 +221,8 @@ export function createPlayerMesh(scene: Scene, colour: number): TransformNode {
 
 export function createEnemyMesh(scene: Scene, kind: EnemyKind): TransformNode {
   return buildEnemy(scene, kind);
+}
+
+export function createSwingArc(scene: Scene): TransformNode {
+  return buildSwingArc(scene);
 }

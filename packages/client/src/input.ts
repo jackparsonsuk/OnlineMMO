@@ -5,11 +5,16 @@
  * step* — not how many OS key-repeat events happened to fire in between.
  */
 
-const BINDINGS: Record<string, "forward" | "back" | "left" | "right"> = {
+type Action = "forward" | "back" | "left" | "right" | "attack";
+
+const BINDINGS: Record<string, Action> = {
   KeyW: "forward", ArrowUp: "forward",
   KeyS: "back", ArrowDown: "back",
   KeyA: "left", ArrowLeft: "left",
   KeyD: "right", ArrowRight: "right",
+  // Space rather than a mouse button: left-drag already orbits the camera,
+  // and a click-vs-drag distinction is a bad way to start a fight.
+  Space: "attack",
 };
 
 export interface MoveAxes {
@@ -56,6 +61,12 @@ export class KeyboardInput {
     const x = (this.held.has("right") ? 1 : 0) - (this.held.has("left") ? 1 : 0);
     const z = (this.held.has("forward") ? 1 : 0) - (this.held.has("back") ? 1 : 0);
     return { x: x as -1 | 0 | 1, z: z as -1 | 0 | 1 };
+  }
+
+  /** Held, not edge-triggered. The server gates swings on a cooldown, so
+   *  holding the key auto-attacks and spamming it gains nothing. */
+  attacking(): boolean {
+    return this.held.has("attack");
   }
 
   dispose(): void {

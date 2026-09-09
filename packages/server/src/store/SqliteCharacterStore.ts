@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { isOstraId, STARTING_OSTRA } from "@mmo/shared";
+import { isOstraId, PLAYER_MAX_HEALTH, STARTING_OSTRA } from "@mmo/shared";
 import type { CharacterPosition, CharacterRecord, CharacterStore } from "./CharacterStore.js";
 
 /**
@@ -40,6 +40,29 @@ export class SqliteCharacterStore implements CharacterStore {
         PRIMARY KEY (realm_id, id)
       )
     `);
+
+    this.migrate();
+  }
+
+  /**
+   * Add columns that later versions introduced.
+   *
+   * `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists,
+   * so a new field is invisible to anyone with an existing save file. Adding
+   * them here keeps a development database working across a schema change
+   * instead of silently reading undefined. Each step must be idempotent.
+   */
+  private migrate(): void {
+    const columns = new Set(
+      (this.db.prepare("PRAGMA table_info(characters)").all() as { name: string }[])
+        .map((column) => column.name),
+    );
+
+    if (!columns.has("health")) {
+      this.db.exec(
+        `ALTER TABLE characters ADD COLUMN health INTEGER NOT NULL DEFAULT ${PLAYER_MAX_HEALTH}`,
+      );
+    }
   }
 
   find(realmId: string, characterId: string): CharacterRecord | undefined {
@@ -52,8 +75,8 @@ export class SqliteCharacterStore implements CharacterStore {
   create(character: CharacterRecord): void {
     this.db.prepare(`
       INSERT INTO characters
-        (id, realm_id, name, colour, ostra_id, x, y, z, yaw, created_at, last_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, realm_id, name, colour, ostra_id, x, y, z, yaw, health, created_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       character.id,
       character.realmId,
@@ -64,6 +87,7 @@ export class SqliteCharacterStore implements CharacterStore {
       character.y,
       character.z,
       character.yaw,
+      character.health,
       character.createdAt,
       character.lastSeenAt,
     );
@@ -72,7 +96,7 @@ export class SqliteCharacterStore implements CharacterStore {
   savePosition(realmId: string, characterId: string, position: CharacterPosition): void {
     this.db.prepare(`
       UPDATE characters
-         SET ostra_id = ?, x = ?, y = ?, z = ?, yaw = ?, last_seen_at = ?
+         SET ostra_id = ?, x = ?, y = ?, z = ?, yaw = ?, health = ?, last_seen_at = ?
        WHERE realm_id = ? AND id = ?
     `).run(
       position.ostraId,
@@ -80,6 +104,7 @@ export class SqliteCharacterStore implements CharacterStore {
       position.y,
       position.z,
       position.yaw,
+      position.health,
       Date.now(),
       realmId,
       characterId,
@@ -112,6 +137,8 @@ function toRecord(row: Record<string, unknown>): CharacterRecord {
     y: Number(row["y"]),
     z: Number(row["z"]),
     yaw: Number(row["yaw"]),
+    // A row written before the health column existed reads as null.
+    health: Number(row["health"] ?? PLAYER_MAX_HEALTH),
     createdAt: Number(row["created_at"]),
     lastSeenAt: Number(row["last_seen_at"]),
   };

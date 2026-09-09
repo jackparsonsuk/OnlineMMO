@@ -149,3 +149,101 @@ kbd {
   color: #ffd9d1;
   background: rgb(58 16 12 / 82%);
 }
+
+/* --- combat ------------------------------------------------------------- */
+
+.nametag .label { display: inline-block; }
+
+/* Health bar under the name. Sized in the label rather than floating
+   separately so the two can never drift apart on screen. */
+.nametag .bar {
+  display: block;
+  height: 3px;
+  margin-top: 3px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 14%);
+  overflow: hidden;
+}
+
+.nametag .bar i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: var(--tag-colour);
+  transition: width 120ms linear;
+}
+
+.nametag.hunting .bar i { background: #ff8a72; }
+
+/* A corpse should recede rather than compete with the living. */
+.nametag.dead {
+  opacity: 0.4;
+  border-color: rgb(230 237 243 / 12%);
+  color: #8b98a5;
+}
+
+.nametag.dead .bar { display: none; }
+
+#vitals {
+  position: fixed;
+  bottom: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  text-align: center;
+  pointer-events: none;
+}
+
+#health-bar {
+  height: 9px;
+  border-radius: 5px;
+  border: 1px solid rgb(230 237 243 / 18%);
+  background: rgb(13 17 23 / 78%);
+  overflow: hidden;
+}
+
+#health-bar i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #4a9e5c, #6dcf7e);
+  transition: width 140ms ease-out;
+}
+
+#health-bar i.low {
+  background: linear-gradient(90deg, #b23b2a, #e8563f);
+}
+
+#health-text {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #9aa7b4;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
+}
+
+#death {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgb(40 8 6 / 42%);
+  pointer-events: none;
+}
+
+#death strong {
+  font-size: 30px;
+  letter-spacing: 0.02em;
+  color: #ffd9d1;
+  text-shadow: 0 2px 10px rgb(0 0 0 / 85%);
+}
+
+#death span { color: #e3b7ae; }
+
+/* An author `display` beats the UA stylesheet's rule for [hidden], so the
+   attribute alone would never hide this. Everything else on the page hides
+   fine because nothing else sets display. */
+#death[hidden] { display: none; }

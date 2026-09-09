@@ -1,17 +1,23 @@
-import { matchMaker, Room, ServerError, type Client } from "@colyseus/core";
+import { matchMaker, Room, ServerError, type Client, type Rewind } from "@colyseus/core";
 import {
   applyInput,
+  ATTACK_COOLDOWN_MS,
+  ATTACK_DAMAGE,
   Enemy,
+  ENEMY_RESPAWN_MS,
   EnemyState,
   findGate,
   getArchetype,
+  isInSwing,
   GATE_ARRIVAL_OFFSET,
   GATE_RADIUS,
   getOstra,
   isEnemyKind,
   isOstraId,
   MoveInput,
+  PLAYER_MAX_HEALTH,
   PLAYER_RADIUS,
+  PLAYER_RESPAWN_MS,
   staticColliders,
   type Collider,
   type EnemyArchetype,
@@ -50,6 +56,10 @@ interface Session {
   suppressedGate: string | undefined;
   /** Set once a transfer is under way; their input stops being simulated. */
   transferring: boolean;
+  /** Wall-clock ms when this player may swing again. */
+  nextAttackAt: number;
+  /** Wall-clock ms when a fallen player wakes at the spawn point. */
+  respawnAt: number;
 }
 
 /** How long to wait for a client to act on a gate handoff before evicting it. */
@@ -76,6 +86,9 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   private readonly brains = new Map<string, EnemyBrain>();
   /** Reused each tick so the AI loop does not allocate a target list 30x a second. */
   private readonly aiTargets: AITarget[] = [];
+  /** Position history, so a swing is judged against the world the attacker
+   *  actually saw rather than the one that exists by the time it arrives. */
+  private rewind!: Rewind;
 
   onCreate(options: OstraRoomOptions): void {
     if (!isOstraId(options.ostraId)) {
@@ -92,6 +105,18 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     this.patchRate = PATCH_RATE_MS;
 
     this.spawnEnemies();
+
+    // Lag compensation. A client renders creatures INTERP_DELAY_MS in the past,
+    // so a spider closing at 7.2 m/s is nearly a metre from where it is drawn by
+    // the time the swing reaches us — most of the attack range. Recording their
+    // positions lets the hit test ask where they were when the player swung.
+    // The client's interpolation delay reaches us through the input handshake,
+    // so neither side has to be told about the other's timing.
+    this.rewind = this.allowRewindState({ maxRewindMs: 600 });
+    this.rewind.attachAll(this.state.enemies, {
+      fields: ["x", "z"],
+      mode: "snapshot",
+    });
 
     // The authoritative simulation. Nothing else in this room is allowed to
     // move a player or a creature: positions change here, from buffered input
@@ -112,17 +137,26 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
         world.selfId = sessionId;
 
+        // A fallen player is simulated no further; their inputs still drain so
+        // the reconcile ack keeps advancing and their client doesn't stall.
+        if (player.health === 0) {
+          for (const _ of this.inputs.get(sessionId)) { /* discard */ }
+          continue;
+        }
+
         // Consuming one at a time (rather than draining to an array) is what
         // keeps the server's ack aligned with the client's pending-input list,
         // so its rollback replays exactly the frames we haven't applied yet.
         for (const input of this.inputs.get(sessionId)) {
           applyInput(player, input, ctx.dt, world);
+          if (input.attack) this.tryPlayerAttack(sessionId, session, player);
         }
 
         this.checkGates(sessionId, session, player);
       }
 
       this.stepEnemies(ctx.dt, world);
+      this.processRespawns();
     }, TICK_RATE);
   }
 
@@ -159,6 +193,9 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       y: character.y,
       z: character.z,
       yaw: character.yaw,
+      // A character stored at 0 HP died as the process went down; wake them
+      // whole rather than dead on arrival with no respawn timer running.
+      health: character.health > 0 ? character.health : PLAYER_MAX_HEALTH,
     }));
 
     this.sessions.set(client.sessionId, {
@@ -166,6 +203,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       // Covers arriving through a Gate and logging in on top of one alike.
       suppressedGate: this.gateContaining(character.x, character.z)?.id,
       transferring: false,
+      nextAttackAt: 0,
+      respawnAt: 0,
     });
   }
 
@@ -182,6 +221,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         y: player.y,
         z: player.z,
         yaw: player.yaw,
+        health: player.health,
       });
     }
 
@@ -217,6 +257,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       });
     }
     for (const [enemyId, enemy] of this.state.enemies) {
+      // You can walk over a corpse.
+      if (enemy.state === EnemyState.Dead) continue;
       colliders.push({
         id: enemyId,
         x: enemy.x,
@@ -264,13 +306,16 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     world: { halfExtent: number; colliders: Collider[]; selfId: string },
   ): void {
     if (this.state.enemies.size === 0) return;
+    const now = Date.now();
 
     // Players only — a zombie should not hunt another zombie, so this can't
     // just reuse the collider snapshot.
     this.aiTargets.length = 0;
     for (const [sessionId, player] of this.state.players) {
       const session = this.sessions.get(sessionId);
-      if (!session || session.transferring) continue;
+      // Nothing hunts a corpse — without this, creatures would stand over a
+      // dead player swinging until they respawned somewhere else entirely.
+      if (!session || session.transferring || player.health === 0) continue;
       this.aiTargets.push({ sessionId, x: player.x, z: player.z });
     }
 
@@ -278,7 +323,122 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const brain = this.brains.get(enemyId);
       if (!brain) continue;
       world.selfId = enemyId;
-      stepEnemy(enemy, brain, this.archetypeFor(enemy.kind), dt, world, this.aiTargets);
+      const struck = stepEnemy(
+        enemy,
+        brain,
+        this.archetypeFor(enemy.kind),
+        dt,
+        world,
+        this.aiTargets,
+        now,
+      );
+      if (struck) this.damagePlayer(struck, this.archetypeFor(enemy.kind).attackDamage);
+    }
+  }
+
+  /**
+   * Resolve one swing.
+   *
+   * Hits the nearest living creature inside the arc — one target, not a cleave.
+   * With five things on you that makes the numbers matter, where a cleave would
+   * make a crowd easier than a single creature.
+   */
+  private tryPlayerAttack(sessionId: string, session: Session, player: Player): void {
+    const now = Date.now();
+    if (now < session.nextAttackAt) return;
+    session.nextAttackAt = now + ATTACK_COOLDOWN_MS;
+
+    // Where this player saw the world when they swung, not where it is now.
+    const seen = this.rewind.lastSeenBy(sessionId);
+
+    let target: Enemy | undefined;
+    let targetId = "";
+    let nearest = Infinity;
+
+    for (const [enemyId, enemy] of this.state.enemies) {
+      if (enemy.state === EnemyState.Dead) continue;
+      const archetype = this.archetypeFor(enemy.kind);
+
+      const x = seen.value(enemy, "x");
+      const z = seen.value(enemy, "z");
+      if (!isInSwing(player.x, player.z, player.yaw, x, z, archetype.radius)) continue;
+
+      const range = Math.hypot(x - player.x, z - player.z);
+      if (range < nearest) {
+        nearest = range;
+        target = enemy;
+        targetId = enemyId;
+      }
+    }
+
+    // Tell the attacker either way: the client draws the swing on its own, and
+    // silence on a miss is indistinguishable from a dropped packet.
+    this.clients.getById(sessionId)?.send("swing", { hit: targetId || undefined });
+    if (!target) return;
+
+    target.health = Math.max(0, target.health - ATTACK_DAMAGE);
+    this.broadcast("damage", { id: targetId, amount: ATTACK_DAMAGE, by: sessionId });
+
+    if (target.health === 0) {
+      target.state = EnemyState.Dead;
+      const brain = this.brains.get(targetId);
+      if (brain) {
+        brain.quarry = undefined;
+        brain.returning = false;
+        brain.respawnAt = now + ENEMY_RESPAWN_MS;
+      }
+    }
+  }
+
+  private damagePlayer(sessionId: string, amount: number): void {
+    const player = this.state.players.get(sessionId);
+    const session = this.sessions.get(sessionId);
+    if (!player || !session || player.health === 0) return;
+
+    player.health = Math.max(0, player.health - amount);
+    this.broadcast("damage", { id: sessionId, amount });
+
+    if (player.health === 0) {
+      session.respawnAt = Date.now() + PLAYER_RESPAWN_MS;
+      this.broadcast("died", { id: sessionId });
+    }
+  }
+
+  /** Stand the dead back up once their timer is out. */
+  private processRespawns(): void {
+    const now = Date.now();
+
+    for (const [enemyId, enemy] of this.state.enemies) {
+      if (enemy.state !== EnemyState.Dead) continue;
+      const brain = this.brains.get(enemyId);
+      if (!brain || now < brain.respawnAt) continue;
+
+      // Back at its spawn rather than where it fell, so a cleared camp
+      // reassembles instead of drifting wherever players dragged it.
+      enemy.x = brain.homeX;
+      enemy.z = brain.homeZ;
+      enemy.health = this.archetypeFor(enemy.kind).maxHealth;
+      enemy.state = EnemyState.Idle;
+      brain.timer = 0;
+      brain.returning = false;
+    }
+
+    for (const [sessionId, session] of this.sessions) {
+      const player = this.state.players.get(sessionId);
+      if (!player || player.health > 0 || now < session.respawnAt) continue;
+
+      const spawn = this.ostra.spawn;
+      player.x = spawn.x;
+      player.z = spawn.z;
+      player.health = PLAYER_MAX_HEALTH;
+      // Whatever they were standing in when they died must not fire on arrival.
+      session.suppressedGate = this.gateContaining(spawn.x, spawn.z)?.id;
+      // Anything still locked onto them lets go. Without this a creature that
+      // followed them keeps its quarry and resumes the moment they stand up.
+      for (const brain of this.brains.values()) {
+        if (brain.quarry === sessionId) brain.quarry = undefined;
+      }
+      this.clients.getById(sessionId)?.send("respawned", { x: spawn.x, z: spawn.z });
     }
   }
 
@@ -329,6 +489,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         y: player.y,
         z,
         yaw: arrivalGate.exitYaw,
+        health: player.health,
       });
 
       const reservation = await matchMaker.joinOrCreate(ROOM_NAME, {

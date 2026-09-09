@@ -28,6 +28,9 @@ the duplicate.
 | `npm run dev:server` / `npm run dev:client` | One side only |
 | `npm run typecheck` | Type-checks all three packages |
 
+Controls: **WASD** move, **Space** attack, drag to orbit, scroll to zoom, walk
+into a Gate ring to travel.
+
 | Env var | Default | Meaning |
 | --- | --- | --- |
 | `PORT` | `2567` | Server port |
@@ -135,6 +138,49 @@ distance test** — see below.
 Creatures live and die with their room and are never persisted, so an emptied
 Ostra repopulates the moment somebody walks back into it.
 
+## Combat
+
+Space swings. The server resolves everything; the client only draws.
+
+**Hits are lag-compensated.** A client renders creatures ~120 ms in the past, so
+a Void Spider closing at 7.2 m/s is nearly a metre from where it appears by the
+time a swing reaches the server — most of the 2.4 m reach. The room records
+enemy positions (`allowRewindState`) and the hit test asks `lastSeenBy()` where
+they were when *that player* swung. Neither side has to be told about the
+other's timing: the client's interpolation delay travels in the input handshake,
+bound automatically because the input handle is wired through the reconciler.
+
+`isInSwing()` lives in `@mmo/shared` for the same reason `applyInput` does — the
+client paints the arc, the server judges it, and if those disagreed the game
+would look like it was cheating you. Reach extends to the target's *surface*, so
+a wide creature is easier to hit than a narrow one.
+
+One swing hits the nearest creature in the arc, not everything in it. With five
+things on you that makes numbers matter, where a cleave would make a crowd
+easier than a single creature.
+
+Cooldowns are enforced server-side, so holding Space auto-attacks and spamming
+it gains nothing. The client mirrors the same constant purely so the swing draws
+on the frame you press rather than a round trip later.
+
+Death: creatures drop to a `Dead` state — still in the map, so the client can
+tip them over — and return to their spawn after 12 s. Players wake at the Ostra's
+spawn point after 4 s, and anything still locked onto them lets go.
+
+Player health persists (see the migration in `SqliteCharacterStore`), so logging
+out at 3 HP and back in is not a free heal.
+
+### Spawn safety
+
+`unsafeSpawns()` checks, at boot, that no spawn point sits inside a creature
+camp's aggro radius, and the server logs a warning per offender.
+
+This exists because Barals put new arrivals 10 m from a camp of Risen that
+notice you at 13 m — you respawned into the creatures that had just killed you,
+forever. Layout is hand-authored data, and hand-authored data drifts: the check
+caught a *second* instance on its first run, one introduced minutes earlier by
+widening a camp.
+
 ## Ostras and Gates
 
 Each Ostra is one Colyseus room. There is a single `OstraRoom` class, and
@@ -180,9 +226,13 @@ Ordered roughly by how much they would hurt in production.
   characters in a loop and fill the database.
 - **SQLite means one process per realm.** The `CharacterStore` interface exists
   so Postgres can replace it; nothing else needs to change.
-- **Nothing can hurt you yet.** Creatures chase you down and stand there. Damage,
-  death and respawn are the next piece of work; `health` is already in the schema
-  and untouched.
+- **Combat is one attack with no cost.** No mana, cooldown management, abilities,
+  targeting, threat, loot or experience — the magic system in the lore has an
+  Aequum ladder that nothing here touches yet.
+- **No damage feedback beyond a flinch.** No numbers, no death animation; a
+  killed creature just tips over.
+- **Player-vs-player is possible but untested.** Nothing stops a swing landing on
+  another player except that `isInSwing` is only ever run against creatures.
 - **A stray player twice appeared after the server was killed under live tabs.**
   Not a state leak: `GET /debug/rooms` showed clients and players *matching*, so
   it was a genuine extra connection. The browser console explains it — the SDK
