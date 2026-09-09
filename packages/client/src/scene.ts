@@ -6,37 +6,42 @@
 // ShaderStore up front, so nothing is ever fetched.
 import "@babylonjs/core/Shaders/default.vertex.js";
 import "@babylonjs/core/Shaders/default.fragment.js";
-import "@babylonjs/materials/grid/grid.vertex.js";
-import "@babylonjs/materials/grid/grid.fragment.js";
 
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera.js";
 import { Engine } from "@babylonjs/core/Engines/engine.js";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight.js";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight.js";
 import { Color3, Color4, Vector3 } from "@babylonjs/core/Maths/math.js";
+import { Ray } from "@babylonjs/core/Culling/ray.js";
+import "@babylonjs/core/Culling/ray.js";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js";
-import { GridMaterial } from "@babylonjs/materials/grid/gridMaterial.js";
+
 import { Scene } from "@babylonjs/core/scene.js";
 import {
   GATE_RADIUS,
   getOstra,
+  heightAt,
   PLAYER_SIZE,
+  settlementsIn,
   type EnemyKind,
   type OstraDefinition,
   type Rarity,
   type Spell,
 } from "@mmo/shared";
 import {
-  buildEnemy,
-  buildObstacle,
   buildCastArc,
+  buildEnemy,
+  buildGroundCover,
   buildGroundItem,
+  buildObstacle,
   buildPlayer,
   facet,
   flatMaterial,
 } from "./lowpoly.js";
+import { buildSettlement, buildVillager } from "./settlement.js";
+import { buildTerrain } from "./terrain.js";
 
 export interface World {
   engine: Engine;
@@ -44,6 +49,11 @@ export interface World {
   camera: ArcRotateCamera;
   /** Ambient light, retinted per Ostra. */
   ambient: HemisphericLight;
+  /** What the viewer last chose with the scroll wheel, kept separately so a
+   *  wall pulling the camera in does not overwrite their preference. */
+  preferredRadius: number;
+  /** True while a wall or hill is holding the camera closer than asked. */
+  cameraBlocked: boolean;
   /**
    * Everything belonging to the current Ostra — ground, walls, Gates. Replaced
    * wholesale on arrival rather than rebuilding the engine, which would drop
@@ -75,14 +85,27 @@ export function createWorld(canvas: HTMLCanvasElement): World {
   camera.panningSensibility = 0; // right-drag panning would desync the follow
 
   const ambient = new HemisphericLight("ambient", new Vector3(0, 1, 0), scene);
-  ambient.intensity = 0.65;
+  // Lifted from 0.65: faceted low-poly geometry loses its shape in shadow,
+  // and the whole point of the facets is that you can read the form.
+  ambient.intensity = 0.85;
 
-  const sun = new DirectionalLight("sun", new Vector3(-0.5, -1, -0.35), scene);
-  sun.intensity = 0.75;
+  const sun = new DirectionalLight("sun", new Vector3(-0.55, -0.85, -0.4), scene);
+  sun.intensity = 0.8;
+  // Warm, so the light has a direction and a time of day rather than being
+  // a neutral wash.
+  sun.diffuse = new Color3(1, 0.96, 0.87);
 
   window.addEventListener("resize", () => engine.resize());
 
-  return { engine, scene, camera, ambient, ostraRoot: undefined };
+  return {
+    engine,
+    scene,
+    camera,
+    ambient,
+    preferredRadius: camera.radius,
+    cameraBlocked: false,
+    ostraRoot: undefined,
+  };
 }
 
 /**
@@ -101,26 +124,35 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
   scene.clearColor = Color4.FromHexString(`${palette.sky}ff`);
   world.ambient.groundColor = Color3.FromHexString(palette.bounce);
 
-  const ground = MeshBuilder.CreateGround(
-    "ground",
-    { width: ostra.size, height: ostra.size },
-    scene,
-  );
-  ground.parent = root;
-
-  // A grid makes movement legible: without a texture, a flat plane gives no
-  // sense of speed or direction at all.
-  const grid = new GridMaterial("groundMaterial", scene);
-  grid.majorUnitFrequency = 5;
-  grid.minorUnitVisibility = 0.4;
-  grid.gridRatio = 1;
-  grid.mainColor = Color3.FromHexString(palette.ground);
-  grid.lineColor = Color3.FromHexString(palette.grid);
-  ground.material = grid;
+  // The ground is now built from the same height function the simulation
+  // walks on, so what you see and what you stand on cannot drift apart.
+  buildTerrain(scene, ostra).parent = root;
 
   addWorldEdges(scene, root, ostra);
   addObstacles(scene, root, ostra);
-  for (const gate of ostra.gates) addGate(scene, root, gate.x, gate.z, gate.target);
+  for (const gate of ostra.gates) addGate(scene, root, ostra, gate.x, gate.z, gate.target);
+
+  // Towns first, so their footprints can be excluded from the scatter.
+  const settlements = settlementsIn(ostra);
+  const exclusions: Array<{ x: number; z: number; radius: number }> = [];
+
+  for (const settlement of settlements) {
+    buildSettlement(scene, ostra, settlement).parent = root;
+    for (const villager of settlement.villagers) {
+      buildVillager(scene, ostra, villager).parent = root;
+    }
+    // Grass stops at the edge of the yard; the trees are placed by hand.
+    exclusions.push({ x: settlement.x, z: settlement.z, radius: settlement.radius * 0.72 });
+  }
+
+  for (const obstacle of ostra.obstacles) {
+    exclusions.push({ x: obstacle.x, z: obstacle.z, radius: obstacle.radius + 0.6 });
+  }
+  for (const gate of ostra.gates) {
+    exclusions.push({ x: gate.x, z: gate.z, radius: GATE_RADIUS + 1.2 });
+  }
+
+  buildGroundCover(scene, ostra, exclusions).parent = root;
 }
 
 /** A low wall marking where `applyInput` clamps you, so the boundary isn't an
@@ -138,11 +170,29 @@ function addWorldEdges(scene: Scene, root: TransformNode, ostra: OstraDefinition
     [half, 0, 0.3, ostra.size],
   ];
 
+  // Segmented so it steps down into valleys rather than floating over them.
+  const segments = Math.max(4, Math.round(ostra.size / 6));
   for (const [x, z, width, depth] of walls) {
-    const wall = MeshBuilder.CreateBox("edge", { width, depth, height: 0.5 }, scene);
-    wall.position.set(x, 0.25, z);
-    wall.material = material;
-    wall.parent = root;
+    const along = width > depth;
+    for (let i = 0; i < segments; i++) {
+      const t = (i + 0.5) / segments - 0.5;
+      const px = along ? t * ostra.size : x;
+      const pz = along ? z : t * ostra.size;
+      // The tuple carries the wall's own thickness in whichever axis it is
+      // thin on; segmenting replaces the LONG axis, never the thin one.
+      // Getting these the wrong way round builds an 80m slab across the map.
+      const thickness = along ? depth : width;
+      const segment = ostra.size / segments + 0.1;
+      const wall = MeshBuilder.CreateBox("edge", {
+        width: along ? segment : thickness,
+        depth: along ? thickness : segment,
+        height: 1.1,
+      }, scene);
+      wall.position.set(px, heightAt(px, pz, ostra.terrain) + 0.35, pz);
+      wall.material = material;
+      wall.metadata = { blocksCamera: true };
+      wall.parent = root;
+    }
   }
 }
 
@@ -154,10 +204,13 @@ function addWorldEdges(scene: Scene, root: TransformNode, ostra: OstraDefinition
 function addObstacles(scene: Scene, root: TransformNode, ostra: OstraDefinition): void {
   if (ostra.obstacles.length === 0) return;
 
+  // Only a touch lighter than the palette's stone. The 1.4x this used to be
+  // was tuned against a near-black ground and blows out to white now that
+  // Terra is daylight.
   const material = flatMaterial(
     scene,
     "obstacleMaterial",
-    Color3.FromHexString(ostra.palette.edge).scale(1.4),
+    Color3.FromHexString(ostra.palette.edge).scale(1.05),
   );
 
   for (const obstacle of ostra.obstacles) {
@@ -169,7 +222,9 @@ function addObstacles(scene: Scene, root: TransformNode, ostra: OstraDefinition)
       material,
     );
     mesh.position.x = obstacle.x;
+    mesh.position.y += heightAt(obstacle.x, obstacle.z, ostra.terrain);
     mesh.position.z = obstacle.z;
+    mesh.metadata = { blocksCamera: true };
     mesh.parent = root;
   }
 }
@@ -181,6 +236,7 @@ function addObstacles(scene: Scene, root: TransformNode, ostra: OstraDefinition)
 function addGate(
   scene: Scene,
   root: TransformNode,
+  ostra: OstraDefinition,
   x: number,
   z: number,
   target: OstraDefinition["id"],
@@ -200,7 +256,8 @@ function addGate(
     scene,
   );
   facet(ring);
-  ring.position.set(x, 0.14, z);
+  const groundY = heightAt(x, z, ostra.terrain);
+  ring.position.set(x, groundY + 0.14, z);
   ring.material = ringMaterial;
   ring.parent = root;
 
@@ -218,7 +275,7 @@ function addGate(
     { diameter: GATE_RADIUS * 1.8, height: 7, tessellation: 12 },
     scene,
   );
-  beam.position.set(x, 3.5, z);
+  beam.position.set(x, groundY + 3.5, z);
   beam.material = beamMaterial;
   beam.isPickable = false;
   beam.parent = root;
@@ -238,4 +295,51 @@ export function createCastArc(scene: Scene, spell: Spell, colour: number): Trans
 
 export function createGroundItemMesh(scene: Scene, rarity: Rarity): TransformNode {
   return buildGroundItem(scene, rarity);
+}
+
+/** How far in front of a wall the camera stops. Enough that the near clip
+ *  plane never cuts into the geometry. */
+const CAMERA_PADDING = 0.45;
+
+/**
+ * Pull the camera in when something solid is between it and the player.
+ *
+ * Without this, backing against a wall in Daso puts the camera inside the
+ * building and you are looking at the inside of a roof. A ray from the player
+ * outwards is the cheapest correct test, and only things tagged
+ * `blocksCamera` are considered — grass, villagers, loot and creatures should
+ * never shove the view around.
+ *
+ * The viewer's chosen distance is remembered separately, so walking away from
+ * a wall returns the camera to where they had it. Scrolling *while* pressed
+ * against a wall is the one case this handles imperfectly; it takes effect as
+ * soon as you step clear.
+ */
+export function updateCameraCollision(world: World): void {
+  const camera = world.camera;
+  if (!world.cameraBlocked) world.preferredRadius = camera.radius;
+
+  const target = camera.target;
+  const direction = camera.position.subtract(target);
+  const distance = direction.length();
+  if (distance < 1e-3) return;
+  direction.scaleInPlace(1 / distance);
+
+  const ray = new Ray(target, direction, world.preferredRadius);
+  const hit = world.scene.pickWithRay(
+    ray,
+    (mesh) => mesh.isEnabled() && mesh.metadata?.blocksCamera === true,
+  );
+
+  if (hit?.hit && hit.distance < world.preferredRadius) {
+    camera.radius = Math.max(
+      camera.lowerRadiusLimit ?? 1.5,
+      hit.distance - CAMERA_PADDING,
+    );
+    world.cameraBlocked = true;
+    return;
+  }
+
+  camera.radius = world.preferredRadius;
+  world.cameraBlocked = false;
 }

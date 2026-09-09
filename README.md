@@ -314,6 +314,54 @@ Serverless hosts (Vercel, Netlify Functions, Lambda) cannot run the server: the
 world lives in memory and ticks at 30 Hz, which needs a process that outlives a
 request.
 
+## Terrain
+
+The ground has shape, and `y` finally means something.
+
+Height is a **pure function**, not a heightmap image, for the same reason
+`applyInput` is shared: the server places you on the ground and the client
+predicts where the ground will be, and a centimetre of disagreement is
+permanent vertical rubber-banding. A function both sides call is identical by
+construction — no asset to load, no sampling convention to get subtly wrong.
+
+It is a sum of three waves rather than real noise: smooth (so walking never
+jitters), cheap (called once per body per tick *and* once per terrain vertex),
+and stateless. Height is **derived** from the final x/z each step rather than
+integrated, so there is no vertical velocity to drift out of sync.
+
+Flat zones blend the hills away under a settlement, because a logging town on a
+hillside looks like an accident. The visible mesh is built from the same
+function and flat-shaded, coloured by height and steepness through vertex
+colours — soil on the flats, stone where it gets steep.
+
+Buildings needed **box colliders**, added alongside the circles. A twelve-metre
+inn approximated by a circle either blocks the street outside it or lets you
+stand in its corners. Boxes rotate, so the town isn't forced onto a grid.
+
+And the camera now stops at walls: a ray from the player outward, tested only
+against things tagged `blocksCamera`, so grass and villagers never shove the
+view around.
+
+## Daso
+
+Terra's west, per the vault: a logging town of fifty, a few houses and an inn,
+and nobody passing through except for work or by accident. That last detail
+shapes the layout — it is built around the timber yard, not a square.
+
+Six buildings including **The Felled Oak** (the only lit windows in the world),
+a ring of woodland that actually blocks you, woodpiles and stumps and lamps,
+and five villagers who say something when you come near. Basan Log is there,
+before the events of *The Daso Voice*:
+
+> There's a sound in the west woods. Like someone saying my name.
+
+`settlements.ts` is plain data. Buildings become colliders on both sides;
+props and villagers are drawn client-side and cost no bandwidth.
+
+`unsafeSpawns()` now checks camps against **settlements** as well as spawn
+points — and caught a Risen camp reaching within 10.6 m of Daso on its first
+run, which would have put zombies in the streets of the one calm place.
+
 ## Ostras and Gates
 
 Each Ostra is one Colyseus room. There is a single `OstraRoom` class, and
@@ -390,8 +438,12 @@ Ordered roughly by how much they would hurt in production.
 - **Only position persists.** No inventory, stats, or progression yet, and
   creatures reset with their room.
 - **AI has no pathfinding.** A creature walks straight at its goal and slides
-  along whatever it hits. Fine in open ground; it will look stupid the moment an
-  Ostra has a wall to walk around.
+  along whatever it hits. Daso's camps are placed well clear of the buildings so
+  this does not show yet, but it is the next thing that will.
+- **Terrain does not affect movement.** Slopes cost nothing to climb and there
+  is no jumping; you simply follow the surface.
+- **Villagers are scenery.** They stand where they are put and say one line.
+  No trading, no quests, no schedule.
 - **`y` is always 0.** It is in the schema and the movement state so terrain and
   jumping don't need a wire format change, but nothing moves vertically.
 

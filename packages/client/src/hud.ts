@@ -23,6 +23,10 @@ export class Hud {
   private stats = document.getElementById("stats") as HTMLElement;
   private roster = document.getElementById("roster") as HTMLElement;
   private gatePrompt = document.getElementById("gate-prompt") as HTMLElement;
+  private speech = document.getElementById("speech") as HTMLElement;
+  private speechWho = document.getElementById("speech-who") as HTMLElement;
+  private speechLine = document.getElementById("speech-line") as HTMLElement;
+  private speaking: string | undefined;
   private healthFill = document.querySelector("#health-bar i") as HTMLElement;
   private healthText = document.getElementById("health-text") as HTMLElement;
   private death = document.getElementById("death") as HTMLElement;
@@ -67,6 +71,21 @@ export class Hud {
   setGatePrompt(label: string | undefined): void {
     this.gatePrompt.textContent = label ?? "";
     this.gatePrompt.hidden = label === undefined;
+  }
+
+  /**
+   * What the nearest villager is saying, or nothing.
+   *
+   * Only touches the DOM when the speaker changes, so standing in front of
+   * someone doesn't rewrite their line sixty times a second.
+   */
+  setSpeech(who: string | undefined, line = ""): void {
+    if (who === this.speaking) return;
+    this.speaking = who;
+    this.speech.hidden = who === undefined;
+    if (who === undefined) return;
+    this.speechWho.textContent = who;
+    this.speechLine.textContent = line;
   }
 
   /** Only touches the DOM when the number actually moved. */

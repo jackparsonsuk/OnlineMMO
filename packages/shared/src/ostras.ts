@@ -1,5 +1,7 @@
 import { getArchetype, type SpawnGroup } from "./enemies.js";
-import type { Collider } from "./movement.js";
+import type { BoxCollider, Collider } from "./movement.js";
+import { DASO, SETTLEMENTS, type SettlementDefinition } from "./settlements.js";
+import { heightAt, type TerrainSettings } from "./terrain.js";
 
 /**
  * The Ostras the game currently knows about, and the Gates between them.
@@ -90,6 +92,10 @@ export interface OstraDefinition {
   obstacles: ObstacleDefinition[];
   obstacleStyle: ObstacleStyle;
   difficulty: OstraDifficulty;
+  /** The shape of the ground. */
+  terrain: TerrainSettings;
+  /** Settlement ids placed in this Ostra. */
+  settlements: string[];
   /** Creatures placed when the room is created. */
   spawns: SpawnGroup[];
 }
@@ -106,12 +112,16 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     subtitle: "Earth Shard",
     size: 80,
     spawn: { x: 0, z: 0 },
+    // Daylight. The other two Ostras keep their gloom, which is the point:
+    // arriving on Terra should feel like coming home, and a place described as
+    // a mixing pot where most people live should not look like a crypt.
     palette: {
-      sky: "#0d1117",
-      ground: "#111a16",
-      grid: "#3f6b52",
-      edge: "#2b4438",
-      bounce: "#1a2620",
+      sky: "#8ab2d0",
+      ground: "#41703f",
+      // Now the CREST tone rather than a grid line — sunlit tops of the rises.
+      grid: "#79a355",
+      edge: "#7a6f5c",
+      bounce: "#5a6f4c",
     },
     gates: [
       {
@@ -135,13 +145,24 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     ],
     obstacles: [
       { x: 6, z: -9, radius: 1.4, height: 3.2 },
-      { x: -8, z: -6, radius: 1.1, height: 2.4 },
+      { x: 10, z: -16, radius: 1.1, height: 2.4 },
       { x: -3, z: 11, radius: 1.8, height: 4.0 },
       { x: 13, z: 4, radius: 1.2, height: 2.8 },
-      { x: -14, z: -14, radius: 2.2, height: 5.0 },
+      { x: -2, z: 20, radius: 2.2, height: 5.0 },
       { x: 24, z: -3, radius: 1.6, height: 3.6 },
     ],
     obstacleStyle: "pillar",
+    // Gentle rolling ground. Enough relief that the horizon moves as you walk,
+    // not so much that a creature disappears behind every rise.
+    terrain: {
+      amplitude: 2.1,
+      frequency: 0.055,
+      phase: 0.7,
+      // Daso sits on a level shelf. A logging town on a hillside would look
+      // like an accident.
+      flats: [{ x: DASO.x, z: DASO.z, radius: DASO.radius, falloff: 11, level: 0.4 }],
+    },
+    settlements: ["daso"],
     // Gentle enough to learn the fight in. A Risen here takes the same four
     // Strikes but hits for well under half.
     difficulty: { damage: 0.6, health: 1 },
@@ -149,8 +170,8 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     // every approach pulls the whole camp at once and a new player never gets
     // a winnable first fight.
     spawns: [
-      { kind: "zombie", count: 4, x: 14, z: -26, radius: 12 },
-      { kind: "spider", count: 3, x: -22, z: -8, radius: 8 },
+      { kind: "zombie", count: 4, x: 20, z: -26, radius: 11 },
+      { kind: "spider", count: 3, x: 24, z: 12, radius: 8 },
     ],
   },
 
@@ -187,6 +208,10 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       { x: 0, z: 12, radius: 2.4, height: 9.0 },
     ],
     obstacleStyle: "pillar",
+    // Nearly level. The gods' realm should read as something built, and hills
+    // would fight the columns.
+    terrain: { amplitude: 0.7, frequency: 0.08, phase: 2.4, flats: [] },
+    settlements: [],
     difficulty: { damage: 1, health: 1.2 },
     // The gods' realm is guarded, not infested.
     spawns: [
@@ -231,6 +256,10 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       { x: -2, z: 16, radius: 2.8, height: 3.4 },
     ],
     obstacleStyle: "boulder",
+    // Broken and steep, so sightlines are short and a spider can be on you
+    // before you see it come over a rise.
+    terrain: { amplitude: 3.4, frequency: 0.075, phase: 5.1, flats: [] },
+    settlements: [],
     // "A place of power and war." Going here before you are ready should be a
     // mistake you feel.
     difficulty: { damage: 1.6, health: 1.5 },
@@ -262,19 +291,71 @@ export function getOstra(id: OstraId): OstraDefinition {
  * identical values — deriving them from the same table is what guarantees it.
  */
 const staticColliderCache = new Map<OstraId, readonly Collider[]>();
+const boxColliderCache = new Map<OstraId, readonly BoxCollider[]>();
 
 export function staticColliders(ostra: OstraDefinition): readonly Collider[] {
   let cached = staticColliderCache.get(ostra.id);
   if (!cached) {
-    cached = ostra.obstacles.map((obstacle, index) => ({
+    const colliders: Collider[] = ostra.obstacles.map((obstacle, index) => ({
       id: `obstacle:${index}`,
       x: obstacle.x,
       z: obstacle.z,
       radius: obstacle.radius,
     }));
+
+    // Trees are circles like rocks. A wood you can walk through is not a wood,
+    // and this is a logging town.
+    for (const settlement of settlementsIn(ostra)) {
+      settlement.trees.forEach((tree, index) => {
+        colliders.push({
+          id: `${settlement.id}:tree:${index}`,
+          x: tree.x,
+          z: tree.z,
+          radius: tree.radius,
+        });
+      });
+    }
+
+    cached = colliders;
     staticColliderCache.set(ostra.id, cached);
   }
   return cached;
+}
+
+/** Buildings, as rectangles. Built once and reused; identical on both sides,
+ *  so walking around a wall predicts perfectly. */
+export function buildingColliders(ostra: OstraDefinition): readonly BoxCollider[] {
+  let cached = boxColliderCache.get(ostra.id);
+  if (!cached) {
+    const boxes: BoxCollider[] = [];
+    for (const settlement of settlementsIn(ostra)) {
+      for (const building of settlement.buildings) {
+        boxes.push({
+          id: building.id,
+          x: building.x,
+          z: building.z,
+          halfWidth: building.width / 2,
+          halfDepth: building.depth / 2,
+          yaw: building.yaw,
+        });
+      }
+    }
+    cached = boxes;
+    boxColliderCache.set(ostra.id, cached);
+  }
+  return cached;
+}
+
+export function settlementsIn(ostra: OstraDefinition): SettlementDefinition[] {
+  return ostra.settlements
+    .map((id) => SETTLEMENTS[id])
+    .filter((settlement): settlement is SettlementDefinition => settlement !== undefined);
+}
+
+/** Ground height in a given Ostra. Sugar over `heightAt`, so callers don't
+ *  have to remember to reach for `.terrain`. */
+export function groundHeight(ostra: OstraDefinition, x: number, z: number): number {
+  return heightAt(x, z, ostra.terrain);
 }
 
 /**
@@ -293,17 +374,34 @@ export function unsafeSpawns(): string[] {
   for (const ostra of Object.values(OSTRAS)) {
     for (const group of ostra.spawns) {
       const archetype = getArchetype(group.kind);
-      const centreDistance = Math.hypot(
+
+      // Worst case is a creature scattered to the near edge of its camp.
+      const toSpawn = Math.max(0, Math.hypot(
         group.x - ostra.spawn.x,
         group.z - ostra.spawn.z,
-      );
-      // Worst case is a creature scattered to the near edge of its camp.
-      const nearest = Math.max(0, centreDistance - group.radius);
-      if (nearest <= archetype.aggroRadius) {
+      ) - group.radius);
+
+      if (toSpawn <= archetype.aggroRadius) {
         problems.push(
-          `${ostra.name}: ${archetype.name} camp can reach within ${nearest.toFixed(1)}m ` +
+          `${ostra.name}: ${archetype.name} camp can reach within ${toSpawn.toFixed(1)}m ` +
           `of the spawn point, inside its ${archetype.aggroRadius}m aggro radius`,
         );
+      }
+
+      // Towns are meant to be the safe part. A camp whose creatures can wander
+      // into the streets makes the one calm place in the Ostra not calm.
+      for (const settlement of settlementsIn(ostra)) {
+        const toTown = Math.max(0, Math.hypot(
+          group.x - settlement.x,
+          group.z - settlement.z,
+        ) - group.radius - settlement.radius);
+
+        if (toTown <= archetype.aggroRadius) {
+          problems.push(
+            `${ostra.name}: ${archetype.name} camp can reach within ${toTown.toFixed(1)}m ` +
+            `of ${settlement.name}, inside its ${archetype.aggroRadius}m aggro radius`,
+          );
+        }
       }
     }
   }

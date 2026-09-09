@@ -607,3 +607,47 @@ kbd {
 .roster-entry .where { font-size: 11px; color: #8b98a5; text-transform: capitalize; }
 
 .make { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgb(230 237 243 / 10%); }
+
+/* --- villagers ----------------------------------------------------------- */
+
+/* Their labels are calm: nobody in Daso is a threat or a target. */
+.nametag.villager {
+  border-color: rgb(232 194 63 / 38%);
+  color: #e8dcc0;
+}
+
+/* What the nearest villager is saying. Sits above the ability bar, in the
+   middle, where the gate prompt also lives — you are never near both. */
+#speech {
+  position: fixed;
+  bottom: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 32rem;
+  padding: 10px 14px;
+  border-radius: 9px;
+  border: 1px solid rgb(232 194 63 / 30%);
+  background: rgb(13 17 23 / 84%);
+  backdrop-filter: blur(6px);
+  text-align: center;
+  pointer-events: none;
+}
+
+#speech[hidden] { display: none; }
+
+#speech-who {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #e8c23f;
+  margin-bottom: 3px;
+}
+
+#speech-line {
+  display: block;
+  font-size: 14px;
+  font-style: italic;
+  color: #e6edf3;
+  line-height: 1.5;
+}

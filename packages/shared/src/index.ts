@@ -5,4 +5,6 @@ export * from "./items.js";
 export * from "./movement.js";
 export * from "./ostras.js";
 export * from "./schema.js";
+export * from "./settlements.js";
 export * from "./spells.js";
+export * from "./terrain.js";

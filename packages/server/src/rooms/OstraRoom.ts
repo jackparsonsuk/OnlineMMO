@@ -1,6 +1,7 @@
 import { matchMaker, Room, ServerError, type Client, type Rewind } from "@colyseus/core";
 import {
   applyInput,
+  buildingColliders,
   DROP_CHANCE,
   Enemy,
   ENEMY_RESPAWN_MS,
@@ -10,6 +11,7 @@ import {
   findGate,
   getArchetype,
   getItem,
+  groundHeight,
   GROUND_ITEM_TTL_MS,
   GroundItem,
   LOOT_CLAIM_MS,
@@ -36,6 +38,7 @@ import {
   staticColliders,
   type Collider,
   type EnemyArchetype,
+  type MoveWorld,
   type GateDefinition,
   type OstraDefinition,
   type OstraId,
@@ -43,6 +46,7 @@ import {
   Player,
   ROOM_NAME,
   TICK_RATE,
+  type BoxCollider,
   type EquipSlot,
   type Equipment,
   type Spell,
@@ -126,6 +130,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   /** Position history, so a swing is judged against the world the attacker
    *  actually saw rather than the one that exists by the time it arrives. */
   private rewind!: Rewind;
+  /** Building footprints. Constant for the room's life. */
+  private boxes!: readonly BoxCollider[];
   /** When each dropped item expires, keyed as `state.ground`. Server-only:
    *  clients have no use for the deadline, only for the item. */
   private readonly groundExpiry = new Map<string, number>();
@@ -142,6 +148,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     this.store = context.store;
     this.realmId = context.realmId;
     this.ostra = getOstra(options.ostraId);
+    this.boxes = buildingColliders(this.ostra);
 
     this.state = new WorldState({ ostraId: this.ostra.id });
     this.maxClients = 64;
@@ -176,7 +183,13 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       // already-moved positions, making the result depend on map iteration
       // order — and the client, which has no such order, could never match it.
       const colliders = this.collectColliders();
-      const world = { halfExtent: this.ostra.size / 2, colliders, selfId: "" };
+      const world = {
+        halfExtent: this.ostra.size / 2,
+        colliders,
+        boxes: this.boxes,
+        terrain: this.ostra.terrain,
+        selfId: "",
+      };
 
       for (const [sessionId, player] of this.state.players) {
         const session = this.sessions.get(sessionId);
@@ -257,7 +270,9 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       name: character.name,
       colour: character.colour,
       x: character.x,
-      y: character.y,
+      // Recomputed rather than restored: the ground may have been reshaped
+      // since they logged out, and a saved height would bury or float them.
+      y: groundHeight(this.ostra, character.x, character.z),
       z: character.z,
       yaw: character.yaw,
       // A character stored at 0 HP died as the process went down; wake them
@@ -388,7 +403,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         this.state.enemies.set(id, new Enemy({
           kind: archetype.kind,
           x,
-          y: 0,
+          y: groundHeight(this.ostra, x, z),
           z,
           yaw: Math.random() * Math.PI * 2,
           health: this.scaledHealth(archetype.maxHealth),
@@ -401,7 +416,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
   private stepEnemies(
     dt: number,
-    world: { halfExtent: number; colliders: Collider[]; selfId: string },
+    world: MoveWorld & { selfId: string },
   ): void {
     if (this.state.enemies.size === 0) return;
     const now = Date.now();
@@ -572,7 +587,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       itemId: item.id,
       claimedBy: killerSessionId,
       x: enemy.x,
-      y: enemy.y,
+      y: groundHeight(this.ostra, enemy.x, enemy.z),
       z: enemy.z,
     }));
     this.groundExpiry.set(id, Date.now() + GROUND_ITEM_TTL_MS);
@@ -724,6 +739,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       // reassembles instead of drifting wherever players dragged it.
       enemy.x = brain.homeX;
       enemy.z = brain.homeZ;
+      enemy.y = groundHeight(this.ostra, brain.homeX, brain.homeZ);
       enemy.health = this.scaledHealth(this.archetypeFor(enemy.kind).maxHealth);
       enemy.state = EnemyState.Idle;
       brain.timer = 0;
@@ -737,6 +753,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const spawn = this.ostra.spawn;
       player.x = spawn.x;
       player.z = spawn.z;
+      player.y = groundHeight(this.ostra, spawn.x, spawn.z);
       player.health = player.maxHealth;
       player.mana = player.maxMana;
       session.manaCarry = 0;
@@ -799,7 +816,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       this.store.savePosition(this.realmId, session.characterId, {
         ostraId: destination.id,
         x,
-        y: player.y,
+        y: groundHeight(destination, x, z),
         z,
         yaw: arrivalGate.exitYaw,
         health: player.health,

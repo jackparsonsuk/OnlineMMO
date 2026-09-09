@@ -7,8 +7,11 @@ import type { Scene } from "@babylonjs/core/scene.js";
 import {
   getArchetype,
   type EnemyKind,
+  heightAt,
+  type OstraDefinition,
   PLAYER_SIZE,
   type Rarity,
+  slopeAt,
   type Spell,
 } from "@mmo/shared";
 
@@ -328,4 +331,86 @@ export function buildGroundItem(scene: Scene, rarity: Rarity): TransformNode {
   halo.material = haloMaterial;
 
   return pivot;
+}
+
+/**
+ * Ground cover: grass tufts, ferns and small rocks scattered over the wild
+ * parts of an Ostra.
+ *
+ * Placed from a seeded sequence rather than Math.random, so every client sees
+ * the same meadow — two players describing the same landmark matters more here
+ * than variety does. None of it collides; you walk through long grass.
+ *
+ * Everything lives under one returned node, and each kind is drawn as a single
+ * merged-by-hand cluster of thin boxes: hundreds of individual meshes would
+ * cost more in draw calls than the whole rest of the scene.
+ */
+export function buildGroundCover(
+  scene: Scene,
+  ostra: OstraDefinition,
+  exclusions: ReadonlyArray<{ x: number; z: number; radius: number }>,
+): TransformNode {
+  const root = new TransformNode("groundCover", scene);
+  const half = ostra.size / 2 - 2;
+
+  const palette = ostra.palette;
+  const bladeMaterial = flatMaterial(scene, "grassBlade", Color3.FromHexString(palette.grid).scale(0.8));
+  const bladeAlt = flatMaterial(scene, "grassBladeAlt", Color3.FromHexString(palette.grid).scale(1.15));
+  const pebbleMaterial = flatMaterial(scene, "pebble", Color3.FromHexString(palette.edge).scale(1.25));
+
+  // A tiny deterministic generator. Not good randomness — good enough to
+  // scatter plants, and identical on every machine, which matters more.
+  let seed = 0x9e3779b9 ^ Math.round(ostra.terrain.phase * 1000);
+  const random = (): number => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 0x100000000;
+  };
+
+  const density = Math.round((ostra.size * ostra.size) / 42);
+
+  for (let i = 0; i < density; i++) {
+    const x = (random() * 2 - 1) * half;
+    const z = (random() * 2 - 1) * half;
+
+    // Nothing grows in the middle of a town or on bare rock.
+    if (exclusions.some((zone) => Math.hypot(x - zone.x, z - zone.z) < zone.radius)) continue;
+    if (slopeAt(x, z, ostra.terrain) > 0.55) continue;
+
+    const y = heightAt(x, z, ostra.terrain);
+    const roll = random();
+
+    if (roll < 0.14) {
+      const pebble = facet(MeshBuilder.CreatePolyhedron("pebble", {
+        type: 1, size: 0.1 + random() * 0.12,
+      }, scene));
+      pebble.position.set(x, y + 0.05, z);
+      pebble.rotation.set(random() * 3, random() * 3, random() * 3);
+      pebble.material = pebbleMaterial;
+      pebble.parent = root;
+      continue;
+    }
+
+    // A tuft: three thin blades leaning apart, which reads as grass from any
+    // angle without costing a mesh per blade.
+    const tuft = new TransformNode("tuft", scene);
+    tuft.position.set(x, y, z);
+    tuft.rotation.y = random() * Math.PI * 2;
+    tuft.parent = root;
+
+    const tall = roll > 0.82;
+    const height = (tall ? 0.75 : 0.42) + random() * 0.25;
+
+    for (let blade = 0; blade < 3; blade++) {
+      const mesh = MeshBuilder.CreateBox("blade", {
+        width: 0.07, height, depth: 0.07,
+      }, scene);
+      const lean = 0.16 + random() * 0.2;
+      mesh.position.set((blade - 1) * 0.09, height / 2, (random() - 0.5) * 0.12);
+      mesh.rotation.z = (blade - 1) * lean;
+      mesh.material = tall ? bladeAlt : bladeMaterial;
+      mesh.parent = tuft;
+    }
+  }
+
+  return root;
 }

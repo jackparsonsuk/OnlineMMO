@@ -15,6 +15,7 @@ import {
   INTERP_DELAY_MS,
   getItem,
   type GroundItem,
+  heightAt,
   isEnemyKind,
   SPELL_IDS,
   SPELLS,
@@ -27,8 +28,10 @@ import {
   type Player,
   PLAYER_HALF,
   PLAYER_RADIUS,
+  settlementsIn,
   staticColliders,
   TICK_RATE,
+  type VillagerDefinition,
   type WorldState,
 } from "@mmo/shared";
 import type { Hud } from "./hud.js";
@@ -39,6 +42,7 @@ import {
   createEnemyMesh,
   createGroundItemMesh,
   createPlayerMesh,
+  updateCameraCollision,
   type World,
 } from "./scene.js";
 
@@ -66,6 +70,10 @@ export interface OstraSession {
 
 /** Show the Gate label from a little further out than the Gate actually fires. */
 const GATE_PROMPT_RANGE = 6;
+
+/** Walk this close to a villager and they say their piece. Roughly the
+ *  distance at which you would actually address someone. */
+const SPEAKING_RANGE = 3.6;
 
 export function createSession(
   world: World,
@@ -305,6 +313,22 @@ export function createSession(
     return closest?.label;
   }
 
+  // Villagers stand still, so their labels are computed once. Everything else
+  // about them is drawn by the scene; the session only owns their names and
+  // whether you are close enough to hear one.
+  const villagers: Array<VillagerDefinition & { key: string; y: number }> = [];
+  for (const settlement of settlementsIn(ostra)) {
+    for (const villager of settlement.villagers) {
+      const key = `npc:${settlement.id}:${villager.name}`;
+      villagers.push({
+        ...villager,
+        key,
+        y: heightAt(villager.x, villager.z, ostra.terrain),
+      });
+      nametags.add(key, villager.name, villager.colour, "villager");
+    }
+  }
+
   const nametagTargets: NametagTarget[] = [];
 
   function frame(now: number): void {
@@ -393,6 +417,17 @@ export function createSession(
       });
     });
 
+    // Villager labels float whether or not you are near; their lines do not.
+    for (const villager of villagers) {
+      nametagTargets.push({
+        sessionId: villager.key,
+        x: villager.x,
+        y: villager.y,
+        z: villager.z,
+        height: 1.5,
+      });
+    }
+
     if (selfPlayer) {
       const x = predict.value(selfPlayer, "x");
       const y = predict.value(selfPlayer, "y");
@@ -433,7 +468,23 @@ export function createSession(
       // Follow the *rendered* position, not the raw schema one, or the camera
       // judders by exactly the correction the reconciler is smoothing out.
       world.camera.target.set(x, y + PLAYER_HALF, z);
+      // After the target moves, so the ray starts from where the player
+      // actually is this frame.
+      updateCameraCollision(world);
       hud.setGatePrompt(nearestGateLabel(x, z));
+
+      // Close enough to hear someone. Nearest wins, so standing between two
+      // villagers is never ambiguous.
+      let closest: (typeof villagers)[number] | undefined;
+      let closestRange = SPEAKING_RANGE;
+      for (const villager of villagers) {
+        const range = Math.hypot(villager.x - x, villager.z - z);
+        if (range < closestRange) {
+          closestRange = range;
+          closest = villager;
+        }
+      }
+      hud.setSpeech(closest?.name, closest?.line);
     }
 
     // Turn and bob the drops. Cheap, and a moving thing on a still floor is
@@ -483,6 +534,7 @@ export function createSession(
     hud.setDead(false);
     nametags.clear();
     hud.setGatePrompt(undefined);
+    hud.setSpeech(undefined);
   }
 
   return { frame, dispose, debug: { predict, meshes, colliders, input } };

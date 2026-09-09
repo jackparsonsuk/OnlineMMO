@@ -81,7 +81,10 @@ export const ENEMY_ARCHETYPES: Record<EnemyKind, EnemyArchetype> = {
     attackDamage: 11,
     attackRange: 1.9,
     attackCooldownMs: 1400,
-    colour: 0x6f8f52,
+    // Shifted grey-yellow: the old green was almost exactly Terra's grass,
+    // and a creature you cannot pick out of the ground is not a threat, it
+    // is an ambush the player never gets to answer.
+    colour: 0xa8a86a,
     idleSeconds: 2.6,
   },
 

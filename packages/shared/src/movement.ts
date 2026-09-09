@@ -1,4 +1,5 @@
 import { COLLISION_ITERATIONS, MOVE_SPEED, PLAYER_RADIUS } from "./constants.js";
+import { heightAt, type TerrainSettings } from "./terrain.js";
 
 /**
  * The single movement simulation, run in two places:
@@ -29,14 +30,34 @@ export interface MoveCommand {
   yaw: number;
 }
 
-/** A circle you cannot walk into: a rock, a pillar, or another player. */
+/** A circle you cannot walk into: a rock, a pillar, a creature or a player. */
 export interface Collider {
-  /** Stable identity, so a player can be excluded from colliding with itself.
+  /** Stable identity, so a body can be excluded from colliding with itself.
    *  Session id for players, `obstacle:N` for scenery. */
   id: string;
   x: number;
   z: number;
   radius: number;
+}
+
+/**
+ * A rectangle you cannot walk into — a building.
+ *
+ * Circles were fine while everything was a rock. A twelve-metre inn
+ * approximated by a circle either blocks the street outside it or lets you
+ * stand inside its corners, and both read as broken. Rotation is supported so
+ * a town isn't forced onto a grid.
+ */
+export interface BoxCollider {
+  id: string;
+  /** Centre. */
+  x: number;
+  z: number;
+  /** Half-extents along the box's own axes, before rotation. */
+  halfWidth: number;
+  halfDepth: number;
+  /** Rotation about Y, radians. */
+  yaw: number;
 }
 
 /** Everything about the surroundings that the step needs. */
@@ -53,9 +74,16 @@ export interface MoveWorld {
    * Scenery is identical on both sides and so predicts perfectly.
    */
   colliders: readonly Collider[];
-  /** The collider representing the player being simulated, skipped so nobody
+  /** Buildings. Identical on both sides, so they predict perfectly. */
+  boxes?: readonly BoxCollider[];
+  /** The collider representing the body being simulated, skipped so nobody
    *  pushes themselves. */
   selfId?: string;
+  /**
+   * The ground. Bodies are placed on it after every step, so `y` finally means
+   * something. Omitted leaves `y` untouched, which is what a flat Ostra wants.
+   */
+  terrain?: TerrainSettings;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -123,6 +151,11 @@ export function moveBody(
   const limit = world.halfExtent - radius;
   state.x = clamp(state.x, -limit, limit);
   state.z = clamp(state.z, -limit, limit);
+
+  // Then stand on the ground. Height is derived from the final position rather
+  // than integrated, so there is no vertical velocity to drift out of sync —
+  // where you are horizontally completely determines how high you are.
+  if (world.terrain) state.y = heightAt(state.x, state.z, world.terrain);
 }
 
 /**
@@ -138,6 +171,50 @@ function resolveCollisions(state: MoveState, world: MoveWorld, radius: number): 
     let pushX = 0;
     let pushZ = 0;
     let contacts = 0;
+
+    for (const box of world.boxes ?? []) {
+      if (box.id === world.selfId) continue;
+
+      // Work in the box's own frame, where it is axis-aligned and the nearest
+      // point is a clamp. Rotating the answer back out is what lets a town be
+      // laid out at angles instead of on a grid.
+      const sin = Math.sin(box.yaw);
+      const cos = Math.cos(box.yaw);
+      const relX = state.x - box.x;
+      const relZ = state.z - box.z;
+      const localX = relX * cos - relZ * sin;
+      const localZ = relX * sin + relZ * cos;
+
+      const nearestX = clamp(localX, -box.halfWidth, box.halfWidth);
+      const nearestZ = clamp(localZ, -box.halfDepth, box.halfDepth);
+      let awayX = localX - nearestX;
+      let awayZ = localZ - nearestZ;
+      let gap = Math.hypot(awayX, awayZ);
+
+      if (gap >= radius) continue;
+
+      if (gap < 1e-6) {
+        // Inside the box: push out through whichever wall is closest, or the
+        // maths has no direction to work with and the body sticks.
+        const toRight = box.halfWidth - localX;
+        const toLeft = localX + box.halfWidth;
+        const toFar = box.halfDepth - localZ;
+        const toNear = localZ + box.halfDepth;
+        const least = Math.min(toRight, toLeft, toFar, toNear);
+        awayX = least === toRight ? 1 : least === toLeft ? -1 : 0;
+        awayZ = least === toFar ? 1 : least === toNear ? -1 : 0;
+        gap = 0;
+      } else {
+        awayX /= gap;
+        awayZ /= gap;
+      }
+
+      const overlap = radius - gap;
+      // Back out of the box's frame.
+      pushX += (awayX * cos + awayZ * sin) * overlap;
+      pushZ += (-awayX * sin + awayZ * cos) * overlap;
+      contacts++;
+    }
 
     for (const collider of world.colliders) {
       if (collider.id === world.selfId) continue;

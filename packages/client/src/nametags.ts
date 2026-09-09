@@ -32,7 +32,7 @@ export interface NametagTarget {
 
 /** Which styling a label gets. `hunting` is how you tell, at a glance,
  *  that something has noticed you. */
-export type NametagVariant = "self" | "player" | "hostile" | "hunting" | "dead";
+export type NametagVariant = "self" | "player" | "hostile" | "hunting" | "dead" | "villager";
 
 export class Nametags {
   private readonly container: HTMLElement;
