@@ -21,7 +21,7 @@ html, body {
   touch-action: none;
 }
 
-#hud, #hint {
+#hud, #hint, #gate-prompt {
   position: fixed;
   padding: 10px 12px;
   border-radius: 8px;
@@ -36,7 +36,29 @@ html, body {
 #hud { top: 12px; left: 12px; min-width: 190px; }
 #hint { bottom: 12px; left: 12px; color: #9aa7b4; }
 
+#ostra-name {
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+#ostra-subtitle {
+  color: #8b98a5;
+  font-size: 12px;
+  font-style: italic;
+  margin-bottom: 6px;
+}
+
 #status { font-weight: 600; }
+
+/* Centred above the hint line, where the eye already is when walking. */
+#gate-prompt {
+  bottom: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  color: #d7e2ee;
+}
 #status.error { color: #ff7b72; }
 
 #stats {

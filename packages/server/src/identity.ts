@@ -1,0 +1,66 @@
+import { randomBytes } from "node:crypto";
+import { getOstra, STARTING_OSTRA } from "@mmo/shared";
+import type { CharacterRecord, CharacterStore } from "./store/CharacterStore.js";
+
+/**
+ * ⚠ THIS IS NOT AUTHENTICATION.
+ *
+ * A character is identified by a random 128-bit id that the client keeps in
+ * localStorage and presents on join. Anyone who learns that id can play as that
+ * character — there is no password, no session, and no way to recover one.
+ *
+ * That is a deliberate trade for a prototype with nothing worth stealing, and
+ * it is confined to this file so it can be replaced without touching the rooms:
+ * when accounts land, the room stops trusting `options.characterId` and starts
+ * reading a verified identity instead. `@colyseus/auth` ships with Colyseus and
+ * is the intended home for that. Do not ship a real product on this.
+ */
+
+/** Distinct, readable cube colours, handed out in turn as characters are made. */
+const PALETTE = [
+  0xe8563f, 0x3fa9e8, 0x5ec25e, 0xe8c23f, 0xa969e8,
+  0x3fd6c4, 0xe86fb0, 0xf08f3c, 0x8ad04a, 0x6f7de8,
+] as const;
+
+const MAX_NAME_LENGTH = 16;
+
+export function sanitiseName(raw: unknown, fallback: string): string {
+  if (typeof raw !== "string") return fallback;
+  // Strip control characters — they would render as boxes in the roster and
+  // could smuggle newlines into logs.
+  const cleaned = raw.replace(/\p{C}/gu, "").trim().slice(0, MAX_NAME_LENGTH);
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+
+export function isCharacterId(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
+}
+
+/** Mint a character and persist it. The caller hands the id to the client,
+ *  which presents it on every subsequent join. */
+export function createCharacter(
+  store: CharacterStore,
+  realmId: string,
+  requestedName: unknown,
+): CharacterRecord {
+  const index = store.count(realmId);
+  const spawn = getOstra(STARTING_OSTRA).spawn;
+  const now = Date.now();
+
+  const character: CharacterRecord = {
+    id: randomBytes(16).toString("hex"),
+    realmId,
+    name: sanitiseName(requestedName, `Traveller ${index + 1}`),
+    colour: PALETTE[index % PALETTE.length]!,
+    ostraId: STARTING_OSTRA,
+    x: spawn.x,
+    y: 0,
+    z: spawn.z,
+    yaw: 0,
+    createdAt: now,
+    lastSeenAt: now,
+  };
+
+  store.create(character);
+  return character;
+}

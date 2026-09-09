@@ -1,9 +1,17 @@
-import type { Player, WorldState } from "@mmo/shared";
+import type { OstraDefinition, Player, WorldState } from "@mmo/shared";
 
 export class Hud {
+  private ostraName = document.getElementById("ostra-name") as HTMLElement;
+  private ostraSubtitle = document.getElementById("ostra-subtitle") as HTMLElement;
   private status = document.getElementById("status") as HTMLElement;
   private stats = document.getElementById("stats") as HTMLElement;
   private roster = document.getElementById("roster") as HTMLElement;
+  private gatePrompt = document.getElementById("gate-prompt") as HTMLElement;
+
+  setOstra(ostra: OstraDefinition): void {
+    this.ostraName.textContent = ostra.name;
+    this.ostraSubtitle.textContent = ostra.subtitle;
+  }
 
   setStatus(text: string, isError = false): void {
     this.status.textContent = text;
@@ -15,6 +23,12 @@ export class Hud {
   setStats(ping: number, tickRate: number, pending: number): void {
     this.stats.textContent =
       `${Math.round(ping)} ms · ${tickRate} Hz · ${pending} pending`;
+  }
+
+  /** Named when you're near enough to see it, so a Gate is never a surprise. */
+  setGatePrompt(label: string | undefined): void {
+    this.gatePrompt.textContent = label ?? "";
+    this.gatePrompt.hidden = label === undefined;
   }
 
   setRoster(state: WorldState, selfSessionId: string): void {

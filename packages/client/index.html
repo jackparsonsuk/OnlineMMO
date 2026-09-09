@@ -3,21 +3,26 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OnlineMMO</title>
+    <title>Ostracon</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <canvas id="game"></canvas>
 
     <div id="hud">
-      <div id="status">connecting…</div>
+      <div id="ostra-name">&nbsp;</div>
+      <div id="ostra-subtitle"></div>
+      <div id="status">connecting&hellip;</div>
       <div id="stats"></div>
       <div id="roster"></div>
     </div>
 
+    <div id="gate-prompt" hidden></div>
+
     <div id="hint">
-      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;·&nbsp;
-      drag to orbit &nbsp;·&nbsp; scroll to zoom
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;&middot;&nbsp;
+      drag to orbit &nbsp;&middot;&nbsp; scroll to zoom &nbsp;&middot;&nbsp;
+      walk into a ring to travel
     </div>
 
     <script type="module" src="/src/main.ts"></script>

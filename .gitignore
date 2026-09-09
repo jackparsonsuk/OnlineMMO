@@ -5,3 +5,6 @@ dist-types/
 .env
 .env.local
 .DS_Store
+
+# SQLite realm data
+data/

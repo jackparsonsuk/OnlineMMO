@@ -1,4 +1,4 @@
-import { MOVE_SPEED, PLAYER_HALF, WORLD_HALF } from "./constants.js";
+import { MOVE_SPEED, PLAYER_HALF } from "./constants.js";
 
 /**
  * The single movement simulation, run in two places:
@@ -9,7 +9,8 @@ import { MOVE_SPEED, PLAYER_HALF, WORLD_HALF } from "./constants.js";
  *
  * It has to be deterministic and identical on both sides, which is the whole
  * reason it lives in `@mmo/shared` rather than being written twice. Keep it
- * pure: same state + same command + same dt must give the same result.
+ * pure: same state + same command + same dt + same bounds must give the same
+ * result.
  */
 
 /** Anything with a position and a heading — a `Player` schema, or the
@@ -28,14 +29,22 @@ export interface MoveCommand {
   yaw: number;
 }
 
-/** Cubes stop at the world edge with their side flush against it. */
-const LIMIT = WORLD_HALF - PLAYER_HALF;
-
 function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
 }
 
-export function applyInput(state: MoveState, command: MoveCommand, dt: number): void {
+/**
+ * @param halfExtent Half the width of the Ostra you are standing in. Ostras
+ *   differ in size, so this is a parameter rather than a constant — and the
+ *   client must pass the same value the server does, or its prediction will
+ *   disagree at the boundary.
+ */
+export function applyInput(
+  state: MoveState,
+  command: MoveCommand,
+  dt: number,
+  halfExtent: number,
+): void {
   // Facing is client-driven (it follows their camera) but still sanitised:
   // a NaN from a malformed packet would poison the position permanently.
   const yaw = Number.isFinite(command.yaw) ? command.yaw : state.yaw;
@@ -59,6 +68,8 @@ export function applyInput(state: MoveState, command: MoveCommand, dt: number): 
   const worldX = inputX * cos + inputZ * sin;
   const worldZ = inputZ * cos - inputX * sin;
 
-  state.x = clamp(state.x + worldX * MOVE_SPEED * dt, -LIMIT, LIMIT);
-  state.z = clamp(state.z + worldZ * MOVE_SPEED * dt, -LIMIT, LIMIT);
+  // Cubes stop at the world edge with their side flush against it.
+  const limit = halfExtent - PLAYER_HALF;
+  state.x = clamp(state.x + worldX * MOVE_SPEED * dt, -limit, limit);
+  state.z = clamp(state.z + worldZ * MOVE_SPEED * dt, -limit, limit);
 }

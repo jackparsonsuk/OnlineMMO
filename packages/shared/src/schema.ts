@@ -33,6 +33,9 @@ export const Player = schema({
 export type Player = SchemaType<typeof Player>;
 
 export const WorldState = schema({
+  /** Which Ostra this room is. One room per Ostra, so it never changes for
+   *  the lifetime of the room — the client reads it to pick the palette. */
+  ostraId: t.string().default(""),
   players: t.map(Player),
 }, "WorldState");
 export type WorldState = SchemaType<typeof WorldState>;
