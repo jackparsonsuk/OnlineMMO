@@ -92,3 +92,47 @@ kbd {
   font: inherit;
   font-size: 12px;
 }
+
+/* Names are HTML rather than 3D text, so they stay crisp at any zoom. The
+   layer never takes pointer events — the canvas underneath needs them all for
+   camera dragging. */
+#nametags {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.nametag {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 1px 7px 2px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--tag-colour) 55%, transparent);
+  background: rgb(13 17 23 / 68%);
+  color: #e6edf3;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: nowrap;
+  /* Keeps the label legible against a bright ground or a gate beam. */
+  text-shadow: 0 1px 2px rgb(0 0 0 / 85%);
+  will-change: transform;
+}
+
+/* A colour chip rather than a tinted label: tinting hurts legibility on the
+   darker palettes. */
+.nametag::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: baseline;
+  background: var(--tag-colour);
+}
+
+.nametag.self {
+  font-weight: 600;
+}

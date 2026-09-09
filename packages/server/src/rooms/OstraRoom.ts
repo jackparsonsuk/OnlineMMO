@@ -7,6 +7,9 @@ import {
   getOstra,
   isOstraId,
   MoveInput,
+  PLAYER_RADIUS,
+  staticColliders,
+  type Collider,
   type GateDefinition,
   type OstraDefinition,
   type OstraId,
@@ -81,7 +84,12 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     // The authoritative simulation. Nothing else in this room is allowed to
     // move a player: positions change here, from buffered input, or not at all.
     this.setFixedTimestep((ctx) => {
-      const halfExtent = this.ostra.size / 2;
+      // One snapshot for the whole tick, taken before anyone moves. Rebuilding
+      // it per player would mean players simulated later collide against
+      // already-moved positions, making the result depend on map iteration
+      // order — and the client, which has no such order, could never match it.
+      const colliders = this.collectColliders();
+      const world = { halfExtent: this.ostra.size / 2, colliders, selfId: "" };
 
       for (const [sessionId, player] of this.state.players) {
         const session = this.sessions.get(sessionId);
@@ -89,11 +97,13 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         // them further here would overwrite that with a stale position.
         if (!session || session.transferring) continue;
 
+        world.selfId = sessionId;
+
         // Consuming one at a time (rather than draining to an array) is what
         // keeps the server's ack aligned with the client's pending-input list,
         // so its rollback replays exactly the frames we haven't applied yet.
         for (const input of this.inputs.get(sessionId)) {
-          applyInput(player, input, ctx.dt, halfExtent);
+          applyInput(player, input, ctx.dt, world);
         }
 
         this.checkGates(sessionId, session, player);
@@ -178,6 +188,20 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     session.suppressedGate = gate.id;
     const client = this.clients.getById(sessionId);
     if (client) void this.beginTransfer(client, session, player, gate);
+  }
+
+  /** Scenery plus every player, as circles. */
+  private collectColliders(): Collider[] {
+    const colliders: Collider[] = [...staticColliders(this.ostra)];
+    for (const [sessionId, player] of this.state.players) {
+      colliders.push({
+        id: sessionId,
+        x: player.x,
+        z: player.z,
+        radius: PLAYER_RADIUS,
+      });
+    }
+    return colliders;
   }
 
   private gateContaining(x: number, z: number): GateDefinition | undefined {

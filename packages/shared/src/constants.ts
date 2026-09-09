@@ -21,6 +21,23 @@ export const PLAYER_SIZE = 1;
 export const PLAYER_HALF = PLAYER_SIZE / 2;
 
 /**
+ * Collision radius. Players are cubes but collide as circles: a circle needs no
+ * rotation in the maths, which keeps the shared simulation short enough to be
+ * obviously identical on both sides.
+ *
+ * Sits between the cube's half-width (0.5) and its half-diagonal (0.707). Take
+ * the half-width and two cubes meeting corner-first sink a third of their width
+ * into each other; take the half-diagonal and they stop a visible gap apart when
+ * meeting face-first. This leaves at most ~0.1 of overlap in the worst corner
+ * case, which reads as contact rather than as a bug.
+ */
+export const PLAYER_RADIUS = 0.65;
+
+/** How many push-out passes per step. Two settles most wedged-between-two
+ *  cases without the cost of a real solver. */
+export const COLLISION_ITERATIONS = 2;
+
+/**
  * How far in the past remote players are rendered. Covers one patch interval
  * plus jitter, so the interpolator always has two samples to work between.
  */

@@ -102,6 +102,7 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
   ground.material = grid;
 
   addWorldEdges(scene, root, ostra);
+  addObstacles(scene, root, ostra);
   for (const gate of ostra.gates) addGate(scene, root, gate.x, gate.z, gate.target);
 }
 
@@ -125,6 +126,30 @@ function addWorldEdges(scene: Scene, root: TransformNode, ostra: OstraDefinition
     wall.position.set(x, 0.25, z);
     wall.material = material;
     wall.parent = root;
+  }
+}
+
+/**
+ * Solid scenery. Rendered as cylinders because collision treats them as
+ * circles — a box would be a promise the simulation doesn't keep, and players
+ * would scrape along an invisible curve at its corners.
+ */
+function addObstacles(scene: Scene, root: TransformNode, ostra: OstraDefinition): void {
+  if (ostra.obstacles.length === 0) return;
+
+  const material = new StandardMaterial("obstacleMaterial", scene);
+  material.diffuseColor = Color3.FromHexString(ostra.palette.edge).scale(1.4);
+  material.specularColor = Color3.Black();
+
+  for (const obstacle of ostra.obstacles) {
+    const mesh = MeshBuilder.CreateCylinder(
+      "obstacle",
+      { diameter: obstacle.radius * 2, height: obstacle.height, tessellation: 20 },
+      scene,
+    );
+    mesh.position.set(obstacle.x, obstacle.height / 2, obstacle.z);
+    mesh.material = material;
+    mesh.parent = root;
   }
 }
 

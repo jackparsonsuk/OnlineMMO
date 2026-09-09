@@ -1,3 +1,5 @@
+import type { Collider } from "./movement.js";
+
 /**
  * The Ostras the game currently knows about, and the Gates between them.
  *
@@ -43,6 +45,16 @@ export interface OstraPalette {
   bounce: string;
 }
 
+/** A solid circular prop. Collided against by both sides, and identical on
+ *  both, so it predicts perfectly — unlike another player. */
+export interface ObstacleDefinition {
+  x: number;
+  z: number;
+  radius: number;
+  /** Purely visual; collision is a 2D circle. */
+  height: number;
+}
+
 export interface OstraDefinition {
   id: OstraId;
   /** "Terra Ostra" */
@@ -55,6 +67,7 @@ export interface OstraDefinition {
   spawn: { x: number; z: number };
   palette: OstraPalette;
   gates: GateDefinition[];
+  obstacles: ObstacleDefinition[];
 }
 
 /** Face the middle of the Ostra from a point on its edge. */
@@ -96,6 +109,14 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
         exitYaw: facingCentre(-20, 20),
       },
     ],
+    obstacles: [
+      { x: 6, z: -9, radius: 1.4, height: 3.2 },
+      { x: -8, z: -6, radius: 1.1, height: 2.4 },
+      { x: -3, z: 11, radius: 1.8, height: 4.0 },
+      { x: 13, z: 4, radius: 1.2, height: 2.8 },
+      { x: -14, z: -14, radius: 2.2, height: 5.0 },
+      { x: 24, z: -3, radius: 1.6, height: 3.6 },
+    ],
   },
 
   ascendant: {
@@ -121,6 +142,14 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
         z: -16,
         exitYaw: facingCentre(0, -16),
       },
+    ],
+    // Tall, thin columns — the gods' realm reads as architecture, not rubble.
+    obstacles: [
+      { x: 5, z: 5, radius: 0.9, height: 7.0 },
+      { x: -5, z: 5, radius: 0.9, height: 7.0 },
+      { x: 5, z: -5, radius: 0.9, height: 7.0 },
+      { x: -5, z: -5, radius: 0.9, height: 7.0 },
+      { x: 0, z: 12, radius: 2.4, height: 9.0 },
     ],
   },
 
@@ -148,6 +177,15 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
         exitYaw: facingCentre(0, -20),
       },
     ],
+    // Squat volcanic rock, scattered without pattern.
+    obstacles: [
+      { x: 8, z: 2, radius: 2.6, height: 2.2 },
+      { x: -7, z: -4, radius: 1.9, height: 1.6 },
+      { x: 2, z: -11, radius: 3.1, height: 2.8 },
+      { x: -13, z: 9, radius: 2.2, height: 2.0 },
+      { x: 15, z: -14, radius: 1.7, height: 1.4 },
+      { x: -2, z: 16, radius: 2.8, height: 3.4 },
+    ],
   },
 };
 
@@ -162,6 +200,27 @@ export function isOstraId(value: unknown): value is OstraId {
 
 export function getOstra(id: OstraId): OstraDefinition {
   return OSTRAS[id];
+}
+
+/**
+ * The scenery colliders for an Ostra, built once and reused. Both the server
+ * room and the client's prediction call this every step, and they must get
+ * identical values — deriving them from the same table is what guarantees it.
+ */
+const staticColliderCache = new Map<OstraId, readonly Collider[]>();
+
+export function staticColliders(ostra: OstraDefinition): readonly Collider[] {
+  let cached = staticColliderCache.get(ostra.id);
+  if (!cached) {
+    cached = ostra.obstacles.map((obstacle, index) => ({
+      id: `obstacle:${index}`,
+      x: obstacle.x,
+      z: obstacle.z,
+      radius: obstacle.radius,
+    }));
+    staticColliderCache.set(ostra.id, cached);
+  }
+  return cached;
 }
 
 export function findGate(ostra: OstraDefinition, gateId: string): GateDefinition | undefined {

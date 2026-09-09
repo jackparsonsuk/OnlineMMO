@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import cors from "cors";
 import express from "express";
-import { Server } from "@colyseus/core";
+import { matchMaker, Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { OSTRA_IDS, ROOM_NAME } from "@mmo/shared";
 import { setServerContext } from "./context.js";
@@ -30,6 +30,28 @@ app.use(express.json({ limit: "4kb" }));
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, realmId, ostras: OSTRA_IDS });
+});
+
+/**
+ * Live room census. Exists to answer one question quickly: does a room hold
+ * more players than it holds connections? A mismatch means state and clients
+ * have diverged; equal counts mean every player on screen is a real socket.
+ */
+app.get("/debug/rooms", async (_req, res) => {
+  const rooms = await matchMaker.query({});
+  res.json(rooms.map((room) => {
+    const local = matchMaker.getLocalRoomById(room.roomId);
+    return {
+      roomId: room.roomId,
+      ostraId: (room.metadata as { ostraId?: string } | undefined)?.ostraId
+        ?? (local?.state as { ostraId?: string } | undefined)?.ostraId,
+      clients: local ? local.clients.length : room.clients,
+      players: (local?.state as { players?: { size: number } } | undefined)?.players?.size,
+      names: local
+        ? [...((local.state as { players: Map<string, { name: string }> }).players).values()].map((p) => p.name)
+        : undefined,
+    };
+  }));
 });
 
 /**

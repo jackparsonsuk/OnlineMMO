@@ -69,6 +69,34 @@ Steps 3 and 4 are the SDK's `Predict` / `Reconciler`; step 2 is the room's
 `defineInput` buffer. The tick rate is advertised by the server through the join
 handshake, so both sides predict on exactly the same `dt`.
 
+## Collision
+
+Circle-vs-circle push-out, resolved inside `applyInput` so client and server run
+the identical code. Two kinds of collider go in:
+
+- **Scenery** comes from each Ostra's `obstacles` table. Identical on both sides,
+  so it predicts perfectly — you never see a correction walking into a rock.
+- **Other players** are approximate on the client by construction. The server
+  knows exactly where everyone is; the client only knows where it last *drew*
+  them, ~120 ms in the past. The reconciler exists to absorb precisely that
+  disagreement, so a contested shove settles rather than fighting.
+
+Displacements from every contact are summed and applied together rather than one
+collider at a time. Sequential resolution depends on the order colliders arrive
+in, and the two sides build that list from different sources — order-independence
+is what keeps them agreeing.
+
+The server snapshots collider positions once per tick, before anyone moves.
+Rebuilding per player would make the result depend on map iteration order, which
+the client has no way to reproduce.
+
+## Nametags
+
+HTML, not 3D. Each label is a `<div>` positioned by projecting the player's world
+position into CSS pixels every frame. Babylon's GUI package would render text into
+a texture — another dependency, and soft text up close. As with most MMOs the
+labels are not occluded by geometry: you can read a name through a rock.
+
 ## Ostras and Gates
 
 Each Ostra is one Colyseus room. There is a single `OstraRoom` class, and
@@ -114,8 +142,16 @@ Ordered roughly by how much they would hurt in production.
   characters in a loop and fill the database.
 - **SQLite means one process per realm.** The `CharacterStore` interface exists
   so Postgres can replace it; nothing else needs to change.
-- **No collision.** Players walk through each other and through Gate rings; the
-  only limit is the Ostra boundary that `applyInput` clamps to.
+- **A player entry twice appeared with no client attached**, both times during
+  development after the server process was killed under live browser tabs. Two
+  targeted reproductions (join/leave, and a Gate transfer watched from a second
+  client) both came back clean, and the room census has matched ever since, so
+  the cause is unconfirmed — most likely the client SDK's automatic reconnection
+  racing a restarting server. `GET /debug/rooms` reports clients and players per
+  room specifically to catch it: if those two numbers ever disagree, that is the
+  bug.
+- **Gate rings are not solid**, deliberately — you walk into one to use it.
+  Scenery and other players are solid.
 - **The duplicate-character guard is per-room.** One character can't be in the
   same Ostra twice, but two clients racing could briefly hold it in two
   different Ostras.
@@ -125,10 +161,24 @@ Ordered roughly by how much they would hurt in production.
 
 ## Debugging
 
-In dev, `window.mmo` exposes `{ character, world, keyboard, room, session, frame }`.
+`GET /debug/rooms` lists every live room with its client count, player count and
+names — the fastest way to tell a rendering problem from a state problem.
+
+In dev, `window.mmo` exposes `{ character, world, keyboard, room, session, frame }`,
+and `session.debug` carries `{ predict, meshes, colliders }`. Reading a pose two
+ways — what prediction holds versus what is drawn — is how the yaw seam bug below
+was pinned down.
 `frame(now)` runs a single render/network frame on a clock you supply — useful
 because `requestAnimationFrame` stops in a background tab, which otherwise makes
 the client look frozen when you are testing two windows at once.
+
+One subtlety worth keeping: **your own facing is never reconciled.** The server
+only echoes back the yaw you sent it, so there is nothing to correct — and
+correcting it anyway is a bug. The reconciler smooths numeric fields linearly with
+no notion of angles, so a turn across the 0/2π seam gets interpolated the long way
+round, whipping the cube through a half-turn to face the camera and back. The local
+mesh reads `cameraYaw()` directly instead, which also removes a frame of turn
+latency. Remote players are fine: their yaw is smoothed with `angle: true`.
 
 Note that Babylon's ES-module build tree-shakes shader source out of the bundle
 and fetches it at runtime; under Vite that request hits the SPA fallback and
