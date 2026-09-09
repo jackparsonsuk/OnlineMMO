@@ -1,14 +1,22 @@
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import type { Data } from "@colyseus/schema";
-import { getStateCallbacks, Predict, type Reconciler, type Room } from "@colyseus/sdk";
+import {
+  getStateCallbacks,
+  type InputHandle,
+  Predict,
+  type Reconciler,
+  type Room,
+} from "@colyseus/sdk";
 import {
   applyInput,
-  ATTACK_COOLDOWN_MS,
   type Enemy,
   EnemyState,
   getArchetype,
   INTERP_DELAY_MS,
   isEnemyKind,
+  SPELL_IDS,
+  SPELLS,
+  type SpellId,
   SWING_VISUAL_MS,
   MoveInput,
   type Collider,
@@ -24,7 +32,7 @@ import {
 import type { Hud } from "./hud.js";
 import type { KeyboardInput } from "./input.js";
 import { Nametags, type NametagTarget, type NametagVariant } from "./nametags.js";
-import { createEnemyMesh, createPlayerMesh, createSwingArc, type World } from "./scene.js";
+import { createCastArc, createEnemyMesh, createPlayerMesh, type World } from "./scene.js";
 
 /**
  * Everything tied to being inside one Ostra's room: prediction, the input
@@ -42,6 +50,9 @@ export interface OstraSession {
     predict: Predict<WorldState>;
     meshes: ReadonlyMap<string, TransformNode>;
     colliders: readonly Collider[];
+    /** The live input handle — `sentCount` is the fastest way to tell
+     *  "the server ignored me" from "nothing was ever sent". */
+    input: InputHandle<Data<MoveInput>>;
   };
 }
 
@@ -93,12 +104,26 @@ export function createSession(
   /** performance.now() when each creature was last struck, for the flash. */
   const enemyHitAt = new Map<string, number>();
 
-  const swingArc = createSwingArc(world.scene);
-  let swingShownAt = -Infinity;
-  // The client mirrors the server's cooldown so the swing draws on the
-  // frame you press, not a round trip later. Both read the same constant,
-  // so the two agree; the server is still the only thing that deals damage.
-  let nextSwingAt = 0;
+  /** One arc per spell, built once and shown when that spell is cast. Each
+   *  is drawn to its own range and width, so the ring and the bolt are
+   *  visibly different reach rather than the same wedge recoloured. */
+  const castArcs = new Map<SpellId, TransformNode>();
+  const ARC_COLOURS: Record<SpellId, number> = {
+    strike: 0xbfe4ff,
+    voidbolt: 0xa987ff,
+    sunder: 0xffb066,
+  };
+  for (const id of SPELL_IDS) {
+    castArcs.set(id, createCastArc(world.scene, SPELLS[id], ARC_COLOURS[id]));
+  }
+
+  let castShownAt = -Infinity;
+  let castShownId: SpellId | undefined;
+  // The client mirrors each spell's cooldown so the effect draws on the
+  // frame you press, not a round trip later. Both sides read the same
+  // table; the server is still the only thing that deals damage or spends
+  // mana, so a client that lies to itself only lies about a picture.
+  const nextCastAt = new Map<SpellId, number>();
   let wasDead = false;
   const nametags = new Nametags(document.getElementById("nametags") as HTMLElement);
   let selfPlayer: Player | undefined;
@@ -216,7 +241,15 @@ export function createSession(
   function pumpInput(now: number): void {
     // Cap the catch-up after a tab-switch or a long stall: replaying a
     // multi-second backlog of inputs at once would teleport the player.
-    accumulator = Math.min(accumulator + (now - lastFrame), stepMs * 5);
+    //
+    // The lower clamp matters because `frame(now)` is a documented entry point
+    // for driving on your own clock. A caller whose clock runs ahead of real
+    // time hands us a NEGATIVE delta on the next call, and without the clamp
+    // the accumulator goes deeply negative and silently stops sending input
+    // for as long as it takes to climb back — the game looks connected and
+    // simply ignores you. performance.now() is monotonic so the real client
+    // never does this, but nothing here should depend on that.
+    accumulator = Math.min(Math.max(0, accumulator + (now - lastFrame)), stepMs * 5);
     lastFrame = now;
 
     while (accumulator >= stepMs) {
@@ -225,7 +258,7 @@ export function createSession(
       input.data.moveX = axes.x;
       input.data.moveZ = axes.z;
       input.data.yaw = cameraYaw();
-      input.data.attack = keyboard.attacking();
+      input.data.cast = keyboard.castSlot();
       // The reconciler is subscribed to this handle, so sending is also what
       // advances the local prediction — there's no second call to make.
       input.send();
@@ -343,18 +376,31 @@ export function createSession(
         hud.setDead(!alive, alive ? "" : "Returning to the Ostra's heart\u2026");
       }
 
-      if (alive && keyboard.attacking() && now >= nextSwingAt) {
-        nextSwingAt = now + ATTACK_COOLDOWN_MS;
-        swingShownAt = now;
+      const slot = keyboard.castSlot();
+      const wanted = slot > 0 ? SPELL_IDS[slot - 1] : undefined;
+      if (alive && wanted) {
+        const spell = SPELLS[wanted];
+        // Mana is checked here too, so a cast you cannot afford doesn't draw an
+        // effect the server is about to ignore.
+        if (now >= (nextCastAt.get(wanted) ?? 0) && selfPlayer.mana >= spell.manaCost) {
+          nextCastAt.set(wanted, now + spell.cooldownMs);
+          castShownAt = now;
+          castShownId = wanted;
+        }
       }
 
-      // Sits just off the ground so it doesn't fight the grid for depth.
-      const showing = now - swingShownAt < SWING_VISUAL_MS;
-      swingArc.setEnabled(showing);
-      if (showing) {
-        swingArc.position.set(x, y + 0.08, z);
-        swingArc.rotation.y = cameraYaw();
+      const showing = castShownId !== undefined && now - castShownAt < SWING_VISUAL_MS;
+      for (const [id, arc] of castArcs) {
+        const visible = showing && id === castShownId;
+        arc.setEnabled(visible);
+        if (!visible) continue;
+        // Sits just off the ground so it doesn't fight the grid for depth.
+        arc.position.set(x, y + 0.08, z);
+        arc.rotation.y = cameraYaw();
       }
+
+      hud.setMana(selfPlayer.mana);
+      hud.setCooldowns(now, nextCastAt);
       // Follow the *rendered* position, not the raw schema one, or the camera
       // judders by exactly the correction the reconciler is smoothing out.
       world.camera.target.set(x, y + PLAYER_HALF, z);
@@ -384,11 +430,12 @@ export function createSession(
     enemyVariants.clear();
     enemyHealth.clear();
     enemyHitAt.clear();
-    swingArc.dispose(false, true);
+    for (const arc of castArcs.values()) arc.dispose(false, true);
+    castArcs.clear();
     hud.setDead(false);
     nametags.clear();
     hud.setGatePrompt(undefined);
   }
 
-  return { frame, dispose, debug: { predict, meshes, colliders } };
+  return { frame, dispose, debug: { predict, meshes, colliders, input } };
 }

@@ -1,5 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { getOstra, PLAYER_MAX_HEALTH, STARTING_OSTRA } from "@mmo/shared";
+import {
+  getOstra,
+  MAX_AFFINITY,
+  MIN_AFFINITY,
+  PLAYER_MAX_HEALTH,
+  STARTING_OSTRA,
+} from "@mmo/shared";
 import type { CharacterRecord, CharacterStore } from "./store/CharacterStore.js";
 
 /**
@@ -58,6 +64,11 @@ export function createCharacter(
     z: spawn.z,
     yaw: 0,
     health: PLAYER_MAX_HEALTH,
+    // Rolled once, kept forever. "Everyone has some amount of innate magical
+    // ability" — so nobody rolls zero, but not everyone can reach the same
+    // ceiling.
+    affinity: MIN_AFFINITY + Math.floor(Math.random() * (MAX_AFFINITY - MIN_AFFINITY + 1)),
+    spells: {},
     createdAt: now,
     lastSeenAt: now,
   };

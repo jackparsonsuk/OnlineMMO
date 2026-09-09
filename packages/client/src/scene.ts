@@ -19,12 +19,19 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js";
 import { GridMaterial } from "@babylonjs/materials/grid/gridMaterial.js";
 import { Scene } from "@babylonjs/core/scene.js";
-import { GATE_RADIUS, getOstra, PLAYER_SIZE, type EnemyKind, type OstraDefinition } from "@mmo/shared";
+import {
+  GATE_RADIUS,
+  getOstra,
+  PLAYER_SIZE,
+  type EnemyKind,
+  type OstraDefinition,
+  type Spell,
+} from "@mmo/shared";
 import {
   buildEnemy,
   buildObstacle,
+  buildCastArc,
   buildPlayer,
-  buildSwingArc,
   facet,
   flatMaterial,
 } from "./lowpoly.js";
@@ -223,6 +230,6 @@ export function createEnemyMesh(scene: Scene, kind: EnemyKind): TransformNode {
   return buildEnemy(scene, kind);
 }
 
-export function createSwingArc(scene: Scene): TransformNode {
-  return buildSwingArc(scene);
+export function createCastArc(scene: Scene, spell: Spell, colour: number): TransformNode {
+  return buildCastArc(scene, spell, colour);
 }

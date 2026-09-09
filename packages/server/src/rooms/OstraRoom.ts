@@ -1,23 +1,26 @@
 import { matchMaker, Room, ServerError, type Client, type Rewind } from "@colyseus/core";
 import {
   applyInput,
-  ATTACK_COOLDOWN_MS,
-  ATTACK_DAMAGE,
   Enemy,
   ENEMY_RESPAWN_MS,
   EnemyState,
   findGate,
   getArchetype,
-  isInSwing,
+  grownProficiency,
+  isInArc,
   GATE_ARRIVAL_OFFSET,
   GATE_RADIUS,
   getOstra,
   isEnemyKind,
   isOstraId,
   MoveInput,
+  MANA_REGEN_PER_SECOND,
   PLAYER_MAX_HEALTH,
+  PLAYER_MAX_MANA,
   PLAYER_RADIUS,
   PLAYER_RESPAWN_MS,
+  spellDamage,
+  spellFromWire,
   staticColliders,
   type Collider,
   type EnemyArchetype,
@@ -28,6 +31,9 @@ import {
   Player,
   ROOM_NAME,
   TICK_RATE,
+  type Spell,
+  type SpellId,
+  type SpellProficiency,
   WorldState,
 } from "@mmo/shared";
 import { createBrain, stepEnemy, type AITarget, type EnemyBrain } from "../ai/enemyAI.js";
@@ -56,8 +62,15 @@ interface Session {
   suppressedGate: string | undefined;
   /** Set once a transfer is under way; their input stops being simulated. */
   transferring: boolean;
-  /** Wall-clock ms when this player may swing again. */
-  nextAttackAt: number;
+  /** Wall-clock ms when each spell may be cast again. */
+  nextCastAt: Partial<Record<SpellId, number>>;
+  /** Innate ceiling, from the character record. */
+  affinity: number;
+  /** Live proficiency; written back to the store on save. */
+  spells: SpellProficiency;
+  /** Fractional mana carried between ticks, so a 30Hz regen of 5/s is not
+   *  rounded away to nothing every step. */
+  manaCarry: number;
   /** Wall-clock ms when a fallen player wakes at the spawn point. */
   respawnAt: number;
 }
@@ -121,6 +134,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     // The authoritative simulation. Nothing else in this room is allowed to
     // move a player or a creature: positions change here, from buffered input
     // or from the AI, or not at all.
+    this.onMessage("requestProfile", (client) => this.onRequestProfile(client));
+
     this.setFixedTimestep((ctx) => {
       // One snapshot for the whole tick, taken before anyone moves. Rebuilding
       // it per player would mean players simulated later collide against
@@ -149,12 +164,13 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         // so its rollback replays exactly the frames we haven't applied yet.
         for (const input of this.inputs.get(sessionId)) {
           applyInput(player, input, ctx.dt, world);
-          if (input.attack) this.tryPlayerAttack(sessionId, session, player);
+          if (input.cast) this.tryCast(sessionId, session, player, input.cast);
         }
 
         this.checkGates(sessionId, session, player);
       }
 
+      this.regenerateMana(ctx.dt);
       this.stepEnemies(ctx.dt, world);
       this.processRespawns();
     }, TICK_RATE);
@@ -203,9 +219,26 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       // Covers arriving through a Gate and logging in on top of one alike.
       suppressedGate: this.gateContaining(character.x, character.z)?.id,
       transferring: false,
-      nextAttackAt: 0,
+      nextCastAt: {},
+      affinity: character.affinity,
+      spells: { ...character.spells },
+      manaCarry: 0,
       respawnAt: 0,
     });
+  }
+
+  /**
+   * The client asks for this rather than being pushed it on join.
+   *
+   * A message sent from onJoin races the client registering its handlers; the
+   * character id had the same problem and went over HTTP for it. Letting the
+   * client ask once it is ready removes the race for the price of one round
+   * trip nobody is waiting on.
+   */
+  private onRequestProfile(client: Client): void {
+    const session = this.sessions.get(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    if (session && player) this.sendProfile(client.sessionId, session, player);
   }
 
   onLeave(client: Client): void {
@@ -222,6 +255,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         z: player.z,
         yaw: player.yaw,
         health: player.health,
+        spells: session.spells,
       });
     }
 
@@ -293,7 +327,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
           y: 0,
           z,
           yaw: Math.random() * Math.PI * 2,
-          health: archetype.maxHealth,
+          health: this.scaledHealth(archetype.maxHealth),
           state: EnemyState.Idle,
         }));
         this.brains.set(id, createBrain(x, z));
@@ -332,28 +366,66 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         this.aiTargets,
         now,
       );
-      if (struck) this.damagePlayer(struck, this.archetypeFor(enemy.kind).attackDamage);
+      if (struck) {
+        // The same creature hits harder in a harder place.
+        this.damagePlayer(
+          struck,
+          Math.max(1, Math.round(
+            this.archetypeFor(enemy.kind).attackDamage * this.ostra.difficulty.damage,
+          )),
+        );
+      }
     }
   }
 
   /**
-   * Resolve one swing.
+   * Resolve one cast.
    *
-   * Hits the nearest living creature inside the arc — one target, not a cleave.
-   * With five things on you that makes the numbers matter, where a cleave would
-   * make a crowd easier than a single creature.
+   * Every spell runs through the same shape test — a ring is just an arc of
+   * 2*PI — so adding a spell is a table entry rather than a new code path.
    */
-  private tryPlayerAttack(sessionId: string, session: Session, player: Player): void {
+  private tryCast(sessionId: string, session: Session, player: Player, wire: number): void {
+    const spell = spellFromWire(wire);
+    if (!spell) return;
+
     const now = Date.now();
-    if (now < session.nextAttackAt) return;
-    session.nextAttackAt = now + ATTACK_COOLDOWN_MS;
+    if (now < (session.nextCastAt[spell.id] ?? 0)) return;
+    if (player.mana < spell.manaCost) return;
 
-    // Where this player saw the world when they swung, not where it is now.
+    session.nextCastAt[spell.id] = now + spell.cooldownMs;
+    player.mana -= spell.manaCost;
+
+    const hits = this.resolveSpell(sessionId, player, spell, session);
+
+    // Tell the caster either way: the client draws the effect on its own, and
+    // silence on a miss is indistinguishable from a dropped packet.
+    this.clients.getById(sessionId)?.send("cast", { spell: spell.id, hits: hits.length });
+
+    if (hits.length === 0) return;
+
+    // Proficiency only grows on a LANDED cast. "The more you use magic the
+    // better you become" would otherwise mean facing a wall and holding a key,
+    // which is training in the least interesting sense.
+    const before = session.spells[spell.id] ?? 0;
+    const after = grownProficiency(before, session.affinity);
+    if (after !== before) {
+      session.spells[spell.id] = after;
+      this.sendProfile(sessionId, session, player);
+    }
+  }
+
+  /** Apply a spell to whatever it catches, and return what it hit. */
+  private resolveSpell(
+    sessionId: string,
+    player: Player,
+    spell: Spell,
+    session: Session,
+  ): string[] {
+    // Where this player saw the world when they cast, not where it is now.
     const seen = this.rewind.lastSeenBy(sessionId);
+    const damage = spellDamage(spell, session.spells[spell.id] ?? 0);
 
-    let target: Enemy | undefined;
-    let targetId = "";
-    let nearest = Infinity;
+    const caught: Array<{ id: string; enemy: Enemy; range: number }> = [];
 
     for (const [enemyId, enemy] of this.state.enemies) {
       if (enemy.state === EnemyState.Dead) continue;
@@ -361,32 +433,72 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
       const x = seen.value(enemy, "x");
       const z = seen.value(enemy, "z");
-      if (!isInSwing(player.x, player.z, player.yaw, x, z, archetype.radius)) continue;
+      const inside = isInArc(
+        player.x, player.z, player.yaw,
+        x, z, archetype.radius,
+        spell.range, spell.arc,
+      );
+      if (!inside) continue;
 
-      const range = Math.hypot(x - player.x, z - player.z);
-      if (range < nearest) {
-        nearest = range;
-        target = enemy;
-        targetId = enemyId;
+      caught.push({ id: enemyId, enemy, range: Math.hypot(x - player.x, z - player.z) });
+    }
+
+    if (caught.length === 0) return [];
+
+    const struck = spell.targeting === "all"
+      ? caught
+      : [caught.reduce((closest, next) => (next.range < closest.range ? next : closest))];
+
+    for (const { id, enemy } of struck) {
+      enemy.health = Math.max(0, enemy.health - damage);
+      this.broadcast("damage", { id, amount: damage, by: sessionId });
+
+      if (enemy.health === 0) {
+        enemy.state = EnemyState.Dead;
+        const brain = this.brains.get(id);
+        if (brain) {
+          brain.quarry = undefined;
+          brain.returning = false;
+          brain.respawnAt = Date.now() + ENEMY_RESPAWN_MS;
+        }
       }
     }
 
-    // Tell the attacker either way: the client draws the swing on its own, and
-    // silence on a miss is indistinguishable from a dropped packet.
-    this.clients.getById(sessionId)?.send("swing", { hit: targetId || undefined });
-    if (!target) return;
+    return struck.map((entry) => entry.id);
+  }
 
-    target.health = Math.max(0, target.health - ATTACK_DAMAGE);
-    this.broadcast("damage", { id: targetId, amount: ATTACK_DAMAGE, by: sessionId });
+  /**
+   * Send a player their own affinity and proficiency.
+   *
+   * Private to the caster, so it goes by message rather than into replicated
+   * state — nobody else needs to know how practised you are, and it changes
+   * rarely enough that a message is cheaper than a synced field.
+   */
+  private sendProfile(sessionId: string, session: Session, player: Player): void {
+    this.clients.getById(sessionId)?.send("profile", {
+      affinity: session.affinity,
+      spells: session.spells,
+      maxMana: PLAYER_MAX_MANA,
+      manaNow: player.mana,
+    });
+  }
 
-    if (target.health === 0) {
-      target.state = EnemyState.Dead;
-      const brain = this.brains.get(targetId);
-      if (brain) {
-        brain.quarry = undefined;
-        brain.returning = false;
-        brain.respawnAt = now + ENEMY_RESPAWN_MS;
+  /** Mana ticks back up whether or not you are fighting. */
+  private regenerateMana(dt: number): void {
+    for (const [sessionId, session] of this.sessions) {
+      const player = this.state.players.get(sessionId);
+      if (!player || player.health === 0 || player.mana >= PLAYER_MAX_MANA) {
+        if (player && player.health === 0) session.manaCarry = 0;
+        continue;
       }
+
+      // Accumulate the fraction: at 5/s and 30Hz each step is 0.167 mana, and
+      // rounding that per-tick would regenerate exactly nothing.
+      session.manaCarry += MANA_REGEN_PER_SECOND * dt;
+      const whole = Math.floor(session.manaCarry);
+      if (whole <= 0) continue;
+      session.manaCarry -= whole;
+      player.mana = Math.min(PLAYER_MAX_MANA, player.mana + whole);
     }
   }
 
@@ -417,7 +529,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       // reassembles instead of drifting wherever players dragged it.
       enemy.x = brain.homeX;
       enemy.z = brain.homeZ;
-      enemy.health = this.archetypeFor(enemy.kind).maxHealth;
+      enemy.health = this.scaledHealth(this.archetypeFor(enemy.kind).maxHealth);
       enemy.state = EnemyState.Idle;
       brain.timer = 0;
       brain.returning = false;
@@ -431,6 +543,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       player.x = spawn.x;
       player.z = spawn.z;
       player.health = PLAYER_MAX_HEALTH;
+      player.mana = PLAYER_MAX_MANA;
+      session.manaCarry = 0;
       // Whatever they were standing in when they died must not fire on arrival.
       session.suppressedGate = this.gateContaining(spawn.x, spawn.z)?.id;
       // Anything still locked onto them lets go. Without this a creature that
@@ -440,6 +554,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       }
       this.clients.getById(sessionId)?.send("respawned", { x: spawn.x, z: spawn.z });
     }
+  }
+
+  private scaledHealth(base: number): number {
+    return Math.max(1, Math.round(base * this.ostra.difficulty.health));
   }
 
   /** Falls back rather than throwing: a stored kind this build no longer knows
@@ -490,6 +608,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         z,
         yaw: arrivalGate.exitYaw,
         health: player.health,
+        spells: session.spells,
       });
 
       const reservation = await matchMaker.joinOrCreate(ROOM_NAME, {

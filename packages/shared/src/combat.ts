@@ -5,22 +5,12 @@
  */
 
 export const PLAYER_MAX_HEALTH = 100;
+export const PLAYER_MAX_MANA = 100;
 
-/** Reach measured from the attacker's centre to the target's *surface*, so a
- *  wide creature is easier to hit than a narrow one — as it should be. */
-export const ATTACK_RANGE = 2.4;
+/** Mana per second, regenerated server-side whether or not you are fighting. */
+export const MANA_REGEN_PER_SECOND = 5;
 
-/**
- * Total width of the swing, centred on where you are facing. Generous by
- * design: a narrow cone punishes camera micro-movement rather than aim, and
- * this is a third-person game where the camera is also your aim.
- */
-export const ATTACK_ARC = Math.PI * 0.62;
-
-export const ATTACK_COOLDOWN_MS = 600;
-export const ATTACK_DAMAGE = 18;
-
-/** How long the swing effect is drawn for. Purely cosmetic. */
+/** How long a cast's effect is drawn for. Purely cosmetic. */
 export const SWING_VISUAL_MS = 180;
 
 /** A felled creature lies there this long before it comes back at its spawn. */
@@ -30,30 +20,34 @@ export const ENEMY_RESPAWN_MS = 12_000;
 export const PLAYER_RESPAWN_MS = 4_000;
 
 /**
- * Is `target` inside the swing?
+ * Is `target` inside a wedge of reach `range` and width `arc`, centred on `yaw`?
  *
- * Shared rather than written twice because the client draws the arc and the
+ * Shared rather than written twice because the client draws the shape and the
  * server judges it — if those two ever disagreed, the game would look like it
- * was cheating you.
+ * was cheating you. Every spell resolves through this one function, so a ring
+ * (`arc` of 2*PI) and a narrow bolt differ only by their numbers.
  *
- * @param yaw Where the attacker is facing.
+ * @param yaw Where the caster is facing. Ignored when `arc` covers a full turn.
  * @param targetRadius Reach extends to the target's surface, not its centre.
  */
-export function isInSwing(
-  attackerX: number,
-  attackerZ: number,
+export function isInArc(
+  originX: number,
+  originZ: number,
   yaw: number,
   targetX: number,
   targetZ: number,
   targetRadius: number,
+  range: number,
+  arc: number,
 ): boolean {
-  const toX = targetX - attackerX;
-  const toZ = targetZ - attackerZ;
+  const toX = targetX - originX;
+  const toZ = targetZ - originZ;
   const distance = Math.hypot(toX, toZ);
-  if (distance > ATTACK_RANGE + targetRadius) return false;
+  if (distance > range + targetRadius) return false;
 
-  // Standing inside someone is always a hit; there is no meaningful direction
-  // to test, and failing here would make point-blank swings whiff.
+  // A full ring has no direction to test, and neither does standing exactly
+  // inside something — failing either would make point-blank casts whiff.
+  if (arc >= Math.PI * 2) return true;
   if (distance < 1e-4) return true;
 
   // Babylon's left-handed frame again: facing yaw means (sin yaw, cos yaw).
@@ -62,5 +56,5 @@ export function isInSwing(
   const cosAngle = (toX * facingX + toZ * facingZ) / distance;
   // Clamp before acos — floating point can hand it 1.0000000002 and get NaN.
   const angle = Math.acos(Math.min(1, Math.max(-1, cosAngle)));
-  return angle <= ATTACK_ARC / 2;
+  return angle <= arc / 2;
 }

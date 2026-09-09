@@ -1,4 +1,4 @@
-import type { OstraId } from "@mmo/shared";
+import type { OstraId, SpellProficiency } from "@mmo/shared";
 
 /**
  * A character as it survives between sessions. Position and Ostra live here
@@ -24,13 +24,24 @@ export interface CharacterRecord {
   yaw: number;
   /** Persisted so logging out at 3 HP and back in is not a full heal. */
   health: number;
+  /**
+   * Innate magical ceiling, rolled once at creation and never changed. No
+   * proficiency may exceed it — the lore's "up to a set ceiling", and the
+   * reason two characters who both trained to their limit are not equal.
+   */
+  affinity: number;
+  /** Per-spell proficiency, keyed by SpellId. Absent means untrained. */
+  spells: SpellProficiency;
   createdAt: number;
   lastSeenAt: number;
 }
 
 /** Where a character is, and in which Ostra — the part that changes constantly. */
 export type CharacterPosition =
-  Pick<CharacterRecord, "ostraId" | "x" | "y" | "z" | "yaw" | "health">;
+  Pick<CharacterRecord, "ostraId" | "x" | "y" | "z" | "yaw" | "health"> & {
+    /** Written on every save; proficiency changes as you play. */
+    spells: SpellProficiency;
+  };
 
 /**
  * Storage behind a narrow interface so the SQLite implementation can be

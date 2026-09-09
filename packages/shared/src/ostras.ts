@@ -56,6 +56,21 @@ export interface ObstacleDefinition {
   height: number;
 }
 
+/**
+ * How dangerous an Ostra is, as multipliers on its creatures.
+ *
+ * Travel should be a difficulty choice, not just a change of palette: Terra is
+ * where you learn, Barals is where the lore says you suffer. Applied on the
+ * server when a creature spawns and when it hits, so the same archetype is
+ * genuinely tougher in a harder place.
+ */
+export interface OstraDifficulty {
+  /** Scales creature damage against players. */
+  damage: number;
+  /** Scales creature maximum health. */
+  health: number;
+}
+
 /** How an Ostra's scenery is drawn. Collision is a circle either way — this
  *  only decides which low-poly form sits on top of it. */
 export type ObstacleStyle = "pillar" | "boulder";
@@ -74,6 +89,7 @@ export interface OstraDefinition {
   gates: GateDefinition[];
   obstacles: ObstacleDefinition[];
   obstacleStyle: ObstacleStyle;
+  difficulty: OstraDifficulty;
   /** Creatures placed when the room is created. */
   spawns: SpawnGroup[];
 }
@@ -126,9 +142,10 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       { x: 24, z: -3, radius: 1.6, height: 3.6 },
     ],
     obstacleStyle: "pillar",
-    // Kept away from spawn: a new traveller gets a moment before anything
-    // notices them.
-    // Spread wide on purpose. Packed tighter than a Risen's aggro radius,
+    // Gentle enough to learn the fight in. A Risen here takes the same four
+    // Strikes but hits for well under half.
+    difficulty: { damage: 0.6, health: 1 },
+    // Kept clear of spawn, and spread wide. Packed tighter than a Risen's aggro radius,
     // every approach pulls the whole camp at once and a new player never gets
     // a winnable first fight.
     spawns: [
@@ -170,6 +187,7 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       { x: 0, z: 12, radius: 2.4, height: 9.0 },
     ],
     obstacleStyle: "pillar",
+    difficulty: { damage: 1, health: 1.2 },
     // The gods' realm is guarded, not infested.
     spawns: [
       { kind: "spider", count: 2, x: 14, z: 10, radius: 4 },
@@ -213,6 +231,9 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       { x: -2, z: 16, radius: 2.8, height: 3.4 },
     ],
     obstacleStyle: "boulder",
+    // "A place of power and war." Going here before you are ready should be a
+    // mistake you feel.
+    difficulty: { damage: 1.6, health: 1.5 },
     // The realm of fire and pain earns its name.
     spawns: [
       { kind: "zombie", count: 6, x: -8, z: -2, radius: 9 },

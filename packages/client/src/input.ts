@@ -5,7 +5,7 @@
  * step* — not how many OS key-repeat events happened to fire in between.
  */
 
-type Action = "forward" | "back" | "left" | "right" | "attack";
+type Action = "forward" | "back" | "left" | "right" | "spell1" | "spell2" | "spell3";
 
 const BINDINGS: Record<string, Action> = {
   KeyW: "forward", ArrowUp: "forward",
@@ -13,8 +13,12 @@ const BINDINGS: Record<string, Action> = {
   KeyA: "left", ArrowLeft: "left",
   KeyD: "right", ArrowRight: "right",
   // Space rather than a mouse button: left-drag already orbits the camera,
-  // and a click-vs-drag distinction is a bad way to start a fight.
-  Space: "attack",
+  // and a click-vs-drag distinction is a bad way to start a fight. Space
+  // doubles as the Aequum 0 spell so the free option is always under a
+  // thumb, with 1/2/3 for the bar.
+  Space: "spell1", Digit1: "spell1",
+  Digit2: "spell2",
+  Digit3: "spell3",
 };
 
 export interface MoveAxes {
@@ -63,10 +67,19 @@ export class KeyboardInput {
     return { x: x as -1 | 0 | 1, z: z as -1 | 0 | 1 };
   }
 
-  /** Held, not edge-triggered. The server gates swings on a cooldown, so
-   *  holding the key auto-attacks and spamming it gains nothing. */
-  attacking(): boolean {
-    return this.held.has("attack");
+  /**
+   * Which spell slot is held, 1-based; 0 for none. Held rather than
+   * edge-triggered — the server gates each spell on its own cooldown and
+   * mana, so holding a key auto-repeats and spamming it gains nothing.
+   *
+   * A higher slot wins when several are held: reaching for Sunder while
+   * still leaning on Space should cast Sunder.
+   */
+  castSlot(): number {
+    if (this.held.has("spell3")) return 3;
+    if (this.held.has("spell2")) return 2;
+    if (this.held.has("spell1")) return 1;
+    return 0;
   }
 
   dispose(): void {

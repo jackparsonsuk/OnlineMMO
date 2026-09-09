@@ -28,8 +28,8 @@ the duplicate.
 | `npm run dev:server` / `npm run dev:client` | One side only |
 | `npm run typecheck` | Type-checks all three packages |
 
-Controls: **WASD** move, **Space** attack, drag to orbit, scroll to zoom, walk
-into a Gate ring to travel.
+Controls: **WASD** move, **Space / 1 / 2 / 3** cast, drag to orbit, scroll to
+zoom, walk into a Gate ring to travel.
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
@@ -181,6 +181,56 @@ forever. Layout is hand-authored data, and hand-authored data drifts: the check
 caught a *second* instance on its first run, one introduced minutes earlier by
 widening a camp.
 
+## Spells and getting better at them
+
+Three abilities, on **1 / 2 / 3** (Space also casts Strike, so the free option
+is always under a thumb):
+
+| | Aequum | Mana | Shape | Role |
+| --- | --- | --- | --- | --- |
+| **Strike** | 0 | free | 2.4 m wide cone | Best sustained damage, worst reach |
+| **Voidbolt** | 1 | 12 | 13 m narrow cone | Open before it closes |
+| **Sunder** | 2 | 32 | 4.6 m ring | The answer to being surrounded |
+
+Aequum is a **mana bracket, not a power ranking** — that's the lore's
+definition, and it's why Strike is Aequum 0 while still being the highest
+sustained damage in the kit. Every spell resolves through one `isInArc()` call;
+a ring is just an arc of 2π, so adding a spell is a table entry rather than a
+new code path.
+
+### Proficiency
+
+Progression is use-based, from the vault:
+
+> Everyone has some amount of innate magical ability within them. **Like a
+> muscle the more you use magic the better you become, up to a set ceiling.**
+
+So there is no XP bar. Each spell has its own proficiency that rises **only on
+a landed cast** — casting at a wall would otherwise be training in the least
+interesting sense — and growth slows as it approaches your ceiling, so the last
+points cost far more casts than the first.
+
+`affinity` is that ceiling, rolled once at creation between 55 and 100 and never
+changed. The damage bonus scales against 100 rather than against your own
+ceiling, deliberately: someone born with 55 who maxes out should be weaker than
+someone born with 100 who maxes out, or the ceiling is just a slower bar.
+
+Affinity and proficiency are private, so they travel as a message rather than in
+replicated state — and the client **asks** for them once its handlers are up
+rather than being pushed them from `onJoin`, which is the same race the
+character id fell into.
+
+### Difficulty by Ostra
+
+Creatures scale per Ostra, so travel is a difficulty choice rather than a change
+of palette:
+
+| Ostra | Creature damage | Creature health |
+| --- | --- | --- |
+| Terra | ×0.6 | ×1.0 |
+| Ascendant | ×1.0 | ×1.2 |
+| Barals | ×1.6 | ×1.5 |
+
 ## Ostras and Gates
 
 Each Ostra is one Colyseus room. There is a single `OstraRoom` class, and
@@ -226,9 +276,13 @@ Ordered roughly by how much they would hurt in production.
   characters in a loop and fill the database.
 - **SQLite means one process per realm.** The `CharacterStore` interface exists
   so Postgres can replace it; nothing else needs to change.
-- **Combat is one attack with no cost.** No mana, cooldown management, abilities,
-  targeting, threat, loot or experience — the magic system in the lore has an
-  Aequum ladder that nothing here touches yet.
+- **No loot, no items, no economy.** Killing something gives you practice and
+  nothing else. Inventory is the obvious next reward layer.
+- **No threat or targeting.** Creatures always chase whoever is nearest; you
+  cannot taunt, and there is no target selection — spells hit whatever is in the
+  shape.
+- **Spells are found nowhere.** The lore says spells come from scrolls and books
+  and that the Library Ostracon holds them all; here you simply start with three.
 - **No damage feedback beyond a flinch.** No numbers, no death animation; a
   killed creature just tips over.
 - **Player-vs-player is possible but untested.** Nothing stops a swing landing on

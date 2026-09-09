@@ -1,7 +1,13 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { isOstraId, PLAYER_MAX_HEALTH, STARTING_OSTRA } from "@mmo/shared";
+import {
+  isOstraId,
+  MIN_AFFINITY,
+  PLAYER_MAX_HEALTH,
+  STARTING_OSTRA,
+  type SpellProficiency,
+} from "@mmo/shared";
 import type { CharacterPosition, CharacterRecord, CharacterStore } from "./CharacterStore.js";
 
 /**
@@ -63,6 +69,20 @@ export class SqliteCharacterStore implements CharacterStore {
         `ALTER TABLE characters ADD COLUMN health INTEGER NOT NULL DEFAULT ${PLAYER_MAX_HEALTH}`,
       );
     }
+
+    if (!columns.has("affinity")) {
+      this.db.exec(
+        `ALTER TABLE characters ADD COLUMN affinity INTEGER NOT NULL DEFAULT ${MIN_AFFINITY}`,
+      );
+    }
+
+    if (!columns.has("spells")) {
+      // A JSON blob rather than a spell_proficiency table. It is small, always
+      // read and written whole, and never queried across characters — the
+      // three things that make a relational table worth its joins. Revisit if
+      // anything ever needs "who is best at Sunder".
+      this.db.exec("ALTER TABLE characters ADD COLUMN spells TEXT NOT NULL DEFAULT '{}'");
+    }
   }
 
   find(realmId: string, characterId: string): CharacterRecord | undefined {
@@ -75,8 +95,9 @@ export class SqliteCharacterStore implements CharacterStore {
   create(character: CharacterRecord): void {
     this.db.prepare(`
       INSERT INTO characters
-        (id, realm_id, name, colour, ostra_id, x, y, z, yaw, health, created_at, last_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, realm_id, name, colour, ostra_id, x, y, z, yaw, health, affinity, spells,
+         created_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       character.id,
       character.realmId,
@@ -88,6 +109,8 @@ export class SqliteCharacterStore implements CharacterStore {
       character.z,
       character.yaw,
       character.health,
+      character.affinity,
+      JSON.stringify(character.spells),
       character.createdAt,
       character.lastSeenAt,
     );
@@ -96,7 +119,8 @@ export class SqliteCharacterStore implements CharacterStore {
   savePosition(realmId: string, characterId: string, position: CharacterPosition): void {
     this.db.prepare(`
       UPDATE characters
-         SET ostra_id = ?, x = ?, y = ?, z = ?, yaw = ?, health = ?, last_seen_at = ?
+         SET ostra_id = ?, x = ?, y = ?, z = ?, yaw = ?, health = ?, spells = ?,
+             last_seen_at = ?
        WHERE realm_id = ? AND id = ?
     `).run(
       position.ostraId,
@@ -105,6 +129,7 @@ export class SqliteCharacterStore implements CharacterStore {
       position.z,
       position.yaw,
       position.health,
+      JSON.stringify(position.spells),
       Date.now(),
       realmId,
       characterId,
@@ -123,6 +148,23 @@ export class SqliteCharacterStore implements CharacterStore {
   }
 }
 
+/** Hand-editing the database, or a half-written row, should cost a character
+ *  their training — not their whole session. */
+function parseSpells(raw: unknown): SpellProficiency {
+  if (typeof raw !== "string" || raw.length === 0) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return {};
+    const result: Record<string, number> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === "number" && Number.isFinite(value)) result[key] = value;
+    }
+    return result as SpellProficiency;
+  } catch {
+    return {};
+  }
+}
+
 function toRecord(row: Record<string, unknown>): CharacterRecord {
   const ostraId = row["ostra_id"];
   return {
@@ -137,8 +179,10 @@ function toRecord(row: Record<string, unknown>): CharacterRecord {
     y: Number(row["y"]),
     z: Number(row["z"]),
     yaw: Number(row["yaw"]),
-    // A row written before the health column existed reads as null.
+    // A row written before these columns existed reads as null.
     health: Number(row["health"] ?? PLAYER_MAX_HEALTH),
+    affinity: Number(row["affinity"] ?? MIN_AFFINITY),
+    spells: parseSpells(row["spells"]),
     createdAt: Number(row["created_at"]),
     lastSeenAt: Number(row["last_seen_at"]),
   };

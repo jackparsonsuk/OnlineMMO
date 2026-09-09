@@ -4,7 +4,7 @@ import type { Mesh } from "@babylonjs/core/Meshes/mesh.js";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import type { Scene } from "@babylonjs/core/scene.js";
-import { ATTACK_ARC, ATTACK_RANGE, getArchetype, type EnemyKind, PLAYER_SIZE } from "@mmo/shared";
+import { getArchetype, type EnemyKind, PLAYER_SIZE, type Spell } from "@mmo/shared";
 
 /**
  * The game's art style, in one place.
@@ -228,12 +228,12 @@ export function buildObstacle(
 }
 
 /**
- * The swing: a flat sector on the ground showing exactly the arc the server
- * tests against. Drawing the real shape rather than a generic flourish means
- * a miss is legible — you can see the creature was outside the wedge.
+ * A cast's effect: a flat sector on the ground showing exactly the shape the
+ * server tests against. Drawing the real wedge rather than a generic flourish
+ * means a miss is legible — you can see the creature was outside it.
  *
  * Returned as a pivot with the sector already oriented inside it, so the caller
- * only has to set `rotation.y` to the attacker's yaw. Getting there needs one
+ * only has to set `rotation.y` to the caster's yaw. Getting there needs one
  * fixed correction, worked out once here rather than fudged by eye:
  *
  *   CreateDisc lays a sector in the XY plane from local +X, sweeping toward +Y.
@@ -244,23 +244,30 @@ export function buildObstacle(
  *   Babylon composes rotation as Y * X * Z, so that Z spin happens first, inside
  *   the sector's own plane — which is exactly where it needs to apply.
  */
-export function buildSwingArc(scene: Scene): TransformNode {
-  const pivot = new TransformNode("swingPivot", scene);
+export function buildCastArc(scene: Scene, spell: Spell, colour: number): TransformNode {
+  const pivot = new TransformNode(`castPivot:${spell.id}`, scene);
 
+  // A full ring would be a disc with a seam; drawing it as a complete circle
+  // avoids the arc parameter entirely.
+  const full = spell.arc >= Math.PI * 2;
   const sector = MeshBuilder.CreateDisc(
-    "swing",
-    { radius: ATTACK_RANGE, tessellation: 10, arc: ATTACK_ARC / (Math.PI * 2) },
+    `cast:${spell.id}`,
+    {
+      radius: spell.range,
+      tessellation: full ? 24 : 10,
+      ...(full ? {} : { arc: spell.arc / (Math.PI * 2) }),
+    },
     scene,
   );
   sector.rotation.x = Math.PI / 2;
-  sector.rotation.z = Math.PI / 2 - ATTACK_ARC / 2;
+  if (!full) sector.rotation.z = Math.PI / 2 - spell.arc / 2;
   sector.isPickable = false;
   sector.parent = pivot;
 
-  const material = new StandardMaterial("swingMaterial", scene);
+  const material = new StandardMaterial(`castMaterial:${spell.id}`, scene);
   material.diffuseColor = Color3.Black();
   material.specularColor = Color3.Black();
-  material.emissiveColor = hexColour(0xbfe4ff);
+  material.emissiveColor = hexColour(colour);
   material.alpha = 0.34;
   material.backFaceCulling = false;
   sector.material = material;

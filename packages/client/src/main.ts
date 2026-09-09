@@ -1,6 +1,13 @@
 import type { Room, SeatReservation } from "@colyseus/sdk";
 import { Client } from "@colyseus/sdk";
-import { getOstra, isOstraId, ROOM_NAME, type OstraDefinition, WorldState } from "@mmo/shared";
+import {
+  getOstra,
+  isOstraId,
+  ROOM_NAME,
+  type OstraDefinition,
+  type SpellProficiency,
+  WorldState,
+} from "@mmo/shared";
 import { resolveCharacter } from "./characters.js";
 import { Hud } from "./hud.js";
 import { KeyboardInput } from "./input.js";
@@ -32,6 +39,14 @@ const keyboard = new KeyboardInput();
 function cameraYaw(): number {
   const alpha = world.camera.alpha;
   return Math.atan2(-Math.cos(alpha), -Math.sin(alpha));
+}
+
+/** The caster's own training. Nobody else's business, so it is not in state. */
+interface ProfileMessage {
+  affinity: number;
+  spells: SpellProficiency;
+  maxMana: number;
+  manaNow: number;
 }
 
 /** What the server sends when a player steps into a Gate. */
@@ -95,6 +110,17 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
 
   hud.setOstra(ostra);
   hud.setStatus("connected");
+  hud.buildAbilityBar();
+
+  // Affinity and per-spell proficiency are private to this player, so they
+  // arrive as a message rather than in replicated state. Asked for rather than
+  // pushed: a send from the room's onJoin would race this handler being
+  // registered, which is the same trap the character id fell into.
+  next.onMessage("profile", (payload: ProfileMessage) => {
+    hud.setProfile(payload.affinity, payload.spells);
+    hud.setMana(payload.manaNow);
+  });
+  next.send("requestProfile");
 
   next.onMessage("gate", (payload: GateMessage) => {
     void travel(client, payload);
