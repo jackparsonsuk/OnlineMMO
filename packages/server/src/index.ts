@@ -17,6 +17,7 @@ import {
   verifyToken,
 } from "./auth.js";
 import { createCharacter, isCharacterId } from "./identity.js";
+import { apiLimiter, loginLimiter, registerLimiter } from "./rateLimit.js";
 import { OstraRoom } from "./rooms/OstraRoom.js";
 import { SqliteCharacterStore } from "./store/SqliteCharacterStore.js";
 
@@ -33,6 +34,21 @@ const realmId = process.env["REALM_ID"] ?? "local";
 const MAX_CHARACTERS_PER_ACCOUNT = 5;
 const databaseFile = process.env["DATABASE_FILE"] ?? "data/ostracon.db";
 const isProduction = process.env["NODE_ENV"] === "production";
+
+/**
+ * How many reverse proxies sit in front of this server.
+ *
+ * Behind a proxy, every request appears to come from the proxy unless Express
+ * is told to read `X-Forwarded-For` — which would rate-limit the whole world as
+ * one client. But trusting that header blindly is worse: anyone can set it and
+ * become a fresh IP whenever they are throttled. So this is a HOP COUNT, not a
+ * boolean: Express then reads the correct entry and ignores the spoofable rest.
+ *
+ * 0 (the default) means no proxy — correct for local development and for
+ * running the container directly. Railway, Fly and most managed hosts put
+ * exactly one in front, so set TRUST_PROXY=1 there.
+ */
+const trustProxy = Number(process.env["TRUST_PROXY"] ?? 0);
 
 /**
  * Origins allowed to call the HTTP endpoints, comma separated.
@@ -52,6 +68,7 @@ setServerContext({ realmId, store });
 configureAuth(process.env["JWT_SECRET"], isProduction);
 
 const app = express();
+if (trustProxy > 0) app.set("trust proxy", trustProxy);
 // Pinned rather than wide open. In development the Vite dev server is a
 // different origin and must be named; in production the client is served from
 // this same origin and the list is empty, which denies everyone else.
@@ -60,6 +77,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: "4kb" }));
+app.use(apiLimiter());
 
 /** Wrap a handler so a thrown AuthError becomes its status rather than a 500. */
 function handle(fn: (req: express.Request, res: express.Response) => Promise<void> | void) {
@@ -115,13 +133,13 @@ app.get("/debug/rooms", async (_req, res) => {
 
 // --- accounts ---------------------------------------------------------------
 
-app.post("/auth/register", handle(async (req, res) => {
+app.post("/auth/register", registerLimiter(), handle(async (req, res) => {
   const body = req.body as { email?: unknown; password?: unknown } | undefined;
   const { token, account } = await registerAccount(store, body?.email, body?.password);
   res.status(201).json({ token, email: account.email });
 }));
 
-app.post("/auth/login", handle(async (req, res) => {
+app.post("/auth/login", loginLimiter(), handle(async (req, res) => {
   const body = req.body as { email?: unknown; password?: unknown } | undefined;
   const { token, account } = await loginAccount(store, body?.email, body?.password);
   res.json({ token, email: account.email });

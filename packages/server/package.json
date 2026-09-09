@@ -16,7 +16,8 @@
     "@mmo/shared": "*",
     "colyseus": "^0.18.5",
     "cors": "^2.8.5",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.7.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

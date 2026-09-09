@@ -297,34 +297,22 @@ save without asking.
 
 ## Deploying
 
-One artifact. The server serves the built client from its own origin, which
-means no CORS to configure, no server URL baked into the bundle at build time,
-and one certificate.
+One artifact: the server serves the built client from its own origin, so there
+is no CORS to configure, no server URL baked into the bundle at build time, and
+one certificate.
 
 ```bash
 npm ci && npm run build
-JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))") \
-NODE_ENV=production npm start
+JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))") NODE_ENV=production npm start
 ```
 
-Or with the included `Dockerfile`:
+**[DEPLOYMENT.md](DEPLOYMENT.md) is the full runbook** — Railway, Fly and plain
+Docker, every environment variable, backups, and the ephemeral-filesystem trap
+that silently wipes a realm on redeploy.
 
-```bash
-docker build -t ostracon .
-docker run -p 2567:2567 -v ostracon-data:/app/data --env-file .env ostracon
-```
-
-Copy `.env.example` to `.env` first. **Mount a volume on `/app/data`** or a
-restart loses every character in the realm.
-
-Two things the client works out for itself: `location.origin` in production (so
-it follows wherever it was served from), and `http://localhost:2567` in
-development, where Vite serves the page on its own port. `VITE_SERVER_URL`
-overrides both, but note Vite inlines it at *build* time — anything set there
-pins one deployment forever, which is why the default derives from the origin.
-
-Still needed before this is genuinely public: TLS in front of it for `wss://`,
-and rate limiting on the auth endpoints.
+Serverless hosts (Vercel, Netlify Functions, Lambda) cannot run the server: the
+world lives in memory and ticks at 30 Hz, which needs a process that outlives a
+request.
 
 ## Ostras and Gates
 

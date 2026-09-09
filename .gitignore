@@ -8,3 +8,6 @@ dist-types/
 
 # SQLite realm data
 data/
+
+# Local database backups
+backups/
