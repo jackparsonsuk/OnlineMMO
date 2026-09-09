@@ -1,15 +1,20 @@
 import { matchMaker, Room, ServerError, type Client } from "@colyseus/core";
 import {
   applyInput,
+  Enemy,
+  EnemyState,
   findGate,
+  getArchetype,
   GATE_ARRIVAL_OFFSET,
   GATE_RADIUS,
   getOstra,
+  isEnemyKind,
   isOstraId,
   MoveInput,
   PLAYER_RADIUS,
   staticColliders,
   type Collider,
+  type EnemyArchetype,
   type GateDefinition,
   type OstraDefinition,
   type OstraId,
@@ -19,6 +24,7 @@ import {
   TICK_RATE,
   WorldState,
 } from "@mmo/shared";
+import { createBrain, stepEnemy, type AITarget, type EnemyBrain } from "../ai/enemyAI.js";
 import { getServerContext } from "../context.js";
 import { isCharacterId } from "../identity.js";
 import type { CharacterStore } from "../store/CharacterStore.js";
@@ -66,6 +72,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   private store!: CharacterStore;
   private realmId!: string;
   private readonly sessions = new Map<string, Session>();
+  /** Server-only AI memory, keyed by the same id as `state.enemies`. */
+  private readonly brains = new Map<string, EnemyBrain>();
+  /** Reused each tick so the AI loop does not allocate a target list 30x a second. */
+  private readonly aiTargets: AITarget[] = [];
 
   onCreate(options: OstraRoomOptions): void {
     if (!isOstraId(options.ostraId)) {
@@ -81,8 +91,11 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     this.maxClients = 64;
     this.patchRate = PATCH_RATE_MS;
 
+    this.spawnEnemies();
+
     // The authoritative simulation. Nothing else in this room is allowed to
-    // move a player: positions change here, from buffered input, or not at all.
+    // move a player or a creature: positions change here, from buffered input
+    // or from the AI, or not at all.
     this.setFixedTimestep((ctx) => {
       // One snapshot for the whole tick, taken before anyone moves. Rebuilding
       // it per player would mean players simulated later collide against
@@ -108,6 +121,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
         this.checkGates(sessionId, session, player);
       }
+
+      this.stepEnemies(ctx.dt, world);
     }, TICK_RATE);
   }
 
@@ -190,7 +205,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     if (client) void this.beginTransfer(client, session, player, gate);
   }
 
-  /** Scenery plus every player, as circles. */
+  /** Scenery, every player, and every creature, as circles. */
   private collectColliders(): Collider[] {
     const colliders: Collider[] = [...staticColliders(this.ostra)];
     for (const [sessionId, player] of this.state.players) {
@@ -201,7 +216,76 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         radius: PLAYER_RADIUS,
       });
     }
+    for (const [enemyId, enemy] of this.state.enemies) {
+      colliders.push({
+        id: enemyId,
+        x: enemy.x,
+        z: enemy.z,
+        radius: this.archetypeFor(enemy.kind).radius,
+      });
+    }
     return colliders;
+  }
+
+  /**
+   * Populate the Ostra from its spawn table. Creatures live and die with the
+   * room and are never persisted, so an emptied Ostra repopulates the moment
+   * somebody walks back into it.
+   */
+  private spawnEnemies(): void {
+    let index = 0;
+    for (const group of this.ostra.spawns) {
+      const archetype = getArchetype(group.kind);
+      for (let n = 0; n < group.count; n++) {
+        // Scatter over the camp's area rather than its circumference: the sqrt
+        // spreads them evenly instead of bunching them at the edge.
+        const angle = Math.random() * Math.PI * 2;
+        const reach = group.radius * Math.sqrt(Math.random());
+        const x = group.x + Math.cos(angle) * reach;
+        const z = group.z + Math.sin(angle) * reach;
+
+        const id = `e${index++}`;
+        this.state.enemies.set(id, new Enemy({
+          kind: archetype.kind,
+          x,
+          y: 0,
+          z,
+          yaw: Math.random() * Math.PI * 2,
+          health: archetype.maxHealth,
+          state: EnemyState.Idle,
+        }));
+        this.brains.set(id, createBrain(x, z));
+      }
+    }
+  }
+
+  private stepEnemies(
+    dt: number,
+    world: { halfExtent: number; colliders: Collider[]; selfId: string },
+  ): void {
+    if (this.state.enemies.size === 0) return;
+
+    // Players only — a zombie should not hunt another zombie, so this can't
+    // just reuse the collider snapshot.
+    this.aiTargets.length = 0;
+    for (const [sessionId, player] of this.state.players) {
+      const session = this.sessions.get(sessionId);
+      if (!session || session.transferring) continue;
+      this.aiTargets.push({ sessionId, x: player.x, z: player.z });
+    }
+
+    for (const [enemyId, enemy] of this.state.enemies) {
+      const brain = this.brains.get(enemyId);
+      if (!brain) continue;
+      world.selfId = enemyId;
+      stepEnemy(enemy, brain, this.archetypeFor(enemy.kind), dt, world, this.aiTargets);
+    }
+  }
+
+  /** Falls back rather than throwing: a stored kind this build no longer knows
+   *  should not take the whole room's simulation down. */
+  private archetypeFor(kind: string): EnemyArchetype {
+    return isEnemyKind(kind) ? getArchetype(kind) : getArchetype("zombie");
   }
 
   private gateContaining(x: number, z: number): GateDefinition | undefined {

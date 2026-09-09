@@ -97,6 +97,44 @@ position into CSS pixels every frame. Babylon's GUI package would render text in
 a texture — another dependency, and soft text up close. As with most MMOs the
 labels are not occluded by geometry: you can read a name through a rock.
 
+## Art style
+
+Low poly, and that means two things that have to go together: very few
+triangles, and **flat** shading so each triangle reads as its own facet. A coarse
+mesh with smooth normals just looks badly made; the same mesh faceted looks
+deliberate. `packages/client/src/lowpoly.ts` holds the whole style — materials
+with no specular highlight, and every model built from primitives at runtime.
+
+Nothing is loaded from a model file. There is no exporter in the pipeline, and a
+creature's proportions sit next to the numbers the simulation uses, so a spider
+cannot be drawn wider than the circle it collides with.
+
+## Enemies and AI
+
+Creatures are entirely server-driven. Clients predict their own movement and
+nothing else, so enemies are interpolated exactly like other players — which
+means the AI never has to be deterministic across machines, and is free to use
+randomness.
+
+`packages/shared/src/enemies.ts` is the archetype table. Two so far, built to
+feel like opposites:
+
+| | Risen (zombie) | Void Spider |
+| --- | --- | --- |
+| Notices you at | 13 m | 8 m |
+| Chase speed | 3.2 m/s | 7.2 m/s (you cannot outrun it) |
+| Threat | Sees you early and never stops | Harmless until close, then instant |
+
+The state machine is Idle → Wander → Chase → Return.
+
+Two details carry most of the feel. **Deaggro is wider than aggro** (20 m vs 13 m
+for a Risen), because with a single radius a player standing exactly on the line
+makes the creature start and stop every tick. And **Return is a latch, not a
+distance test** — see below.
+
+Creatures live and die with their room and are never persisted, so an emptied
+Ostra repopulates the moment somebody walks back into it.
+
 ## Ostras and Gates
 
 Each Ostra is one Colyseus room. There is a single `OstraRoom` class, and
@@ -142,20 +180,27 @@ Ordered roughly by how much they would hurt in production.
   characters in a loop and fill the database.
 - **SQLite means one process per realm.** The `CharacterStore` interface exists
   so Postgres can replace it; nothing else needs to change.
-- **A player entry twice appeared with no client attached**, both times during
-  development after the server process was killed under live browser tabs. Two
-  targeted reproductions (join/leave, and a Gate transfer watched from a second
-  client) both came back clean, and the room census has matched ever since, so
-  the cause is unconfirmed — most likely the client SDK's automatic reconnection
-  racing a restarting server. `GET /debug/rooms` reports clients and players per
-  room specifically to catch it: if those two numbers ever disagree, that is the
-  bug.
+- **Nothing can hurt you yet.** Creatures chase you down and stand there. Damage,
+  death and respawn are the next piece of work; `health` is already in the schema
+  and untouched.
+- **A stray player twice appeared after the server was killed under live tabs.**
+  Not a state leak: `GET /debug/rooms` showed clients and players *matching*, so
+  it was a genuine extra connection. The browser console explains it — the SDK
+  retries dropped rooms with `skipHandshake=true&reconnectionToken=...`, so a
+  retry from an abandoned page can succeed against a freshly restarted server and
+  rejoin for real. A development artifact of restarting the process under open
+  tabs. If clients and players ever *disagree*, that is a different and much
+  worse bug.
 - **Gate rings are not solid**, deliberately — you walk into one to use it.
   Scenery and other players are solid.
 - **The duplicate-character guard is per-room.** One character can't be in the
   same Ostra twice, but two clients racing could briefly hold it in two
   different Ostras.
-- **Only position persists.** No inventory, stats, or progression yet.
+- **Only position persists.** No inventory, stats, or progression yet, and
+  creatures reset with their room.
+- **AI has no pathfinding.** A creature walks straight at its goal and slides
+  along whatever it hits. Fine in open ground; it will look stupid the moment an
+  Ostra has a wall to walk around.
 - **`y` is always 0.** It is in the schema and the movement state so terrain and
   jumping don't need a wire format change, but nothing moves vertically.
 

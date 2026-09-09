@@ -136,3 +136,16 @@ kbd {
 .nametag.self {
   font-weight: 600;
 }
+
+/* Hostile labels read as a warning without being shouty; `hunting` is the one
+   that should catch your eye, because it means something is coming. */
+.nametag.hostile {
+  border-color: rgb(200 90 70 / 45%);
+  color: #e3b7ae;
+}
+
+.nametag.hunting {
+  border-color: rgb(232 86 63 / 95%);
+  color: #ffd9d1;
+  background: rgb(58 16 12 / 82%);
+}

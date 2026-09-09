@@ -1,9 +1,4 @@
-import {
-  COLLISION_ITERATIONS,
-  MOVE_SPEED,
-  PLAYER_HALF,
-  PLAYER_RADIUS,
-} from "./constants.js";
+import { COLLISION_ITERATIONS, MOVE_SPEED, PLAYER_RADIUS } from "./constants.js";
 
 /**
  * The single movement simulation, run in two places:
@@ -84,6 +79,8 @@ export function applyInput(
   // Normalising the stick is what stops diagonals being ~41% faster; it also
   // means a client sending (1, 1) gains nothing over (0, 1).
   const magnitude = Math.hypot(moveX, moveZ);
+  let deltaX = 0;
+  let deltaZ = 0;
   if (magnitude > 0) {
     const inputX = moveX / magnitude;
     const inputZ = moveZ / magnitude;
@@ -92,17 +89,38 @@ export function applyInput(
     // (sin yaw, 0, cos yaw), and its right is (cos yaw, 0, -sin yaw).
     const sin = Math.sin(yaw);
     const cos = Math.cos(yaw);
-    state.x += (inputX * cos + inputZ * sin) * MOVE_SPEED * dt;
-    state.z += (inputZ * cos - inputX * sin) * MOVE_SPEED * dt;
+    deltaX = (inputX * cos + inputZ * sin) * MOVE_SPEED * dt;
+    deltaZ = (inputZ * cos - inputX * sin) * MOVE_SPEED * dt;
   }
+
+  moveBody(state, deltaX, deltaZ, world, PLAYER_RADIUS);
+}
+
+/**
+ * Displace a body, push it out of whatever it now overlaps, and keep it inside
+ * the Ostra. Shared by players and by the creatures the server drives, so a
+ * zombie is stopped by a rock in exactly the way a player is.
+ *
+ * @param radius The body's own collision radius — players and each creature
+ *   kind differ, so it is a parameter rather than a constant.
+ */
+export function moveBody(
+  state: MoveState,
+  deltaX: number,
+  deltaZ: number,
+  world: MoveWorld,
+  radius: number,
+): void {
+  state.x += deltaX;
+  state.z += deltaZ;
 
   // Resolve overlaps even on a stationary step: something else may have moved
   // into us, and standing still is no reason to be left inside a rock.
-  resolveCollisions(state, world);
+  resolveCollisions(state, world, radius);
 
   // Bounds last, so being pushed out of a collider can never push you through
   // the Ostra's edge.
-  const limit = world.halfExtent - PLAYER_HALF;
+  const limit = world.halfExtent - radius;
   state.x = clamp(state.x, -limit, limit);
   state.z = clamp(state.z, -limit, limit);
 }
@@ -115,7 +133,7 @@ export function applyInput(
  * colliders happen to arrive in, and client and server build that list from
  * different sources — order-independence is what keeps the two agreeing.
  */
-function resolveCollisions(state: MoveState, world: MoveWorld): void {
+function resolveCollisions(state: MoveState, world: MoveWorld, radius: number): void {
   for (let iteration = 0; iteration < COLLISION_ITERATIONS; iteration++) {
     let pushX = 0;
     let pushZ = 0;
@@ -126,7 +144,7 @@ function resolveCollisions(state: MoveState, world: MoveWorld): void {
 
       const dx = state.x - collider.x;
       const dz = state.z - collider.z;
-      const minimum = collider.radius + PLAYER_RADIUS;
+      const minimum = collider.radius + radius;
       const distanceSq = dx * dx + dz * dz;
       if (distanceSq >= minimum * minimum) continue;
 

@@ -3,7 +3,11 @@ import type { Data } from "@colyseus/schema";
 import { getStateCallbacks, Predict, type Reconciler, type Room } from "@colyseus/sdk";
 import {
   applyInput,
+  type Enemy,
+  EnemyState,
+  getArchetype,
   INTERP_DELAY_MS,
+  isEnemyKind,
   MoveInput,
   type Collider,
   type MoveWorld,
@@ -17,8 +21,8 @@ import {
 } from "@mmo/shared";
 import type { Hud } from "./hud.js";
 import type { KeyboardInput } from "./input.js";
-import { Nametags, type NametagTarget } from "./nametags.js";
-import { createPlayerMesh, type World } from "./scene.js";
+import { Nametags, type NametagTarget, type NametagVariant } from "./nametags.js";
+import { createEnemyMesh, createPlayerMesh, type World } from "./scene.js";
 
 /**
  * Everything tied to being inside one Ostra's room: prediction, the input
@@ -62,16 +66,25 @@ export function createSession(
   // ordered channel already guarantees.
   const input = room.input({ type: MoveInput, mode: "reliable" });
 
-  predict.attachAll("players", {
+  const smoothing = {
     x: "lerp",
     y: "lerp",
     z: "lerp",
-    // Without `angle`, interpolating across the ±π seam spins the cube the
+    // Without `angle`, interpolating across the ±π seam spins the body the
     // long way round.
     yaw: { mode: "lerp", angle: true },
-  });
+  } as const;
+
+  predict.attachAll("players", smoothing);
+  // Creatures are pure server output — nothing is predicted, so this is the
+  // only thing standing between you and 20Hz stutter on every one of them.
+  predict.attachAll("enemies", smoothing);
 
   const meshes = new Map<string, TransformNode>();
+  const enemyMeshes = new Map<string, TransformNode>();
+  /** Last variant pushed to each creature's label, so the DOM is only
+   *  touched when the AI actually changes its mind. */
+  const enemyVariants = new Map<string, NametagVariant>();
   const nametags = new Nametags(document.getElementById("nametags") as HTMLElement);
   let selfPlayer: Player | undefined;
   // The reconciler works on a plain-data mirror of the input, not the Schema
@@ -102,13 +115,32 @@ export function createSession(
         radius: PLAYER_RADIUS,
       });
     });
+    room.state.enemies.forEach((enemy: Enemy, enemyId: string) => {
+      colliders.push({
+        id: enemyId,
+        x: predict.value(enemy, "x"),
+        z: predict.value(enemy, "z"),
+        radius: archetypeOf(enemy).radius,
+      });
+    });
+  }
+
+  /** Falls back rather than throwing, so a creature kind this build doesn't
+   *  know about is drawn wrong instead of breaking the frame. */
+  function archetypeOf(enemy: Enemy) {
+    return getArchetype(isEnemyKind(enemy.kind) ? enemy.kind : "zombie");
   }
 
   const $ = getStateCallbacks(room);
 
   const offAdd = $(room.state).players.onAdd((player: Player, sessionId: string) => {
     meshes.set(sessionId, createPlayerMesh(world.scene, player.colour));
-    nametags.add(sessionId, player.name, player.colour, sessionId === room.sessionId);
+    nametags.add(
+      sessionId,
+      player.name,
+      player.colour,
+      sessionId === room.sessionId ? "self" : "player",
+    );
 
     if (sessionId === room.sessionId) {
       selfPlayer = player;
@@ -126,6 +158,20 @@ export function createSession(
     }
 
     hud.setRoster(room.state, room.sessionId);
+  });
+
+  const offEnemyAdd = $(room.state).enemies.onAdd((enemy: Enemy, enemyId: string) => {
+    const archetype = archetypeOf(enemy);
+    enemyMeshes.set(enemyId, createEnemyMesh(world.scene, archetype.kind));
+    nametags.add(enemyId, archetype.name, archetype.colour, "hostile");
+    enemyVariants.set(enemyId, "hostile");
+  });
+
+  const offEnemyRemove = $(room.state).enemies.onRemove((_enemy: Enemy, enemyId: string) => {
+    enemyMeshes.get(enemyId)?.dispose(false, true);
+    enemyMeshes.delete(enemyId);
+    nametags.remove(enemyId);
+    enemyVariants.delete(enemyId);
   });
 
   const offRemove = $(room.state).players.onRemove((_player: Player, sessionId: string) => {
@@ -215,6 +261,35 @@ export function createSession(
       nametagTargets.push({ sessionId, x, y, z });
     });
 
+    room.state.enemies.forEach((enemy: Enemy, enemyId: string) => {
+      const mesh = enemyMeshes.get(enemyId);
+      if (!mesh) return;
+      const archetype = archetypeOf(enemy);
+
+      mesh.position.set(
+        predict.value(enemy, "x"),
+        predict.value(enemy, "y"),
+        predict.value(enemy, "z"),
+      );
+      mesh.rotation.y = predict.value(enemy, "yaw");
+
+      // The one piece of AI state the player can see. A creature that has
+      // noticed you should say so before it reaches you.
+      const wanted: NametagVariant = enemy.state === EnemyState.Chase ? "hunting" : "hostile";
+      if (enemyVariants.get(enemyId) !== wanted) {
+        enemyVariants.set(enemyId, wanted);
+        nametags.setVariant(enemyId, wanted);
+      }
+
+      nametagTargets.push({
+        sessionId: enemyId,
+        x: mesh.position.x,
+        y: mesh.position.y,
+        z: mesh.position.z,
+        height: archetype.height + 0.35,
+      });
+    });
+
     if (selfPlayer) {
       const x = predict.value(selfPlayer, "x");
       const y = predict.value(selfPlayer, "y");
@@ -237,10 +312,15 @@ export function createSession(
   function dispose(): void {
     offAdd();
     offRemove();
+    offEnemyAdd();
+    offEnemyRemove();
     reconciler?.dispose();
     predict.dispose();
     for (const mesh of meshes.values()) mesh.dispose(false, true);
     meshes.clear();
+    for (const mesh of enemyMeshes.values()) mesh.dispose(false, true);
+    enemyMeshes.clear();
+    enemyVariants.clear();
     nametags.clear();
     hud.setGatePrompt(undefined);
   }

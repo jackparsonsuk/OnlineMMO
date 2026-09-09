@@ -32,10 +32,30 @@ export const Player = schema({
 }, "Player");
 export type Player = SchemaType<typeof Player>;
 
+/**
+ * A creature. Entirely server-driven — clients never predict these, they just
+ * interpolate whatever arrives, the same way they treat other players.
+ */
+export const Enemy = schema({
+  /** An `EnemyKind`. Sent once on spawn and never changed, so the readability
+   *  of a string is worth more than the bytes an enum id would save. */
+  kind: t.string().default("zombie"),
+  x: t.float32().default(0),
+  y: t.float32().default(0),
+  z: t.float32().default(0),
+  yaw: t.angle().default(0),
+  health: t.uint16().default(1),
+  /** An `EnemyState`. The client lights a creature that is hunting, so you can
+   *  tell at a glance whether it has seen you. */
+  state: t.uint8().default(0),
+}, "Enemy");
+export type Enemy = SchemaType<typeof Enemy>;
+
 export const WorldState = schema({
   /** Which Ostra this room is. One room per Ostra, so it never changes for
    *  the lifetime of the room — the client reads it to pick the palette. */
   ostraId: t.string().default(""),
   players: t.map(Player),
+  enemies: t.map(Enemy),
 }, "WorldState");
 export type WorldState = SchemaType<typeof WorldState>;

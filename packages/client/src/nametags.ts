@@ -17,15 +17,22 @@ import { PLAYER_SIZE } from "@mmo/shared";
 /** Beyond this the label is clutter rather than information. */
 const MAX_DISTANCE = 45;
 
-/** Height above the player's feet to float the label. */
-const HEIGHT = PLAYER_SIZE + 0.55;
+/** Default height above a body's feet to float the label. Creatures pass
+ *  their own, since a spider is a fraction of a player's height. */
+const DEFAULT_HEIGHT = PLAYER_SIZE + 0.55;
 
 export interface NametagTarget {
   sessionId: string;
   x: number;
   y: number;
   z: number;
+  /** Overrides DEFAULT_HEIGHT. */
+  height?: number;
 }
+
+/** Which styling a label gets. `hunting` is how you tell, at a glance,
+ *  that something has noticed you. */
+export type NametagVariant = "self" | "player" | "hostile" | "hunting";
 
 export class Nametags {
   private readonly container: HTMLElement;
@@ -38,17 +45,24 @@ export class Nametags {
     this.container = container;
   }
 
-  add(sessionId: string, name: string, colour: number, isSelf: boolean): void {
+  add(sessionId: string, name: string, colour: number, variant: NametagVariant): void {
     this.remove(sessionId);
 
     const tag = document.createElement("div");
-    tag.className = isSelf ? "nametag self" : "nametag";
+    tag.className = `nametag ${variant}`;
     tag.textContent = name;
     tag.style.setProperty("--tag-colour", `#${colour.toString(16).padStart(6, "0")}`);
     tag.hidden = true;
 
     this.container.appendChild(tag);
     this.tags.set(sessionId, tag);
+  }
+
+  /** Restyle an existing label. Cheap enough to call per frame, but the
+   *  caller should only call it when the variant actually changed. */
+  setVariant(sessionId: string, variant: NametagVariant): void {
+    const tag = this.tags.get(sessionId);
+    if (tag) tag.className = `nametag ${variant}`;
   }
 
   remove(sessionId: string): void {
@@ -89,7 +103,7 @@ export class Nametags {
       const tag = this.tags.get(target.sessionId);
       if (!tag) continue;
 
-      const worldY = target.y + HEIGHT;
+      const worldY = target.y + (target.height ?? DEFAULT_HEIGHT);
       const toX = target.x - cameraPosition.x;
       const toY = worldY - cameraPosition.y;
       const toZ = target.z - cameraPosition.z;

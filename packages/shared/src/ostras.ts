@@ -1,3 +1,4 @@
+import type { SpawnGroup } from "./enemies.js";
 import type { Collider } from "./movement.js";
 
 /**
@@ -55,6 +56,10 @@ export interface ObstacleDefinition {
   height: number;
 }
 
+/** How an Ostra's scenery is drawn. Collision is a circle either way — this
+ *  only decides which low-poly form sits on top of it. */
+export type ObstacleStyle = "pillar" | "boulder";
+
 export interface OstraDefinition {
   id: OstraId;
   /** "Terra Ostra" */
@@ -68,6 +73,9 @@ export interface OstraDefinition {
   palette: OstraPalette;
   gates: GateDefinition[];
   obstacles: ObstacleDefinition[];
+  obstacleStyle: ObstacleStyle;
+  /** Creatures placed when the room is created. */
+  spawns: SpawnGroup[];
 }
 
 /** Face the middle of the Ostra from a point on its edge. */
@@ -117,6 +125,13 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       { x: -14, z: -14, radius: 2.2, height: 5.0 },
       { x: 24, z: -3, radius: 1.6, height: 3.6 },
     ],
+    obstacleStyle: "pillar",
+    // Kept away from spawn: a new traveller gets a moment before anything
+    // notices them.
+    spawns: [
+      { kind: "zombie", count: 4, x: 10, z: -20, radius: 7 },
+      { kind: "spider", count: 3, x: -22, z: -8, radius: 6 },
+    ],
   },
 
   ascendant: {
@@ -150,6 +165,11 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       { x: 5, z: -5, radius: 0.9, height: 7.0 },
       { x: -5, z: -5, radius: 0.9, height: 7.0 },
       { x: 0, z: 12, radius: 2.4, height: 9.0 },
+    ],
+    obstacleStyle: "pillar",
+    // The gods' realm is guarded, not infested.
+    spawns: [
+      { kind: "spider", count: 2, x: 14, z: 10, radius: 4 },
     ],
   },
 
@@ -185,6 +205,13 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       { x: -13, z: 9, radius: 2.2, height: 2.0 },
       { x: 15, z: -14, radius: 1.7, height: 1.4 },
       { x: -2, z: 16, radius: 2.8, height: 3.4 },
+    ],
+    obstacleStyle: "boulder",
+    // The realm of fire and pain earns its name.
+    spawns: [
+      { kind: "zombie", count: 6, x: -6, z: 8, radius: 9 },
+      { kind: "zombie", count: 3, x: 16, z: -6, radius: 5 },
+      { kind: "spider", count: 4, x: -18, z: -12, radius: 7 },
     ],
   },
 };

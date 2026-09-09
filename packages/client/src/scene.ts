@@ -19,7 +19,8 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js";
 import { GridMaterial } from "@babylonjs/materials/grid/gridMaterial.js";
 import { Scene } from "@babylonjs/core/scene.js";
-import { GATE_RADIUS, getOstra, PLAYER_SIZE, type OstraDefinition } from "@mmo/shared";
+import { GATE_RADIUS, getOstra, PLAYER_SIZE, type EnemyKind, type OstraDefinition } from "@mmo/shared";
+import { buildEnemy, buildObstacle, buildPlayer, facet, flatMaterial } from "./lowpoly.js";
 
 export interface World {
   engine: Engine;
@@ -137,18 +138,22 @@ function addWorldEdges(scene: Scene, root: TransformNode, ostra: OstraDefinition
 function addObstacles(scene: Scene, root: TransformNode, ostra: OstraDefinition): void {
   if (ostra.obstacles.length === 0) return;
 
-  const material = new StandardMaterial("obstacleMaterial", scene);
-  material.diffuseColor = Color3.FromHexString(ostra.palette.edge).scale(1.4);
-  material.specularColor = Color3.Black();
+  const material = flatMaterial(
+    scene,
+    "obstacleMaterial",
+    Color3.FromHexString(ostra.palette.edge).scale(1.4),
+  );
 
   for (const obstacle of ostra.obstacles) {
-    const mesh = MeshBuilder.CreateCylinder(
-      "obstacle",
-      { diameter: obstacle.radius * 2, height: obstacle.height, tessellation: 20 },
+    const mesh = buildObstacle(
       scene,
+      ostra.obstacleStyle,
+      obstacle.radius,
+      obstacle.height,
+      material,
     );
-    mesh.position.set(obstacle.x, obstacle.height / 2, obstacle.z);
-    mesh.material = material;
+    mesh.position.x = obstacle.x;
+    mesh.position.z = obstacle.z;
     mesh.parent = root;
   }
 }
@@ -173,9 +178,12 @@ function addGate(
 
   const ring = MeshBuilder.CreateTorus(
     "gate",
-    { diameter: GATE_RADIUS * 2, thickness: 0.28, tessellation: 40 },
+    // Coarse on both axes: the ring should read as cut facets like everything
+    // else, not as the one smooth object in the scene.
+    { diameter: GATE_RADIUS * 2, thickness: 0.28, tessellation: 12 },
     scene,
   );
+  facet(ring);
   ring.position.set(x, 0.14, z);
   ring.material = ringMaterial;
   ring.parent = root;
@@ -191,7 +199,7 @@ function addGate(
 
   const beam = MeshBuilder.CreateCylinder(
     "gateBeam",
-    { diameter: GATE_RADIUS * 1.8, height: 7, tessellation: 28 },
+    { diameter: GATE_RADIUS * 1.8, height: 7, tessellation: 12 },
     scene,
   );
   beam.position.set(x, 3.5, z);
@@ -201,30 +209,9 @@ function addGate(
 }
 
 export function createPlayerMesh(scene: Scene, colour: number): TransformNode {
-  const root = new TransformNode("player", scene);
+  return buildPlayer(scene, colour);
+}
 
-  const body = MeshBuilder.CreateBox("body", { size: PLAYER_SIZE }, scene);
-  body.parent = root;
-
-  const material = new StandardMaterial("playerMaterial", scene);
-  material.diffuseColor = Color3.FromHexString(`#${colour.toString(16).padStart(6, "0")}`);
-  material.specularColor = new Color3(0.15, 0.15, 0.15);
-  body.material = material;
-
-  // A nose on the front face — a bare cube gives no clue which way it's facing,
-  // which makes the whole camera-relative movement scheme impossible to read.
-  const nose = MeshBuilder.CreateBox(
-    "nose",
-    { width: PLAYER_SIZE * 0.28, height: PLAYER_SIZE * 0.28, depth: PLAYER_SIZE * 0.35 },
-    scene,
-  );
-  nose.parent = root;
-  nose.position.z = PLAYER_SIZE * 0.6;
-
-  const noseMaterial = new StandardMaterial("noseMaterial", scene);
-  noseMaterial.diffuseColor = Color3.White();
-  noseMaterial.emissiveColor = new Color3(0.25, 0.25, 0.25);
-  nose.material = noseMaterial;
-
-  return root;
+export function createEnemyMesh(scene: Scene, kind: EnemyKind): TransformNode {
+  return buildEnemy(scene, kind);
 }
