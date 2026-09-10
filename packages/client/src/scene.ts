@@ -14,7 +14,8 @@ import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight.js";
 import { Color3, Color4, Vector3 } from "@babylonjs/core/Maths/math.js";
 import { Ray } from "@babylonjs/core/Culling/ray.js";
 import "@babylonjs/core/Culling/ray.js";
-import type { Mesh } from "@babylonjs/core/Meshes/mesh.js";
+import { Mesh } from "@babylonjs/core/Meshes/mesh.js";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData.js";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder.js";
 import { VertexBuffer } from "@babylonjs/core/Buffers/buffer.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
@@ -25,10 +26,16 @@ import {
   GATE_RADIUS,
   getOstra,
   heightAt,
+  lakeLevel,
+  lakeReach,
+  regionOf,
+  ruinParts,
   settlementsIn,
   WAYSTONE_RADIUS,
+  type LakeDefinition,
   type OstraDefinition,
   type Rarity,
+  type RuinDefinition,
   type Spell,
   type WaystoneDefinition,
 } from "@mmo/shared";
@@ -204,6 +211,17 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
   addObstacles(scene, root, ostra);
   for (const gate of ostra.gates) addGate(scene, root, ostra, gate.x, gate.z, gate.target);
   for (const stone of ostra.waystones) addWaystone(scene, root, ostra, stone);
+  for (const ruin of ostra.ruins) addRuin(scene, root, ostra, ruin);
+  if (ostra.terrain.lakes && ostra.terrain.lakes.length > 0) {
+    const water = new StandardMaterial("water", scene);
+    water.diffuseColor = Color3.FromHexString("#3f7ea6");
+    water.specularColor = new Color3(0.35, 0.4, 0.45);
+    water.specularPower = 48;
+    water.emissiveColor = Color3.FromHexString("#0e2a3a");
+    water.alpha = 0.78;
+    water.backFaceCulling = false;
+    for (const lake of ostra.terrain.lakes) addLake(scene, root, ostra, lake, water);
+  }
 
   for (const settlement of settlementsIn(ostra)) {
     buildSettlement(scene, ostra, settlement).parent = root;
@@ -393,6 +411,115 @@ function addWaystone(scene: Scene, root: TransformNode, ostra: OstraDefinition, 
   beam.material = beamMaterial;
   beam.isPickable = false;
   beam.parent = pivot;
+}
+
+/**
+ * A lake's surface: a flat sheet at the water level, covering every cell of a
+ * grid where the ground dips below it.
+ *
+ * Built from the height function rather than as a disc, so the water follows
+ * the wandering shoreline the terrain carved. The bank always rises above the
+ * surface (see `heightAt`), so the sheet's ragged edge is always under ground.
+ */
+function addLake(scene: Scene, root: TransformNode, ostra: OstraDefinition, lake: LakeDefinition, material: StandardMaterial): void {
+  const level = lakeLevel(lake, ostra.terrain);
+  const reach = lakeReach(lake);
+  const step = 3;
+  const n = Math.ceil((reach * 2) / step);
+  const x0 = lake.x - reach;
+  const z0 = lake.z - reach;
+  const heights = new Float32Array((n + 1) * (n + 1));
+  for (let j = 0; j <= n; j++) {
+    for (let i = 0; i <= n; i++) heights[j * (n + 1) + i] = heightAt(x0 + i * step, z0 + j * step, ostra.terrain);
+  }
+
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const corners = [heights[j * (n + 1) + i]!, heights[j * (n + 1) + i + 1]!, heights[(j + 1) * (n + 1) + i]!, heights[(j + 1) * (n + 1) + i + 1]!];
+      if (Math.min(...corners) >= level) continue;
+      const cx = (i + 0.5) * step - reach;
+      const cz = (j + 0.5) * step - reach;
+      if (cx * cx + cz * cz > reach * reach) continue;
+      const base = positions.length / 3;
+      const ax = i * step - reach, az = j * step - reach;
+      positions.push(ax, 0, az, ax + step, 0, az, ax, 0, az + step, ax + step, 0, az + step);
+      indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+    }
+  }
+  if (indices.length === 0) return;
+
+  const mesh = new Mesh("lake", scene);
+  const data = new VertexData();
+  data.positions = positions;
+  data.indices = indices;
+  data.normals = positions.map((_, k) => (k % 3 === 1 ? 1 : 0));
+  data.applyToMesh(mesh);
+  mesh.position.set(lake.x, level, lake.z);
+  mesh.material = material;
+  mesh.isPickable = false;
+  mesh.parent = root;
+}
+
+/** The stone for a place: whatever its region's rocks are made of. */
+function stoneFor(ostra: OstraDefinition, x: number, z: number): Color3 {
+  const rock = regionOf(ostra, x, z)?.rock ?? "grey";
+  return Color3.FromHexString(rock === "red" ? "#a8603c" : rock === "dark" ? "#4a4440" : "#a39d8c");
+}
+
+/** A ruin: every stone exactly where `ruinParts` puts its collider. */
+function addRuin(scene: Scene, root: TransformNode, ostra: OstraDefinition, ruin: RuinDefinition): void {
+  const parts = ruinParts(ruin);
+  const pivot = new TransformNode(`ruin:${ruin.id}`, scene);
+  pivot.parent = root;
+  const colour = stoneFor(ostra, ruin.x, ruin.z);
+  const stone = flatMaterial(scene, "ruinStone", colour);
+  const worn = flatMaterial(scene, "ruinWorn", colour.scale(0.78));
+
+  for (const part of parts.stones) {
+    const ground = heightAt(part.x, part.z, ostra.terrain);
+    if (part.fallen) {
+      const block = MeshBuilder.CreateBox("ruinFallen", {
+        width: part.radius * 2, height: part.radius * 1.1, depth: Math.max(part.radius * 2.4, part.height),
+      }, scene);
+      block.position.set(part.x, ground + part.radius * 0.45, part.z);
+      block.rotation.y = part.yaw;
+      block.rotation.z = 0.12;
+      block.material = worn;
+      block.parent = pivot;
+    } else {
+      const upright = facet(MeshBuilder.CreateCylinder("ruinStone", {
+        diameterTop: part.radius * 1.4, diameterBottom: part.radius * 2, height: part.height,
+        tessellation: part.height > 12 ? 5 : 6,
+      }, scene));
+      upright.position.set(part.x, ground + part.height / 2 - 0.2, part.z);
+      upright.rotation.y = part.yaw;
+      // A slight lean: nothing this old stands straight.
+      upright.rotation.z = (part.yaw % 0.1) - 0.05;
+      upright.material = stone;
+      upright.metadata = { blocksCamera: true };
+      upright.parent = pivot;
+    }
+  }
+
+  for (const wall of parts.walls) {
+    const ground = heightAt(wall.x, wall.z, ostra.terrain);
+    const block = MeshBuilder.CreateBox("ruinWall", { width: wall.width, height: wall.height, depth: wall.depth }, scene);
+    block.position.set(wall.x, ground + wall.height / 2 - 0.2, wall.z);
+    block.material = stone;
+    block.metadata = { blocksCamera: true };
+    block.parent = pivot;
+  }
+
+  if (parts.mound) {
+    const mound = facet(MeshBuilder.CreateSphere("barrow", { diameter: parts.mound.radius * 2, segments: 3 }, scene));
+    mound.scaling.y = (parts.mound.height * 2) / (parts.mound.radius * 2);
+    mound.position.set(ruin.x, heightAt(ruin.x, ruin.z, ostra.terrain), ruin.z);
+    mound.material = flatMaterial(scene, "barrowTurf", 0x4a4e3c);
+    mound.metadata = { blocksCamera: true };
+    mound.parent = pivot;
+  }
 }
 
 export function createCastArc(scene: Scene, spell: Spell, colour: number): TransformNode {

@@ -1,7 +1,8 @@
 import {
   getOstra,
   heightAt,
-  roadPath,
+  regionOf,
+  roadPaths,
   settlementsIn,
   type OstraDefinition,
 } from "@mmo/shared";
@@ -38,7 +39,7 @@ interface Landmark {
   name: string;
   x: number;
   z: number;
-  kind: "waystone" | "settlement" | "gate";
+  kind: "waystone" | "settlement" | "gate" | "ruin";
   colour: string;
 }
 
@@ -116,7 +117,7 @@ class TileCache {
         const h = heightAt(x, z, t);
         const dx = (heightAt(x + m, z, t) - h) / m;
         const dz = (heightAt(x, z + m, t) - h) / m;
-        groundTone(this.ostra, this.palette, x, z, h, Math.min(1, Math.sqrt(dx * dx + dz * dz)), tone);
+        groundTone(this.ostra, this.palette, x, z, h, Math.min(1, Math.sqrt(dx * dx + dz * dz)), tone, true);
         const nl = Math.sqrt(dx * dx + 1 + dz * dz);
         const light = ((-dx) * lx + ly + (-dz) * lz) / nl;
         const shade = Math.max(0.45, Math.min(1.35, 0.35 + light * 0.9));
@@ -165,6 +166,9 @@ export class Cartographer {
     }
     for (const settlement of settlements) {
       this.landmarks.push({ name: settlement.name, x: settlement.x, z: settlement.z, kind: "settlement", colour: "#ffc46b" });
+    }
+    for (const ruin of ostra.ruins) {
+      this.landmarks.push({ name: ruin.name, x: ruin.x, z: ruin.z, kind: "ruin", colour: "#cdbb8c" });
     }
     for (const gate of ostra.gates) {
       this.landmarks.push({
@@ -262,9 +266,9 @@ export class Cartographer {
     ctx.save();
     ctx.strokeStyle = "rgba(170, 140, 100, 0.9)";
     ctx.lineWidth = 1.6;
-    for (const road of this.ostra.roads) {
+    for (const { points } of roadPaths(this.ostra)) {
       ctx.beginPath();
-      roadPath(road).forEach((p, i) => {
+      points.forEach((p, i) => {
         const px = (p.x - left) / mpp;
         const py = (top - p.z) / mpp;
         if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
@@ -351,24 +355,33 @@ export class Cartographer {
 
     ctx.strokeStyle = "rgba(190, 160, 110, 0.95)";
     ctx.lineWidth = 2;
-    for (const road of this.ostra.roads) {
+    for (const { points } of roadPaths(this.ostra)) {
       ctx.beginPath();
-      roadPath(road).forEach((p, i) => {
+      points.forEach((p, i) => {
         const [px, py] = toPx(p.x, p.z);
         if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
       });
       ctx.stroke();
     }
 
-    ctx.font = "600 12px ui-sans-serif, system-ui, sans-serif";
     ctx.textAlign = "center";
+    ctx.font = "italic 600 15px ui-serif, Georgia, serif";
+    for (const region of this.ostra.regions) {
+      const [rx, ry] = toPx(region.x, region.z + 260);
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillText(region.name.toUpperCase(), rx + 1, ry + 1);
+      ctx.fillStyle = "rgba(255,248,230,0.72)";
+      ctx.fillText(region.name.toUpperCase(), rx, ry);
+    }
+
+    ctx.font = "600 12px ui-sans-serif, system-ui, sans-serif";
     for (const landmark of this.landmarks) {
       const [px, py] = toPx(landmark.x, landmark.z);
       drawLandmark(ctx, landmark, px, py, 1.4);
       if (landmark.kind === "gate") continue;
       ctx.fillStyle = "rgba(0,0,0,0.65)";
       ctx.fillText(landmark.name, px + 1, py - 9);
-      ctx.fillStyle = landmark.kind === "settlement" ? "#ffe2a8" : "#e6edf3";
+      ctx.fillStyle = landmark.kind === "settlement" ? "#ffe2a8" : landmark.kind === "ruin" ? "#e8dcc0" : "#e6edf3";
       ctx.fillText(landmark.name, px, py - 10);
     }
 
@@ -439,7 +452,7 @@ export class Cartographer {
     let place = this.ostra.name;
     if (nearest && best < 90) place = nearest.name;
     else if (nearest && best < 900) place = `${compassWord(Math.atan2(x - nearest.x, z - nearest.z))} of ${nearest.name}`;
-    else if (this.ostra.wilds) place = "The wilds";
+    else place = regionOf(this.ostra, x, z)?.name ?? place;
 
     let danger = "";
     const wilds = this.ostra.wilds;
@@ -494,6 +507,11 @@ function drawLandmark(ctx: CanvasRenderingContext2D, landmark: Landmark, x: numb
     const s = 4.5 * scale;
     ctx.rect(-s, -s * 0.4, s * 2, s * 1.4);
     ctx.moveTo(-s * 1.2, -s * 0.4); ctx.lineTo(0, -s * 1.4); ctx.lineTo(s * 1.2, -s * 0.4);
+  } else if (landmark.kind === "ruin") {
+    const s = 3.6 * scale;
+    ctx.rect(-s, -s * 0.2, s * 0.6, s * 1.2);
+    ctx.rect(s * 0.4, -s, s * 0.6, s * 2);
+    ctx.rect(-s * 0.2, -s * 0.6, s * 0.4, s * 1.6);
   } else {
     ctx.arc(0, 0, 3.5 * scale, 0, Math.PI * 2);
   }

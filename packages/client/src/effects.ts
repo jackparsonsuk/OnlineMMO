@@ -151,7 +151,7 @@ class ShardPool {
   }
 }
 
-export type ShardColour = "spark" | "ichor" | "void" | "blood" | "arcane" | "dust";
+export type ShardColour = "spark" | "ichor" | "void" | "blood" | "arcane" | "dust" | "ember" | "stone" | "bile" | "fur";
 
 const SHARD_COLOURS: Record<ShardColour, number> = {
   spark: 0xfff1c2,
@@ -160,6 +160,10 @@ const SHARD_COLOURS: Record<ShardColour, number> = {
   blood: 0xd8453a,
   arcane: 0xb48cff,
   dust: 0x9c8a66,
+  ember: 0xff8a3a,
+  stone: 0xa39d8c,
+  bile: 0x9ad04a,
+  fur: 0x8a8c92,
 };
 
 /** A telegraph: the ground an enemy's blow is about to cover. */
@@ -302,14 +306,14 @@ export class Effects {
   }
 
   /** Sunder's ring, rushing outward along the ground. */
-  shockwave(now: number, x: number, y: number, z: number, radius: number): void {
+  shockwave(now: number, x: number, y: number, z: number, radius: number, colour = 0xffb066, dust = 18): void {
     const node = new TransformNode("shockPivot", this.scene);
     node.position.set(x, y + 0.12, z);
     const ring = ringSector(this.scene, "shock", 0.8, 1, Math.PI * 2, 40);
-    const material = glow(this.scene, "shockI", hexColour(0xffb066), 0.8);
+    const material = glow(this.scene, "shockI", hexColour(colour), 0.8);
     ring.material = material;
     ring.parent = node;
-    this.dust(x, y, z, 18);
+    this.dust(x, y, z, dust);
     this.add({
       node,
       start: now,
@@ -330,12 +334,15 @@ export class Effects {
    * A Voidbolt in flight. Drawn from the hand to wherever it is going; the
    * damage was already decided — this is how you see where.
    */
-  bolt(now: number, from: Vector3, to: Vector3, onArrive: () => void): void {
+  bolt(
+    now: number, from: Vector3, to: Vector3, onArrive: () => void,
+    colour = 0xc4a2ff, speed = 60, trail: ShardColour = "arcane",
+  ): void {
     const distance = Vector3.Distance(from, to);
-    const duration = Math.max(60, (distance / 60) * 1000);
+    const duration = Math.max(60, (distance / speed) * 1000);
     const node = new TransformNode("bolt", this.scene);
     const core = MeshBuilder.CreatePolyhedron("boltCore", { type: 1, size: 0.18 }, this.scene);
-    const material = glow(this.scene, "boltI", hexColour(0xc4a2ff), 1);
+    const material = glow(this.scene, "boltI", hexColour(colour), 1);
     core.material = material;
     core.parent = node;
     core.scaling.set(0.8, 0.8, 2.4);
@@ -351,7 +358,7 @@ export class Effects {
         core.rotation.z = t * 20;
         if (t - lastTrail > 0.12) {
           lastTrail = t;
-          this.shards.arcane.burst(node.position.x, node.position.y, node.position.z, 1, 0, 0, 0.5);
+          this.shards[trail].burst(node.position.x, node.position.y, node.position.z, 1, 0, 0, 0.5);
         }
       },
       done: () => {

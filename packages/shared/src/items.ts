@@ -36,6 +36,8 @@ export interface ItemDefinition {
   stats: ItemStats;
   /** One line of flavour. The world is the point of the game. */
   description: string;
+  /** Only ever dropped by one creature; kept out of the random pool. */
+  signature?: boolean;
 }
 
 /**
@@ -120,6 +122,55 @@ export const ITEMS: Record<string, ItemDefinition> = {
     stats: { mana: 40, health: 20, damage: 4 },
     description: "Dronas and Solnajar have been fighting since Y0. Something fell.",
   },
+
+  // --- signature drops ------------------------------------------------------
+  // One per creature, found nowhere else. Never in the random pool — see
+  // `itemsOfRarity`.
+  greywolfMantle: {
+    id: "greywolfMantle",
+    name: "Greywolf Mantle",
+    slot: "armour",
+    rarity: "fine",
+    stats: { health: 25, damage: 2 },
+    description: "Still smells of the pack. So do you, now.",
+    signature: true,
+  },
+  tuskCharm: {
+    id: "tuskCharm",
+    name: "Tusk Charm",
+    slot: "trinket",
+    rarity: "fine",
+    stats: { damage: 4, health: 10 },
+    description: "Whittled from a Thornback that did not stop in time.",
+    signature: true,
+  },
+  fenwaterPhial: {
+    id: "fenwaterPhial",
+    name: "Fenwater Phial",
+    slot: "trinket",
+    rarity: "fine",
+    stats: { mana: 35 },
+    description: "Murky, faintly warm, and it hums when you cast.",
+    signature: true,
+  },
+  emberheart: {
+    id: "emberheart",
+    name: "Emberheart",
+    slot: "trinket",
+    rarity: "rare",
+    stats: { damage: 6, mana: 15 },
+    description: "What is left when a wisp stops burning. It has not stopped.",
+    signature: true,
+  },
+  cairnstoneMaul: {
+    id: "cairnstoneMaul",
+    name: "Cairnstone Maul",
+    slot: "weapon",
+    rarity: "rare",
+    stats: { damage: 11, health: 15 },
+    description: "A golem's fist, more or less. Heavy in a reassuring way.",
+    signature: true,
+  },
 };
 
 export const ITEM_IDS = Object.keys(ITEMS);
@@ -179,12 +230,6 @@ export function equipmentStats(equipment: Equipment): Required<ItemStats> {
 
 // --- drops ------------------------------------------------------------------
 
-/** Odds that killing one of these leaves something behind. */
-export const DROP_CHANCE: Record<string, number> = {
-  zombie: 0.35,
-  spider: 0.3,
-};
-
 /**
  * Rarity odds, before the Ostra's difficulty tilts them.
  *
@@ -207,5 +252,5 @@ export function rollRarity(roll: number, danger: number): Rarity {
 
 /** Every item of a given rarity, for picking one at random. */
 export function itemsOfRarity(rarity: Rarity): ItemDefinition[] {
-  return ITEM_IDS.map((id) => ITEMS[id]!).filter((item) => item.rarity === rarity);
+  return ITEM_IDS.map((id) => ITEMS[id]!).filter((item) => item.rarity === rarity && !item.signature);
 }

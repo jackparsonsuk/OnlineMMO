@@ -8,11 +8,15 @@ import {
   GATE_RADIUS,
   hash2,
   heightAt,
+  lakeLevel,
+  lakeReach,
+  regionOf,
   roadDistance,
   sceneryCell,
   settlementsIn,
   slopeAt,
   type OstraDefinition,
+  type RegionDefinition,
   type SceneryItem,
 } from "@mmo/shared";
 import { flatMaterial } from "./lowpoly.js";
@@ -37,7 +41,16 @@ const GRASS_RADIUS = 110;
 /** Candidate tufts per chunk, before the rules thin them out. */
 const GRASS_PER_CHUNK = 90;
 
-type PoolKind = "pineDark" | "pineLight" | "oakDark" | "oakLight" | "rock" | "grass" | "grassTall";
+type TreePool = "pineDark" | "pineLight" | "oakDark" | "oakLight" | "birch" | "dead";
+type RockPool = "rockGrey" | "rockRed" | "rockDark";
+type GrassPool = "grass" | "dry" | "heather" | "reeds" | "ash";
+type PoolKind = TreePool | RockPool | GrassPool;
+
+const TREE_POOLS: readonly (TreePool | RockPool)[] = [
+  "pineDark", "pineLight", "oakDark", "oakLight", "birch", "dead", "rockGrey", "rockRed", "rockDark",
+];
+const GRASS_POOLS: readonly GrassPool[] = ["grass", "dry", "heather", "reeds", "ash"];
+const ROCK_POOL: Record<RegionDefinition["rock"], RockPool> = { grey: "rockGrey", red: "rockRed", dark: "rockDark" };
 
 /** One mesh, drawn once per matrix, fed from per-chunk lists. */
 class InstancePool {
@@ -158,7 +171,52 @@ function buildOak(scene: Scene, name: string, leaf: Color3): Mesh {
   ], scene);
 }
 
-function buildRock(scene: Scene, stone: Color3): Mesh {
+/** Pale bark with dark bands, a narrow crown. Brightwater and the fens. */
+function buildBirch(scene: Scene): Mesh {
+  const trunk = MeshBuilder.CreateCylinder("t", {
+    height: 0.62, diameterTop: TRUNK * 1.1, diameterBottom: TRUNK * 1.7, tessellation: 5,
+  }, scene);
+  trunk.position.y = 0.31;
+  const band = MeshBuilder.CreateCylinder("b", {
+    height: 0.04, diameter: TRUNK * 1.75, tessellation: 5,
+  }, scene);
+  band.position.y = 0.22;
+  const crown = MeshBuilder.CreateIcoSphere("c", { radius: 0.3, subdivisions: 1 }, scene);
+  crown.position.y = 0.74;
+  crown.scaling.set(0.8, 1.2, 0.8);
+  const crown2 = MeshBuilder.CreateIcoSphere("c2", { radius: 0.2, subdivisions: 1 }, scene);
+  crown2.position.set(0.1, 0.55, -0.06);
+  return merge("birch", [
+    paint(trunk, Color3.FromHexString("#ddd8c8")),
+    paint(band, Color3.FromHexString("#3a3530")),
+    paint(crown, Color3.FromHexString("#8cb05a")),
+    paint(crown2, Color3.FromHexString("#7aa24e")),
+  ], scene);
+}
+
+/** Bare, charred, crooked: Ashfall and the high moor. */
+function buildDead(scene: Scene): Mesh {
+  const wood = Color3.FromHexString("#3e3530");
+  const trunk = MeshBuilder.CreateCylinder("t", {
+    height: 0.8, diameterTop: TRUNK * 0.7, diameterBottom: TRUNK * 2, tessellation: 5,
+  }, scene);
+  trunk.position.y = 0.4;
+  const limbs = [
+    { y: 0.55, z: 0.5, x: 0.14, len: 0.36 },
+    { y: 0.68, z: -0.6, x: -0.12, len: 0.3 },
+    { y: 0.8, z: 0.3, x: -0.06, len: 0.22 },
+  ].map((l) => {
+    const limb = MeshBuilder.CreateCylinder("l", {
+      height: l.len, diameterTop: TRUNK * 0.3, diameterBottom: TRUNK * 0.8, tessellation: 4,
+    }, scene);
+    limb.position.set(l.x, l.y, 0);
+    limb.rotation.z = l.z;
+    return paint(limb, wood.scale(1.1));
+  });
+  return merge("dead", [paint(trunk, wood), ...limbs], scene);
+}
+
+function buildRock(scene: Scene, name: string, stone: Color3): Mesh {
   const rock = MeshBuilder.CreateIcoSphere("rock", { radius: 1, subdivisions: 1 }, scene);
   // Knock the vertices about, so it is a stone rather than a gem. Fixed
   // offsets by index — every rock is the same shape, rotated and squashed
@@ -173,7 +231,7 @@ function buildRock(scene: Scene, stone: Color3): Mesh {
     }
     rock.updateVerticesData(VertexBuffer.PositionKind, positions);
   }
-  return merge("rock", [paint(rock, stone)], scene);
+  return merge(name, [paint(rock, stone)], scene);
 }
 
 function buildTuft(scene: Scene, name: string, colour: Color3, height: number): Mesh {
@@ -204,9 +262,16 @@ export class SceneryStreamer implements ChunkListener {
       pineLight: new InstancePool(buildPine(scene, "pineLight", Color3.FromHexString("#3a6334"))),
       oakDark: new InstancePool(buildOak(scene, "oakDark", leaf)),
       oakLight: new InstancePool(buildOak(scene, "oakLight", Color3.FromHexString("#5a8a3c"))),
-      rock: new InstancePool(buildRock(scene, Color3.FromHexString(palette.edge).scale(1.15))),
-      grass: new InstancePool(buildTuft(scene, "grass", grass.scale(0.8), 0.45)),
-      grassTall: new InstancePool(buildTuft(scene, "grassTall", grass.scale(1.1), 0.8)),
+      birch: new InstancePool(buildBirch(scene)),
+      dead: new InstancePool(buildDead(scene)),
+      rockGrey: new InstancePool(buildRock(scene, "rockGrey", Color3.FromHexString(palette.edge).scale(1.15))),
+      rockRed: new InstancePool(buildRock(scene, "rockRed", Color3.FromHexString("#a8603c"))),
+      rockDark: new InstancePool(buildRock(scene, "rockDark", Color3.FromHexString("#45403c"))),
+      grass: new InstancePool(buildTuft(scene, "grass", grass.scale(0.9), 0.5)),
+      dry: new InstancePool(buildTuft(scene, "dry", Color3.FromHexString("#c2ad62"), 0.55)),
+      heather: new InstancePool(buildTuft(scene, "heather", Color3.FromHexString("#8a5a7a"), 0.35)),
+      reeds: new InstancePool(buildTuft(scene, "reeds", Color3.FromHexString("#8a9a52"), 0.85)),
+      ash: new InstancePool(buildTuft(scene, "ash", Color3.FromHexString("#6e6a62"), 0.4)),
     };
   }
 
@@ -223,7 +288,7 @@ export class SceneryStreamer implements ChunkListener {
       push(kind, matrix);
     }
 
-    for (const kind of ["pineDark", "pineLight", "oakDark", "oakLight", "rock"] as const) {
+    for (const kind of TREE_POOLS) {
       this.pools[kind].set(key, Float32Array.from(lists[kind] ?? []));
     }
   }
@@ -260,8 +325,7 @@ export class SceneryStreamer implements ChunkListener {
     for (const key of [...this.grassChunks]) {
       if (wanted.has(key)) continue;
       this.grassChunks.delete(key);
-      this.pools.grass.delete(key);
-      this.pools.grassTall.delete(key);
+      for (const kind of GRASS_POOLS) this.pools[kind].delete(key);
     }
 
     for (const pool of Object.values(this.pools)) pool.flush();
@@ -273,11 +337,13 @@ export class SceneryStreamer implements ChunkListener {
     const shade = (hash2(Math.floor(item.x * 10), Math.floor(item.z * 10), 5) & 1) === 0;
     let kind: PoolKind;
     if (item.kind === "rock") {
-      kind = "rock";
+      kind = ROCK_POOL[item.tint ?? "grey"];
       this.scale.set(item.radius, item.height * 0.62, item.radius * 0.92);
       this.position.set(item.x, y + item.height * 0.12, item.z);
     } else {
-      kind = item.kind === "pine" ? (shade ? "pineDark" : "pineLight") : (shade ? "oakDark" : "oakLight");
+      kind = item.kind === "pine" ? (shade ? "pineDark" : "pineLight")
+        : item.kind === "oak" ? (shade ? "oakDark" : "oakLight")
+        : item.kind;
       // Width from the trunk's collision radius; sunk a little so the root
       // never floats on a slope.
       const width = item.radius / TRUNK;
@@ -300,9 +366,9 @@ export class SceneryStreamer implements ChunkListener {
     const half = ostra.size / 2 - 1.5;
     const settlements = settlementsIn(ostra);
     const snowLine = ostra.terrain.mountains ? ostra.terrain.mountains.amplitude * 0.5 : Infinity;
-    const short: number[] = [];
-    const tall: number[] = [];
+    const lists: Partial<Record<GrassPool, number[]>> = {};
     const out = new Float32Array(16);
+    const lakes = ostra.terrain.lakes ?? [];
 
     for (let n = 0; n < GRASS_PER_CHUNK; n++) {
       const h = hash2(cx * 131 + n, cz * 71 - n, 0x6a55);
@@ -318,18 +384,26 @@ export class SceneryStreamer implements ChunkListener {
       const y = heightAt(x, z, ostra.terrain);
       if (y > snowLine) continue;
 
+      // Reeds at the water's edge, and in the shallows; nothing in the deep.
+      let kind: GrassPool = regionOf(ostra, x, z)?.grass ?? "grass";
+      const lake = lakes.find((l) => Math.hypot(x - l.x, z - l.z) < lakeReach(l));
+      if (lake) {
+        const depth = lakeLevel(lake, ostra.terrain) - y;
+        if (depth > 0.45) continue;
+        if (depth > -0.7) kind = "reeds";
+      }
+
       const isTall = (h & 7) === 0;
-      const size = 0.8 + ((h >>> 8) & 255) / 640;
+      const size = (0.8 + ((h >>> 8) & 255) / 640) * (isTall ? 1.6 : 1);
       this.scale.set(size, size, size);
       this.position.set(x, y - 0.02, z);
       Quaternion.RotationYawPitchRollToRef(((h >>> 4) & 1023) / 163, 0, 0, this.rotation);
       Matrix.ComposeToRef(this.scale, this.rotation, this.position, this.composed);
       this.composed.copyToArray(out);
-      (isTall ? tall : short).push(...out);
+      (lists[kind] ??= []).push(...out);
     }
 
-    this.pools.grass.set(key, Float32Array.from(short));
-    this.pools.grassTall.set(key, Float32Array.from(tall));
+    for (const kind of GRASS_POOLS) this.pools[kind].set(key, Float32Array.from(lists[kind] ?? []));
   }
 
   dispose(): void {

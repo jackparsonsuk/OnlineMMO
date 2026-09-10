@@ -3,7 +3,8 @@
 Ostracon: a browser MMO on Babylon.js (client) and Colyseus 0.18 (server), in an
 npm-workspaces monorepo. **README.md is the design record** — it explains why
 things are the way they are. Read the relevant section before changing a
-system, and update it when a design decision changes.
+system, and update it when a design decision changes. **TODO.md** is the list
+of ideas and known work; remove an item when it is done, add ones you notice.
 
 ## Commands
 
@@ -26,8 +27,10 @@ packages/shared/   one copy of everything both sides must agree on
   movement.ts        applyInput / moveBody / collision — the shared sim
   noise.ts           deterministic hashing + gradient noise
   terrain.ts         heightAt (pure function of TerrainSettings)
-  worldgen.ts        roads, woodland, rocks, camps, SceneryIndex, unsafeSpawns
-  ostras.ts          the Ostra table (Terra = 8000 m, generated wilds)
+  worldgen.ts        routed roads, regions, woodland, rocks, camps, ruins,
+                     SceneryIndex, buildingColliders, unsafeSpawns
+  ostras.ts          the Ostra table: Terra = 8000 m, regions, lakes, ruins,
+                     roads, waystones; generated wilds
   combat.ts spells.ts enemies.ts items.ts settlements.ts schema.ts constants.ts
 packages/server/
   rooms/OstraRoom.ts one room per Ostra: sim loop, camps, casts, loot, gates
@@ -59,6 +62,10 @@ packages/client/src/
   together; `npm run dev` does this.
 - **Every spawn/waystone must be safe.** `unsafeSpawns()` runs at boot and logs
   `[spawn]` warnings; treat any as a bug in the Ostra data.
+- **Adding a creature** touches: `EnemyKind` + archetype in `enemies.ts` (its
+  `style` drives AI and effects), a rig and pose in `rigs.ts`, an entry in
+  `IMPACT_COLOUR`/`WINDUP_SOUND` in `session.ts`, and region `creatures` weights
+  in `ostras.ts`. The compiler flags most of these via `Record<EnemyKind, …>`.
 
 ## Gotchas already paid for
 
@@ -73,6 +80,8 @@ packages/client/src/
 - In dev, `JWT_SECRET` is random per boot and `tsx watch` restarts the server on
   every server/shared change — stored sessions become invalid and the client
   drops back to sign-in.
+- Roads are routed by A* at startup on both sides (~0.35 s). Anything that
+  changes terrain height, lakes or road `points` changes every road.
 - `requestAnimationFrame` stops when the page isn't visible. `window.mmo.frame(now)`
   drives one frame by hand; `window.mmo` exposes `world`, `room`, `session`
   (`session.debug`), `keyboard`, `audio`. `GET /debug/rooms` lists live rooms.

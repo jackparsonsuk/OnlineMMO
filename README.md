@@ -125,14 +125,25 @@ nothing else, so enemies are interpolated exactly like other players — which
 means the AI never has to be deterministic across machines, and is free to use
 randomness.
 
-`packages/shared/src/enemies.ts` is the archetype table. Two so far, built to
-feel like opposites:
+`packages/shared/src/enemies.ts` is the archetype table. Seven creatures, each
+built around one thing you have to learn. Every attack goes through the same
+telegraphed wedge test (see Combat); what differs is its reach, its width, how
+long it warns you, and what the creature does around it (`style`):
 
-| | Risen (zombie) | Void Spider |
-| --- | --- | --- |
-| Notices you at | 13 m | 8 m |
-| Chase speed | 3.2 m/s | 7.2 m/s (you cannot outrun it) |
-| Threat | Sees you early and never stops | Harmless until close, then instant |
+| | Lives in | Style | What to do about it |
+| --- | --- | --- | --- |
+| **Risen** | Heartland, Ashfall | slow overhead | Sees you early and never stops; step out of the swing |
+| **Void Spider** | woods, fens | fast bite, barely telegraphed | 7.2 m/s — you cannot outrun it; kill it |
+| **Greywood Wolf** | Westwood, Greywood | quick bite, in packs | A shade slower than you, but there are always several |
+| **Thornback Boar** | Sunward, Redstep | **charge**: winds up, then runs 8 m down a lane | Sidestep the painted lane |
+| **Fen Wretch** | Lowfen, Brightwater | **spit**: hangs back at 8 m, spits down a 12 m lane | Close the distance — it backs away — or dodge sideways |
+| **Cinder Wisp** | Ashfall | **pulse**: swells, then bursts in a ring | Two Strikes kill it; get out of the circle before it goes |
+| **Cairn Golem** | ruins, Redstep, Highmoor | **slam**: huge, slow, wide | Can't be staggered and barely shoved; read it and move |
+
+Each has a rare **signature drop** found nowhere else (Greywolf Mantle, Tusk
+Charm, Fenwater Phial, Emberheart, Cairnstone Maul), kept out of the random
+loot pool. The client gives each its own procedurally animated body, windup
+sound and blow effect — a spit flies, a pulse bursts, a slam shakes the camera.
 
 The state machine is Idle → Wander → Chase → Return.
 
@@ -454,6 +465,22 @@ props and villagers are drawn client-side and cost no bandwidth.
 points — and caught a Risen camp reaching within 10.6 m of Daso on its first
 run, which would have put zombies in the streets of the one calm place.
 
+## Fanshona
+
+The second settlement, in Brightwater, Terra's lake country: a stone market
+town facing its lake, with a Weighhouse, market stalls, a well, a boathouse, a
+dock running out over the water and boats moored beside it. Built as Daso's
+opposite — Daso is timber and nobody visits; Fanshona is stone and slate and
+everything passes through it: fish off the lake, timber from Daso, stone from
+the moor.
+
+**The vault names Fanshona, but none of these details come from it** — they were
+invented for the game and are listed in TODO.md to be checked.
+
+The town is laid out in its own frame, facing the lake, and rotated into
+place, so it can be turned by editing one number. Its shelf and its lake share
+a fixed level, so the dock always reaches water whatever the ground does.
+
 ## A world eight kilometres wide
 
 Terra is 8000 m on a side — a hundred times the 80 it was. Crossing it on foot
@@ -463,10 +490,39 @@ takes twenty-two minutes, fourteen sprinting. What makes that workable:
 woodland, boulders and ~700 creature camps from `wilds.seed`, lazily, one 64 m
 cell at a time. The server asks a cell for its colliders; the client asks the
 same cell for things to draw. Same deterministic function, so the tree you see
-is the tree that stops you. What is placed by hand — the Gate Circle, Daso,
-four roads and thirteen waystones — is the skeleton the rest hangs off, and
-the placement rules are mostly about where things may *not* go: nothing on a
-road, no camp that can see a town or a waystone.
+is the tree that stops you. What is placed by hand — the Gate Circle, two towns,
+fourteen waystones, seven ruins, twelve lakes and the places roads must reach —
+is the skeleton the rest hangs off, and the placement rules are mostly about
+where things may *not* go: nothing on a road or in a lake, no camp that can see
+a town or a waystone.
+
+**Nine regions**, each with its own ground colour, trees, rocks, grass and
+creatures: the green Heartland round the Gate Circle, Westwood (Daso's oak
+woods), Greywood (dark pine forest), Highmoor (lifted heath and peaks),
+Brightwater (lakes and birch), Sunward (golden plains), Redstep (red mesas cut
+into terraces), Ashfall (grey ash and dead trees) and Lowfen (sunken marsh and
+meres). A region is the nearest of nine centres, with borders warped by noise
+so they meander and blended over ~200 m so none is a line. The same
+`TerrainRegion` data bends the height function — a moor is lifted, a fen
+pressed flat, mesas terraced — so the land and its look agree about borders.
+
+**Lakes** are shallow — you wade, there is no swimming — and carved by
+`heightAt` with a wandering shoreline and a bank that always rises above the
+water. The client draws the surface as a sheet covering every cell where the
+ground dips below it, so the water follows the carved shore exactly.
+
+**Roads are routed, not drawn.** Each road lists only the places it must pass
+through; A* over a 32 m grid finds the way between them, where cost climbs
+steeply with gradient (roads go round mountains), water is nearly forbidden
+(round lakes), broad noise-driven "bad going" is avoided (so even gentle country
+gets long sweeping bends), and ground an earlier road covers is cheap (so roads
+merge into a network with junctions and loops rather than running side by
+side). The result is smoothed into curves and given a gentle wander. Thirteen
+roads, about 36 km, route in ~0.35 s at startup on each side.
+
+**Ruins** — a stone ring, a watchtower, a barrow, two spires, a sunken hall — are
+landmarks with guardians. `ruinParts` places every stone deterministically, so
+the server collides with exactly what the client draws.
 
 **Collision is bucketed.** `MoveWorld.scenery` is a `SceneryIndex`; a body only
 tests the 3×3 cells around it, in a fixed order so both sides sum contacts
@@ -529,11 +585,9 @@ the same database still give players two separate worlds, which is how the
 
 ## Known gaps
 
-Ordered roughly by how much they would hurt in production.
+Ordered roughly by how much they would hurt in production. Ideas for what to
+build next live in [TODO.md](TODO.md).
 
-- **The auth endpoints are unthrottled.** Nothing stops someone hammering
-  `/auth/login` to guess a password, or registering accounts in a loop. Rate
-  limiting is the next security job and should land before this is public.
 - **No email verification and no password reset.** An address is never proved,
   and a forgotten password is a lost account.
 - **No TLS.** Browsers refuse `wss://` from an HTTPS page, so a real deployment
@@ -546,8 +600,9 @@ Ordered roughly by how much they would hurt in production.
   small, but every active creature is still replicated to everyone in the
   room. With players spread across Terra that grows with the player count;
   Colyseus `StateView` (per-client filtering) is the fix.
-- **One settlement.** Daso exists; Fanshona and the rest of the vault do not.
-  Eight kilometres of Terra is mostly wilds.
+- **Two settlements.** Daso and Fanshona; most of Terra is wilds. Fanshona's
+  details are invented and unchecked against the vault.
+- **Docks are scenery.** You wade beside Fanshona's dock, not along it.
 - **No taunt, no group threat tools.** Threat is damage-based; there is no way
   to deliberately hold a creature off a friend.
 - **Spells are found nowhere.** The lore says spells come from scrolls and books

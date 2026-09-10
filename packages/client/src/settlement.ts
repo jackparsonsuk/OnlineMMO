@@ -5,6 +5,8 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import type { Scene } from "@babylonjs/core/scene.js";
 import {
   heightAt,
+  lakeLevel,
+  lakeReach,
   type BuildingDefinition,
   type OstraDefinition,
   type PropDefinition,
@@ -14,12 +16,13 @@ import {
 import { facet, flatMaterial, hexColour } from "./lowpoly.js";
 
 /**
- * Daso, drawn.
+ * Towns, drawn.
  *
- * Timber everywhere, because that is what the town is for. The palette is
- * deliberately warmer than the wilds around it — a lit window and a woodpile
- * should read as somewhere people are, from a distance, against ground that is
- * all greens and greys.
+ * Daso is timber everywhere, because that is what the town is for; Fanshona is
+ * stone and slate, because it is a market that has been there long enough to
+ * build in stone. Both are deliberately warmer than the wilds around them — a
+ * lit window and a woodpile should read as somewhere people are, from a
+ * distance, against ground that is all greens and greys.
  */
 
 const TIMBER = 0x6b4c30;
@@ -28,6 +31,8 @@ const THATCH = 0x8a6a3a;
 const SHINGLE = 0x53412f;
 const PLASTER = 0xc2b394;
 const LAMPLIGHT = 0xffc46b;
+const STONE = 0x9a958a;
+const SLATE = 0x4a525c;
 
 /** Everything for one settlement, under a single node so arrival can replace
  *  it wholesale. */
@@ -44,13 +49,15 @@ export function buildSettlement(
     thatch: flatMaterial(scene, "thatch", THATCH),
     shingle: flatMaterial(scene, "shingle", SHINGLE),
     plaster: flatMaterial(scene, "plaster", PLASTER),
+    stone: flatMaterial(scene, "stone", STONE),
+    slate: flatMaterial(scene, "slate", SLATE),
   };
 
   for (const building of settlement.buildings) {
     buildBuilding(scene, ostra, building, materials).parent = root;
   }
   for (const prop of settlement.props) {
-    buildProp(scene, ostra, prop, materials).parent = root;
+    buildProp(scene, ostra, settlement, prop, materials).parent = root;
   }
   for (const tree of settlement.trees) {
     buildTree(scene, ostra, tree.x, tree.z, tree.radius, tree.height).parent = root;
@@ -59,7 +66,7 @@ export function buildSettlement(
   return root;
 }
 
-type Materials = Record<"timber" | "timberDark" | "thatch" | "shingle" | "plaster", StandardMaterial>;
+type Materials = Record<"timber" | "timberDark" | "thatch" | "shingle" | "plaster" | "stone" | "slate", StandardMaterial>;
 
 function buildBuilding(
   scene: Scene,
@@ -77,7 +84,9 @@ function buildBuilding(
   );
   pivot.rotation.y = building.yaw;
 
-  const wallMaterial = building.style === "shed" ? materials.timberDark : materials.timber;
+  const wallMaterial = building.style === "shed" ? materials.timberDark
+    : building.style === "stone" ? materials.stone
+    : materials.timber;
   const walls = MeshBuilder.CreateBox("walls", {
     width: building.width,
     depth: building.depth,
@@ -107,7 +116,9 @@ function buildBuilding(
   // cross-section swap places under rotation and it is easy to size one and
   // rotate the other — which is exactly the bug that put oversized roofs on
   // every house here. Two boxes have no such ambiguity.
-  const roofMaterial = building.style === "shed" ? materials.shingle : materials.thatch;
+  const roofMaterial = building.style === "shed" ? materials.shingle
+    : building.style === "stone" ? materials.slate
+    : materials.thatch;
   const overhang = building.style === "shed" ? 0.5 : 0.75;
   const pitch = building.style === "shed" ? 0.38 : 0.62;
 
@@ -139,7 +150,9 @@ function buildBuilding(
     gable.position.set((end * (building.width + overhang)) / 2 - end * 0.1,
       building.height + rise / 2, 0);
     gable.scaling.z = 0.5;
-    gable.material = building.style === "cottage" ? materials.plaster : roofMaterial;
+    gable.material = building.style === "cottage" ? materials.plaster
+      : building.style === "stone" ? materials.stone
+      : roofMaterial;
     gable.parent = pivot;
   }
 
@@ -174,9 +187,18 @@ function buildBuilding(
   return pivot;
 }
 
+/** The surface of whatever lake (x, z) is in, if any. */
+function waterSurface(ostra: OstraDefinition, x: number, z: number): number | undefined {
+  for (const lake of ostra.terrain.lakes ?? []) {
+    if (Math.hypot(x - lake.x, z - lake.z) < lakeReach(lake)) return lakeLevel(lake, ostra.terrain);
+  }
+  return undefined;
+}
+
 function buildProp(
   scene: Scene,
   ostra: OstraDefinition,
+  settlement: SettlementDefinition,
   prop: PropDefinition,
   materials: Materials,
 ): TransformNode {
@@ -279,6 +301,102 @@ function buildProp(
       lantern.position.y = 2.5;
       lantern.material = glow;
       lantern.parent = pivot;
+      break;
+    }
+
+    case "well": {
+      const ring = facet(MeshBuilder.CreateCylinder("well", {
+        diameterTop: 1.5, diameterBottom: 1.6, height: 0.75, tessellation: 8,
+      }, scene));
+      ring.position.y = 0.37;
+      ring.material = materials.stone;
+      ring.parent = pivot;
+      const water = MeshBuilder.CreateDisc("wellWater", { radius: 0.55, tessellation: 8 }, scene);
+      water.rotation.x = Math.PI / 2;
+      water.position.y = 0.6;
+      water.material = flatMaterial(scene, "wellWater", 0x2a4a5a);
+      water.parent = pivot;
+      for (const x of [-0.7, 0.7]) {
+        const post = MeshBuilder.CreateBox("wellPost", { width: 0.12, height: 1.9, depth: 0.12 }, scene);
+        post.position.set(x, 0.95, 0);
+        post.material = materials.timberDark;
+        post.parent = pivot;
+      }
+      const roof = MeshBuilder.CreateBox("wellRoof", { width: 1.9, height: 0.12, depth: 1.3 }, scene);
+      roof.position.y = 1.95;
+      roof.material = materials.slate;
+      roof.parent = pivot;
+      break;
+    }
+
+    case "stall": {
+      const table = MeshBuilder.CreateBox("stallTable", { width: 2, height: 0.12, depth: 0.9 }, scene);
+      table.position.y = 0.85;
+      table.material = materials.timber;
+      table.parent = pivot;
+      for (const [x, z] of [[-0.9, -0.38], [0.9, -0.38], [-0.9, 0.38], [0.9, 0.38]] as const) {
+        const leg = MeshBuilder.CreateBox("stallLeg", { width: 0.08, height: 1.9, depth: 0.08 }, scene);
+        leg.position.set(x, 0.95, z);
+        leg.material = materials.timberDark;
+        leg.parent = pivot;
+      }
+      // Cloth in one of a few colours, by position, so a row of stalls isn't
+      // one stall repeated.
+      const cloths = [0xb8483a, 0x3a6ab8, 0xc89a3a, 0x5a8a4a];
+      const cloth = cloths[Math.abs(Math.round(prop.x * 3 + prop.z * 7)) % cloths.length]!;
+      const awning = MeshBuilder.CreateBox("stallAwning", { width: 2.3, height: 0.06, depth: 1.3 }, scene);
+      awning.position.set(0, 1.95, 0.1);
+      awning.rotation.x = 0.2;
+      awning.material = flatMaterial(scene, "stallCloth", cloth);
+      awning.parent = pivot;
+      for (let k = 0; k < 3; k++) {
+        const good = MeshBuilder.CreateBox("goods", { width: 0.4, height: 0.25, depth: 0.35 }, scene);
+        good.position.set(-0.6 + k * 0.6, 1.03, 0);
+        good.material = k === 1 ? materials.timberDark : materials.plaster;
+        good.parent = pivot;
+      }
+      break;
+    }
+
+    case "dock": {
+      // Level with the town, running out over the water; its posts go down
+      // into the lake. Scenery: you wade beside it, not along it.
+      const deck = settlement.level ?? heightAt(settlement.x, settlement.z, ostra.terrain);
+      pivot.position.y = deck + 0.25;
+      const length = 36;
+      const planks = MeshBuilder.CreateBox("dockDeck", { width: 2.6, height: 0.16, depth: length }, scene);
+      planks.material = materials.timber;
+      planks.parent = pivot;
+      for (let z = -length / 2 + 1; z <= length / 2; z += 3.5) {
+        for (const x of [-1.15, 1.15]) {
+          const post = MeshBuilder.CreateBox("dockPost", { width: 0.2, height: 3.2, depth: 0.2 }, scene);
+          post.position.set(x, -1.5, z);
+          post.material = materials.timberDark;
+          post.parent = pivot;
+        }
+      }
+      break;
+    }
+
+    case "boat": {
+      const surface = waterSurface(ostra, prop.x, prop.z) ?? pivot.position.y;
+      pivot.position.y = surface - 0.12;
+      const hull = MeshBuilder.CreateBox("hull", { width: 1.2, height: 0.4, depth: 3 }, scene);
+      hull.position.y = 0.1;
+      hull.material = materials.timberDark;
+      hull.parent = pivot;
+      for (const x of [-0.62, 0.62]) {
+        const side = MeshBuilder.CreateBox("gunwale", { width: 0.1, height: 0.3, depth: 3.1 }, scene);
+        side.position.set(x, 0.35, 0);
+        side.material = materials.timber;
+        side.parent = pivot;
+      }
+      const bow = MeshBuilder.CreateCylinder("bow", { diameterTop: 0, diameterBottom: 1.2, height: 0.8, tessellation: 3 }, scene);
+      bow.rotation.x = Math.PI / 2;
+      bow.position.set(0, 0.12, 1.85);
+      bow.scaling.set(1, 1, 0.45);
+      bow.material = materials.timberDark;
+      bow.parent = pivot;
       break;
     }
   }

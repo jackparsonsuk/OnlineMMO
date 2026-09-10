@@ -14,6 +14,7 @@ import {
   buildingColliders,
   type Enemy,
   type EnemyArchetype,
+  type EnemyKind,
   EnemyState,
   getArchetype,
   INTERP_DELAY_MS,
@@ -122,7 +123,14 @@ const SOFT_AIM_MELEE = 1.3;
 const SOFT_AIM_RANGED = 0.3;
 
 /** Kinds of blood, by creature. */
-const IMPACT_COLOUR: Record<string, ShardColour> = { zombie: "ichor", spider: "void" };
+const IMPACT_COLOUR: Record<EnemyKind, ShardColour> = {
+  zombie: "ichor", spider: "void", wolf: "blood", boar: "blood", wretch: "bile", wisp: "ember", golem: "stone",
+};
+
+/** The warning each creature gives as it winds up. */
+const WINDUP_SOUND: Record<EnemyKind, Sound> = {
+  zombie: "windup", spider: "windup", wolf: "growl", boar: "snort", wretch: "gurgle", wisp: "crackle", golem: "rumble",
+};
 
 interface CastPayload {
   by: string;
@@ -133,6 +141,9 @@ interface CastPayload {
 }
 
 interface EnemyView {
+  /** Bumped when a windup starts or is interrupted; a scheduled blow effect
+   *  only plays if its token is still current. */
+  swing: number;
   rig: Rig;
   animator: Animator;
   archetype: EnemyArchetype;
@@ -547,7 +558,7 @@ export function createSession(
     // climbs out of the ground rather than blinking into existence.
     if (performance.now() - born > 1500) animator.emerge(performance.now());
     if (enemy.state === EnemyState.Dead) animator.die(performance.now() - 10_000);
-    enemies.set(enemyId, { rig, animator, archetype, state: enemy.state, health: enemy.health, variant: "hostile" });
+    enemies.set(enemyId, { swing: 0, rig, animator, archetype, state: enemy.state, health: enemy.health, variant: "hostile" });
     nametags.add(enemyId, `${archetype.name} · ${enemy.level}`, archetype.colour, "hostile", true);
     nametags.setHealth(enemyId, enemy.health / Math.max(1, enemy.maxHealth));
   });
@@ -630,7 +641,13 @@ export function createSession(
           effects.cancelTelegraphNear(point.x, point.z);
         }
       }
-      if (hit.staggered) enemies.get(hit.id)?.animator.interrupt();
+      if (hit.staggered) {
+        const struck = enemies.get(hit.id);
+        if (struck) {
+          struck.animator.interrupt();
+          struck.swing++;
+        }
+      }
       if (!mine) continue;
 
       // Our own: the impact was drawn at the moment of contact if we saw it
@@ -667,8 +684,53 @@ export function createSession(
       view.archetype.attackArc,
       payload.ms,
     );
-    if (payload.target === room.sessionId) play("windup", x, z, 0.9);
+    // Everyone near hears the warning; its target hears it loudest.
+    play(WINDUP_SOUND[view.archetype.kind], x, z, payload.target === room.sessionId ? 0.95 : 0.5);
+
+    const swing = ++view.swing;
+    const y = predict.value(enemy, "y");
+    later(now + payload.ms, () => {
+      if (view.swing !== swing || !enemies.has(payload.id)) return;
+      blowEffect(view, x, y, z, payload.yaw);
+    });
   });
+
+  /** The moment a creature's blow lands: what it looks and sounds like
+   *  depends on how it attacks. Damage, if any, arrives separately. */
+  function blowEffect(view: EnemyView, x: number, y: number, z: number, yaw: number): void {
+    const archetype = view.archetype;
+    const t = performance.now();
+    const fx = Math.sin(yaw);
+    const fz = Math.cos(yaw);
+    const self = selfPosition();
+    const near = Math.hypot(self.x - x, self.z - z);
+    switch (archetype.style) {
+      case "spit": {
+        const from = new Vector3(x + fx * 0.6, y + 0.8, z + fz * 0.6);
+        const to = new Vector3(x + fx * archetype.attackReach, y + 0.7, z + fz * archetype.attackReach);
+        effects.bolt(t, from, to, () => effects.impact(to.x, to.y, to.z, fx, fz, "bile", false), 0x9ad04a, 32, "bile");
+        play("spit", x, z);
+        break;
+      }
+      case "charge":
+        effects.dust(x, y, z, 14);
+        play("charge", x, z);
+        break;
+      case "pulse":
+        effects.shockwave(t, x, y, z, archetype.attackReach + PLAYER_RADIUS, 0xff7a2e, 4);
+        effects.impact(x, y + (archetype.hover ?? 0) + 0.5, z, 0, 0, "ember", true);
+        play("burst", x, z);
+        if (near < 6) shake(0.14, 160, t);
+        break;
+      case "slam":
+        effects.shockwave(t, x + fx * 1.6, y, z + fz * 1.6, 3.2, 0xc8c0a8, 22);
+        play("slam", x, z);
+        if (near < 14) shake(0.3 * (1 - near / 14) + 0.08, 260, t);
+        break;
+      default:
+        break;
+    }
+  }
 
   const offDamage = room.onMessage("damage", (payload: { id: string; amount: number; by?: string }) => {
     const now = performance.now();

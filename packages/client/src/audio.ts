@@ -14,7 +14,9 @@
 export type Sound =
   | "swing" | "swingHeavy" | "hit" | "hitHeavy" | "crit"
   | "bolt" | "boltHit" | "sunder" | "hurt" | "evade"
-  | "windup" | "kill" | "pickup" | "death";
+  | "windup" | "kill" | "pickup" | "death"
+  | "growl" | "snort" | "gurgle" | "crackle" | "rumble"
+  | "spit" | "charge" | "burst" | "slam";
 
 const STORAGE_KEY = "ostracon.muted";
 
@@ -136,6 +138,41 @@ export class SoundBoard {
       case "death":
         this.tone(t, 330, 80, 0.9, "triangle", 0.22 * volume);
         this.rumble(t, 0.6, 0.3 * volume);
+        break;
+      // Windups: each creature has its own warning, so you can tell what is
+      // about to happen from the sound alone.
+      case "growl":
+        this.tone(t, 110 * pitch, 150 * pitch, 0.3, "sawtooth", 0.1 * volume, 700);
+        break;
+      case "snort":
+        this.whoosh(t, 300, 900, 0.16, 0.3 * volume);
+        this.whoosh(t + 0.25, 300, 900, 0.16, 0.3 * volume);
+        break;
+      case "gurgle":
+        this.tone(t, 180 * pitch, 90 * pitch, 0.6, "square", 0.07 * volume, 500);
+        break;
+      case "crackle":
+        for (let i = 0; i < 5; i++) this.crack(t + i * 0.12, 3000 + i * 500, 0.03, 0.18 * volume);
+        break;
+      case "rumble":
+        this.rumble(t, 0.9, 0.6 * volume);
+        this.tone(t, 50, 70, 0.9, "sawtooth", 0.08 * volume, 200);
+        break;
+      // Blows.
+      case "spit":
+        this.whoosh(t, 1400, 500, 0.2, 0.35 * volume);
+        break;
+      case "charge":
+        this.rumble(t, 0.6, 0.55 * volume);
+        this.thud(t, 90, 40, 0.3, 0.6 * volume);
+        break;
+      case "burst":
+        this.thud(t, 140, 40, 0.3, 0.8 * volume);
+        this.crack(t, 1800, 0.18, 0.5 * volume);
+        break;
+      case "slam":
+        this.thud(t, 70, 25, 0.6, 1.0 * volume);
+        this.rumble(t, 0.7, 0.7 * volume);
         break;
     }
   }

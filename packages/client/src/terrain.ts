@@ -7,6 +7,9 @@ import {
   fbm,
   forestAt,
   heightAt,
+  lakeLevel,
+  lakeReach,
+  regionAt,
   roadDistance,
   SCENERY_CELL,
   settlementsIn,
@@ -55,6 +58,11 @@ const SKIRT_DEPTH = 6;
 export interface GroundPalette {
   low: Color3;
   high: Color3;
+  /** Per region, in the Ostra's region order. Empty without regions. */
+  regionLow: Color3[];
+  regionHigh: Color3[];
+  lakebed: Color3;
+  water: Color3;
   dry: Color3;
   rock: Color3;
   peak: Color3;
@@ -71,6 +79,10 @@ export function groundPalette(ostra: OstraDefinition): GroundPalette {
     low,
     // Crests catch the light: the grid colour is the Ostra's brighter tone.
     high: Color3.Lerp(low, grid, 0.55),
+    regionLow: ostra.regions.map((r) => Color3.FromHexString(r.ground)),
+    regionHigh: ostra.regions.map((r) => Color3.Lerp(Color3.FromHexString(r.ground), Color3.FromHexString(r.crest), 0.6)),
+    lakebed: Color3.FromHexString("#4a4a36"),
+    water: Color3.FromHexString("#3f7ea6"),
     // Sun-bleached meadow, for variety across a big map.
     dry: Color3.Lerp(grid, Color3.FromHexString("#b5a55e"), 0.55),
     rock: Color3.FromHexString(p.edge),
@@ -82,6 +94,8 @@ export function groundPalette(ostra: OstraDefinition): GroundPalette {
 }
 
 const scratch = new Color3();
+const lowScratch = new Color3();
+const highScratch = new Color3();
 
 /**
  * The colour of the ground at a point. Shared by the 3D terrain and the map,
@@ -98,14 +112,27 @@ export function groundTone(
   height: number,
   slope: number,
   out: Color3 = scratch,
+  /** The map shows open water; the 3D ground shows the lakebed under the
+   *  water mesh drawn on top of it. */
+  asMap = false,
 ): Color3 {
   const lift = Math.min(1, Math.max(0, height / palette.relief * 0.5 + 0.5));
-  Color3.LerpToRef(palette.low, palette.high, lift, out);
+  let low = palette.low;
+  let high = palette.high;
+  if (palette.regionLow.length > 0) {
+    // Blended across borders, so a region fades into the next.
+    const r = regionAt(ostra.terrain, x, z);
+    Color3.LerpToRef(palette.regionLow[r.secondary]!, palette.regionLow[r.primary]!, r.weight, lowScratch);
+    Color3.LerpToRef(palette.regionHigh[r.secondary]!, palette.regionHigh[r.primary]!, r.weight, highScratch);
+    low = lowScratch;
+    high = highScratch;
+  }
+  Color3.LerpToRef(low, high, lift, out);
 
   if (ostra.wilds) {
     // Broad patches of drier grass, so a kilometre of meadow is not one green.
     const dryness = fbm(x / 520, z / 520, 7, 2);
-    if (dryness > 0.1) Color3.LerpToRef(out, palette.dry, Math.min(0.6, (dryness - 0.1) * 1.6), out);
+    if (dryness > 0.1) Color3.LerpToRef(out, palette.dry, Math.min(0.35, (dryness - 0.1) * 1.2), out);
     // Darker under the trees: woods read from a distance, even on the horizon
     // mesh, which has no trees on it.
     const wooded = forestAt(ostra, x, z);
@@ -128,9 +155,24 @@ export function groundTone(
     Color3.LerpToRef(out, palette.peak, snow, out);
   }
 
-  // Roads last, over everything: a path should be visible through any biome.
+  // Roads over everything but water: a path should be visible in any region.
   const road = roadDistance(ostra, x, z);
   if (road < 1.2) Color3.LerpToRef(out, palette.dirt, road <= 0 ? 0.92 : 0.92 * (1 - road / 1.2), out);
+
+  if (ostra.terrain.lakes) {
+    for (const lake of ostra.terrain.lakes) {
+      const reach = lakeReach(lake);
+      const dx = x - lake.x;
+      const dz = z - lake.z;
+      if (dx * dx + dz * dz >= reach * reach) continue;
+      const depth = lakeLevel(lake, ostra.terrain) - height;
+      if (depth > -0.3) {
+        const wet = Math.min(1, (depth + 0.3) / 0.5);
+        Color3.LerpToRef(out, asMap ? palette.water : palette.lakebed, asMap ? wet : wet * 0.8, out);
+      }
+      break;
+    }
+  }
 
   return out;
 }

@@ -24,13 +24,14 @@ export interface BuildingDefinition {
   depth: number;
   height: number;
   yaw: number;
-  /** Changes the roof and trim. */
-  style: "cottage" | "hall" | "shed";
+  /** Changes the walls, roof and trim. */
+  style: "cottage" | "hall" | "shed" | "stone";
 }
 
 /** Scenery with no collision — you walk through the long grass, not around it. */
 export interface PropDefinition {
-  kind: "log" | "stump" | "barrel" | "crate" | "lamp" | "fence" | "woodpile";
+  kind: "log" | "stump" | "barrel" | "crate" | "lamp" | "fence" | "woodpile"
+    | "dock" | "boat" | "well" | "stall";
   x: number;
   z: number;
   yaw: number;
@@ -64,6 +65,13 @@ export interface SettlementDefinition {
   /** Trees around the edge. These DO collide — it is a logging town, and a
    *  forest you can walk through is not a forest. */
   trees: Array<{ x: number; z: number; radius: number; height: number }>;
+  /** Thickens the generated woods around it. A logging town wants a forest;
+   *  a lake town wants a view of the water. */
+  woodland: boolean;
+  /** Ground height of the town's level shelf. Omit to take the natural ground
+   *  at its centre. Fixed where something else has to line up with it — a
+   *  dock has to reach water. */
+  level?: number;
 }
 
 /**
@@ -232,8 +240,91 @@ export const DASO: SettlementDefinition = {
     { ...at(11, -13), radius: 0.95, height: 8.3 },
     { ...at(16, -8), radius: 0.85, height: 7.6 },
   ],
+  woodland: true,
+};
+
+/**
+ * Fanshona: a lake town in Brightwater, Terra's north-east.
+ *
+ * NOTE: the vault names Fanshona but these details — the lake, the docks,
+ * the weighhouse, everyone in it — were invented for the game and should be
+ * checked against the vault before anyone writes lore around them.
+ *
+ * Built as Daso's opposite. Daso is timber, a working camp nobody visits;
+ * Fanshona is stone, a market everything passes through — fish off the lake,
+ * timber down from Daso, stone from the moor. So it is laid out around a
+ * square and a weighhouse, and it faces the water.
+ */
+const FANSHONA_X = 2065;
+const FANSHONA_Z = 1965;
+/** The town faces its lake, which lies to the north-east. */
+const FANSHONA_YAW = Math.PI / 4;
+
+/** Local coordinates, +z toward the lake, rotated into place — so the whole
+ *  town can be turned by editing one number. Trig is safe here, unlike in the
+ *  generator: if two engines round sin(π/4) differently, a wall moves by a
+ *  femtometre. It cannot make a wall appear or vanish. */
+function lakeside(dx: number, dz: number): { x: number; z: number } {
+  const sin = Math.sin(FANSHONA_YAW);
+  const cos = Math.cos(FANSHONA_YAW);
+  return { x: FANSHONA_X + dx * cos + dz * sin, z: FANSHONA_Z - dx * sin + dz * cos };
+}
+
+export const FANSHONA: SettlementDefinition = {
+  id: "fanshona",
+  name: "Fanshona",
+  subtitle: "Market town on the Brightwater",
+  x: FANSHONA_X,
+  z: FANSHONA_Z,
+  radius: 24,
+  woodland: false,
+  // Set with the lake's level in ostras.ts, so the dock always reaches water.
+  level: 10.2,
+
+  buildings: [
+    { id: "fanshona-weighhouse", name: "The Weighhouse", ...lakeside(0, -5), width: 10, depth: 7, height: 5.2, yaw: FANSHONA_YAW, style: "hall" },
+    { id: "fanshona-house-1", name: "A fisher's house", ...lakeside(-11, -1), width: 5, depth: 4.5, height: 3.4, yaw: FANSHONA_YAW + 0.12, style: "stone" },
+    { id: "fanshona-house-2", name: "A fisher's house", ...lakeside(11, -1.5), width: 5, depth: 4.4, height: 3.3, yaw: FANSHONA_YAW - 0.1, style: "stone" },
+    { id: "fanshona-house-3", name: "The net-house", ...lakeside(-9, -13), width: 4.8, depth: 4.2, height: 3.2, yaw: FANSHONA_YAW + 0.3, style: "stone" },
+    { id: "fanshona-house-4", name: "A trader's house", ...lakeside(9, -13), width: 5.2, depth: 4.4, height: 3.6, yaw: FANSHONA_YAW - 0.25, style: "stone" },
+    { id: "fanshona-house-5", name: "A boatwright's house", ...lakeside(-15, 8), width: 4.6, depth: 4.4, height: 3.2, yaw: FANSHONA_YAW + 0.5, style: "stone" },
+    { id: "fanshona-boathouse", name: "The boathouse", ...lakeside(12, 10), width: 6.5, depth: 4.5, height: 3.4, yaw: FANSHONA_YAW - 0.35, style: "shed" },
+  ],
+
+  props: [
+    { kind: "well", ...lakeside(0, 5), yaw: 0 },
+    { kind: "stall", ...lakeside(-4.5, 3.5), yaw: FANSHONA_YAW + 0.2 },
+    { kind: "stall", ...lakeside(4.5, 3.8), yaw: FANSHONA_YAW - 0.2 },
+    { kind: "crate", ...lakeside(6.5, -9), yaw: 0.3 },
+    { kind: "crate", ...lakeside(7.3, -9.8), yaw: -0.2 },
+    { kind: "barrel", ...lakeside(-6.2, -9.4), yaw: 0 },
+    { kind: "barrel", ...lakeside(-5.5, -10.1), yaw: 0.5 },
+    { kind: "lamp", ...lakeside(-3, 10), yaw: 0 },
+    { kind: "lamp", ...lakeside(3, 10), yaw: 0 },
+    { kind: "lamp", ...lakeside(0, -12), yaw: 0 },
+    // Out over the water from the foot of the square.
+    { kind: "dock", ...lakeside(0, 38), yaw: FANSHONA_YAW },
+    { kind: "boat", ...lakeside(-5, 55), yaw: FANSHONA_YAW + 1.4 },
+    { kind: "boat", ...lakeside(5.5, 51), yaw: FANSHONA_YAW + 1.7 },
+  ],
+
+  villagers: [
+    { name: "Maera, harbourmistress", line: "Every boat on the Brightwater ties up here, or it doesn't tie up at all.", ...lakeside(0, 14), yaw: FANSHONA_YAW + Math.PI, colour: 0x3f6a8a },
+    { name: "Tobin, net-mender", line: "The Wretches take a net a week. Spit straight through the mesh.", ...lakeside(-7, -6), yaw: FANSHONA_YAW + 0.8, colour: 0x6a7a5a },
+    { name: "Ysolde, weigher", line: "Fish, timber down from Daso, stone off the moor. Everything gets weighed.", ...lakeside(1.5, -1), yaw: FANSHONA_YAW + Math.PI, colour: 0x8a5a6a },
+    { name: "Old Caddo", line: "Came through the Gate the day it opened. Saw the lake and never left.", ...lakeside(-3, 6), yaw: FANSHONA_YAW - 0.6, colour: 0x7a6a50 },
+    { name: "Pell, boatwright", line: "Thornback hide patches a hull, if you can get close enough to take one.", ...lakeside(10, 6), yaw: FANSHONA_YAW - 2.2, colour: 0x8a6a3a },
+  ],
+
+  trees: [
+    { ...lakeside(-20, -14), radius: 0.6, height: 7.4 },
+    { ...lakeside(20, -15), radius: 0.6, height: 7.9 },
+    { ...lakeside(-22, 2), radius: 0.55, height: 6.8 },
+    { ...lakeside(23, 3), radius: 0.6, height: 7.2 },
+  ],
 };
 
 export const SETTLEMENTS: Record<string, SettlementDefinition> = {
   daso: DASO,
+  fanshona: FANSHONA,
 };

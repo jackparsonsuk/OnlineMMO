@@ -8,7 +8,6 @@ import {
   COMBO_FINISHER_MULTIPLIER,
   CRIT_CHANCE,
   CRIT_MULTIPLIER,
-  DROP_CHANCE,
   Enemy,
   ENEMY_RESPAWN_MS,
   EnemyState,
@@ -752,7 +751,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         const length = Math.hypot(dx, dz) || 1;
         const knockback = finisher ? COMBO_FINISHER_KNOCKBACK : spell.knockback;
         staggered = spell.stagger || finisher;
-        takeHit(brain, sessionId, amount, dx / length, dz / length, knockback, staggered, now);
+        const archetype = this.archetypeFor(enemy.kind);
+        takeHit(brain, archetype, sessionId, amount, dx / length, dz / length, knockback, staggered, now);
+        // A golem shrugs it off; tell the client so it doesn't claim otherwise.
+        if (archetype.staggerImmune) staggered = false;
         this.rallyCampMates(id, brain, enemy, sessionId);
       }
 
@@ -821,13 +823,17 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
    * Circle. Without that, a harder place is pure downside and nobody would go.
    */
   private rollDrop(enemy: Enemy, killerSessionId: string): void {
-    const chance = DROP_CHANCE[enemy.kind] ?? 0;
-    if (Math.random() >= chance) return;
+    const archetype = this.archetypeFor(enemy.kind);
+    if (Math.random() >= archetype.dropChance) return;
 
-    const danger = this.ostra.difficulty.health * (1 + 0.06 * (enemy.level - 1));
-    const rarity = rollRarity(Math.random(), danger);
-    const pool = itemsOfRarity(rarity);
-    const item = pool[Math.floor(Math.random() * pool.length)];
+    // Each creature's own rare find, checked first. Found nowhere else.
+    const signature = archetype.signature;
+    let item = signature && Math.random() < signature.chance ? getItem(signature.itemId) : undefined;
+    if (!item) {
+      const danger = this.ostra.difficulty.health * (1 + 0.06 * (enemy.level - 1));
+      const pool = itemsOfRarity(rollRarity(Math.random(), danger));
+      item = pool[Math.floor(Math.random() * pool.length)];
+    }
     if (!item) return;
 
     const id = `g${this.nextGroundId++}`;

@@ -150,6 +150,7 @@ export function calmDown(brain: EnemyBrain): void {
  */
 export function takeHit(
   brain: EnemyBrain,
+  archetype: EnemyArchetype,
   attacker: string,
   damage: number,
   dirX: number,
@@ -162,10 +163,12 @@ export function takeHit(
   if (!brain.returning && brain.quarry === undefined) brain.quarry = attacker;
 
   // Velocity whose decaying integral is `knockback` metres.
-  brain.knockX += dirX * knockback * KNOCK_DECAY;
-  brain.knockZ += dirZ * knockback * KNOCK_DECAY;
+  const shove = knockback * (archetype.knockbackScale ?? 1) * KNOCK_DECAY;
+  brain.knockX += dirX * shove;
+  brain.knockZ += dirZ * shove;
 
-  if (!stagger) return;
+  // A golem does not flinch. That is most of what makes it a golem.
+  if (!stagger || archetype.staggerImmune) return;
   brain.windupUntil = 0;
   brain.windupTarget = undefined;
   brain.staggerUntil = now + STAGGER_MS;
@@ -303,6 +306,13 @@ function resolveBlow(
     victim.x, victim.z, PLAYER_RADIUS,
     archetype.attackReach, archetype.attackArc,
   );
+
+  // A charger runs on through, hit or miss. Spent like knockback, so it
+  // stops at a tree the way anything shoved into one does.
+  if (archetype.dash) {
+    brain.knockX += Math.sin(brain.windupYaw) * archetype.dash * KNOCK_DECAY;
+    brain.knockZ += Math.cos(brain.windupYaw) * archetype.dash * KNOCK_DECAY;
+  }
   return { type: landed ? "hit" : "miss", target };
 }
 
@@ -400,11 +410,22 @@ function advance(
 
   // Close enough. Still face the quarry — a zombie that has caught you should
   // be looking at you, not at wherever it last walked.
-  const stopAt = enemy.state === EnemyState.Chase
-    ? archetype.radius + CONTACT_SLACK
+  const chasing = enemy.state === EnemyState.Chase;
+  const preferred = chasing ? archetype.preferredRange : undefined;
+  const stopAt = chasing
+    ? preferred ?? archetype.radius + CONTACT_SLACK
     : 0.25;
 
   if (range > 1e-4) turnToward(enemy, Math.atan2(toX, toZ), dt);
+
+  // A spitter backs off when you close on it, still facing you — so the way
+  // to fight one is to commit to chasing it down.
+  if (preferred !== undefined && range < preferred - 3 && range > 1e-4) {
+    const retreat = archetype.chaseSpeed * 0.75 * dt;
+    moveBody(enemy, (-toX / range) * retreat, (-toZ / range) * retreat, world, archetype.radius);
+    return;
+  }
+
   if (range <= stopAt) {
     // Nothing to move by, but still resolve overlaps: a player can walk into a
     // standing creature and it should be pushed apart rather than merged.

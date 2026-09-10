@@ -1,5 +1,5 @@
 import { Color3 } from "@babylonjs/core/Maths/math.js";
-import type { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js";
+import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.js";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
@@ -23,7 +23,7 @@ import { facet, flatMaterial, hexColour } from "./lowpoly.js";
  * moment its blow actually lands.
  */
 
-export type RigKind = "player" | "zombie" | "spider";
+export type RigKind = "player" | EnemyKind;
 
 export interface Rig {
   kind: RigKind;
@@ -204,8 +204,203 @@ function buildSpiderRig(scene: Scene): Rig {
   return rig;
 }
 
+/** Four legs at the corners of a body, each swinging from the hip. Shared by
+ *  the wolf and the boar; the gait lives in `poseQuadruped`. */
+function addLegs(
+  scene: Scene, rig: Rig, parent: TransformNode,
+  halfWidth: number, halfLength: number, hipY: number, length: number, thickness: number,
+  material: StandardMaterial,
+): void {
+  const corners: Array<[string, number, number]> = [
+    ["legFL", -halfWidth, halfLength], ["legFR", halfWidth, halfLength],
+    ["legBL", -halfWidth, -halfLength], ["legBR", halfWidth, -halfLength],
+  ];
+  for (const [name, x, z] of corners) {
+    const leg = joint(scene, name, parent, x, hipY, z);
+    box(scene, rig, leg, { width: thickness, height: length, depth: thickness }, 0, -length / 2, 0, material);
+    rig.joints[name] = leg;
+  }
+}
+
+/** Lean, long-snouted, tail up. Grey so it reads against both grass and pine. */
+function buildWolfRig(scene: Scene): Rig {
+  const archetype = getArchetype("wolf");
+  const rig = newRig(scene, "wolf");
+  const fur = flatMaterial(scene, "wolfFur", archetype.colour);
+  const dark = flatMaterial(scene, "wolfDark", hexColour(archetype.colour).scale(0.62));
+  const pale = flatMaterial(scene, "wolfPale", hexColour(archetype.colour).scale(1.3));
+  const eyes = flatMaterial(scene, "wolfEyes", 0xf0d060);
+  eyes.emissiveColor = hexColour(0x9a7a18);
+  track(rig, fur, dark, pale, eyes);
+
+  const torso = joint(scene, "torso", rig.body, 0, 0.58, 0);
+  box(scene, rig, torso, { width: 0.4, height: 0.36, depth: 0.95 }, 0, 0, 0, fur);
+  box(scene, rig, torso, { width: 0.46, height: 0.42, depth: 0.36 }, 0, 0.04, 0.3, fur);
+  box(scene, rig, torso, { width: 0.3, height: 0.12, depth: 0.7 }, 0, -0.2, 0.05, pale);
+  const head = joint(scene, "head", torso, 0, 0.16, 0.5);
+  box(scene, rig, head, { width: 0.3, height: 0.28, depth: 0.3 }, 0, 0, 0.08, fur);
+  box(scene, rig, head, { width: 0.17, height: 0.14, depth: 0.26 }, 0, -0.05, 0.33, pale);
+  box(scene, rig, head, { width: 0.22, height: 0.05, depth: 0.04 }, 0, 0.06, 0.24, eyes);
+  box(scene, rig, head, { width: 0.07, height: 0.14, depth: 0.06 }, -0.1, 0.19, 0.02, dark);
+  box(scene, rig, head, { width: 0.07, height: 0.14, depth: 0.06 }, 0.1, 0.19, 0.02, dark);
+  const tail = joint(scene, "tail", torso, 0, 0.1, -0.47);
+  box(scene, rig, tail, { width: 0.1, height: 0.1, depth: 0.45 }, 0, 0, -0.2, dark);
+  tail.rotation.x = -0.5;
+  addLegs(scene, rig, torso, 0.14, 0.33, -0.1, 0.5, 0.11, dark);
+  Object.assign(rig.joints, { torso, head, tail });
+  return rig;
+}
+
+/** Heavy, low-slung, all shoulder — with a crest of thorns down its back and
+ *  tusks you can see from across a field. */
+function buildBoarRig(scene: Scene): Rig {
+  const archetype = getArchetype("boar");
+  const rig = newRig(scene, "boar");
+  const hide = flatMaterial(scene, "boarHide", archetype.colour);
+  const dark = flatMaterial(scene, "boarDark", hexColour(archetype.colour).scale(0.55));
+  const bone = flatMaterial(scene, "boarTusk", 0xe8e0c8);
+  const eyes = flatMaterial(scene, "boarEyes", 0xd84a2a);
+  eyes.emissiveColor = hexColour(0x7a1a0a);
+  track(rig, hide, dark, bone, eyes);
+
+  const torso = joint(scene, "torso", rig.body, 0, 0.66, 0);
+  box(scene, rig, torso, { width: 0.72, height: 0.62, depth: 1.25 }, 0, 0, -0.05, hide);
+  box(scene, rig, torso, { width: 0.8, height: 0.72, depth: 0.5 }, 0, 0.06, 0.32, hide);
+  // The thorns: a ridge of little pyramids.
+  for (let k = 0; k < 5; k++) {
+    const thorn = MeshBuilder.CreateCylinder("thorn", { diameterTop: 0, diameterBottom: 0.16, height: 0.24, tessellation: 4 }, scene);
+    thorn.position.set(0, 0.42, 0.42 - k * 0.24);
+    thorn.material = dark;
+    thorn.parent = torso;
+    rig.pickables.push(thorn);
+  }
+  const head = joint(scene, "head", torso, 0, -0.02, 0.58);
+  box(scene, rig, head, { width: 0.5, height: 0.46, depth: 0.42 }, 0, 0, 0.12, hide);
+  box(scene, rig, head, { width: 0.3, height: 0.24, depth: 0.2 }, 0, -0.1, 0.4, dark);
+  box(scene, rig, head, { width: 0.28, height: 0.05, depth: 0.04 }, 0, 0.1, 0.34, eyes);
+  for (const side of [-1, 1]) {
+    const tusk = box(scene, rig, head, { width: 0.06, height: 0.24, depth: 0.06 }, side * 0.17, -0.02, 0.48, bone);
+    tusk.rotation.x = -0.6;
+    tusk.rotation.z = side * -0.35;
+  }
+  addLegs(scene, rig, torso, 0.24, 0.42, -0.22, 0.42, 0.16, dark);
+  Object.assign(rig.joints, { torso, head });
+  return rig;
+}
+
+/** Squat, wide-mouthed, long-armed: a thing that sits in the mud and waits. */
+function buildWretchRig(scene: Scene): Rig {
+  const archetype = getArchetype("wretch");
+  const rig = newRig(scene, "wretch");
+  const skin = flatMaterial(scene, "wretchSkin", archetype.colour);
+  const dark = flatMaterial(scene, "wretchDark", hexColour(archetype.colour).scale(0.55));
+  const belly = flatMaterial(scene, "wretchBelly", 0xa8a870);
+  const glow = flatMaterial(scene, "wretchGlow", 0xc8ff6a);
+  glow.emissiveColor = hexColour(0x6a9a1a);
+  track(rig, skin, dark, belly, glow);
+
+  const torso = joint(scene, "torso", rig.body, 0, 0.45, 0);
+  const lump = facet(MeshBuilder.CreateSphere("wretchBody", { diameter: 1, segments: 2 }, scene));
+  lump.scaling.set(0.95, 0.75, 1.05);
+  lump.material = skin;
+  lump.parent = torso;
+  rig.pickables.push(lump);
+  box(scene, rig, torso, { width: 0.6, height: 0.3, depth: 0.2 }, 0, -0.12, 0.38, belly);
+  const head = joint(scene, "head", torso, 0, 0.3, 0.3);
+  box(scene, rig, head, { width: 0.62, height: 0.3, depth: 0.5 }, 0, 0.05, 0.15, skin);
+  box(scene, rig, head, { width: 0.4, height: 0.06, depth: 0.05 }, 0, 0.12, 0.41, glow);
+  const jaw = joint(scene, "jaw", head, 0, -0.1, 0.02);
+  box(scene, rig, jaw, { width: 0.58, height: 0.12, depth: 0.46 }, 0, -0.04, 0.16, dark);
+  // The gullet, which glows when it is about to spit.
+  const throat = box(scene, rig, head, { width: 0.3, height: 0.1, depth: 0.1 }, 0, -0.04, 0.38, glow);
+  throat.scaling.setAll(0.01);
+  for (const side of [-1, 1]) {
+    const arm = joint(scene, side < 0 ? "armL" : "armR", torso, side * 0.46, 0.08, 0.2);
+    const limb = box(scene, rig, arm, { width: 0.14, height: 0.6, depth: 0.14 }, 0, -0.28, 0, dark);
+    limb.rotation.z = side * 0.35;
+    rig.joints[side < 0 ? "armL" : "armR"] = arm;
+  }
+  Object.assign(rig.joints, { torso, head, jaw, throat });
+  return rig;
+}
+
+/** A knot of embers that will not settle: a bright core and shards orbiting
+ *  it. Glows, so it reads in the ash and the dark. */
+function buildWispRig(scene: Scene): Rig {
+  const archetype = getArchetype("wisp");
+  const rig = newRig(scene, "wisp");
+  const core = new StandardMaterial("wispCore", scene);
+  core.diffuseColor = hexColour(0xffd27a);
+  core.emissiveColor = hexColour(0xff9a3a);
+  core.specularColor = Color3.Black();
+  const shard = new StandardMaterial("wispShard", scene);
+  shard.diffuseColor = hexColour(archetype.colour);
+  shard.emissiveColor = hexColour(0xc0441a);
+  shard.specularColor = Color3.Black();
+  track(rig, core, shard);
+
+  const heart = joint(scene, "heart", rig.body, 0, archetype.hover ?? 0.9, 0);
+  const ball = MeshBuilder.CreatePolyhedron("wispHeart", { type: 1, size: 0.34 }, scene);
+  ball.material = core;
+  ball.parent = heart;
+  rig.pickables.push(ball);
+  const orbit = joint(scene, "orbit", heart, 0, 0, 0);
+  for (let k = 0; k < 4; k++) {
+    const piece = MeshBuilder.CreatePolyhedron("wispShard", { type: 0, size: 0.14 }, scene);
+    const angle = (k / 4) * Math.PI * 2;
+    piece.position.set(Math.sin(angle) * 0.55, (k % 2 === 0 ? 0.15 : -0.15), Math.cos(angle) * 0.55);
+    piece.material = shard;
+    piece.parent = orbit;
+    rig.pickables.push(piece);
+  }
+  Object.assign(rig.joints, { heart, orbit });
+  return rig;
+}
+
+/** Stacked stone the size of a doorway, with a rune for a face. */
+function buildGolemRig(scene: Scene): Rig {
+  const archetype = getArchetype("golem");
+  const rig = newRig(scene, "golem");
+  const stone = flatMaterial(scene, "golemStone", archetype.colour);
+  const dark = flatMaterial(scene, "golemDark", hexColour(archetype.colour).scale(0.68));
+  const moss = flatMaterial(scene, "golemMoss", 0x5a7a44);
+  const rune = flatMaterial(scene, "golemRune", 0x8ff0e0);
+  rune.emissiveColor = hexColour(0x2a9a88);
+  track(rig, stone, dark, moss, rune);
+
+  const hips = 1.05;
+  const legL = joint(scene, "legL", rig.body, -0.36, hips, 0);
+  const legR = joint(scene, "legR", rig.body, 0.36, hips, 0);
+  box(scene, rig, legL, { width: 0.5, height: 1.05, depth: 0.55 }, 0, -0.52, 0, dark);
+  box(scene, rig, legR, { width: 0.5, height: 1.05, depth: 0.55 }, 0, -0.52, 0, dark);
+  const chest = joint(scene, "chest", rig.body, 0, hips, 0);
+  box(scene, rig, chest, { width: 1.4, height: 1.2, depth: 0.9 }, 0, 0.62, 0, stone);
+  box(scene, rig, chest, { width: 1.0, height: 0.2, depth: 0.95 }, 0, 1.28, -0.05, moss);
+  const head = joint(scene, "head", chest, 0, 1.3, 0.2);
+  box(scene, rig, head, { width: 0.55, height: 0.45, depth: 0.5 }, 0, 0.15, 0.05, dark);
+  box(scene, rig, head, { width: 0.34, height: 0.08, depth: 0.05 }, 0, 0.2, 0.31, rune);
+  box(scene, rig, chest, { width: 0.2, height: 0.35, depth: 0.05 }, 0, 0.7, 0.46, rune);
+  for (const side of [-1, 1]) {
+    const name = side < 0 ? "armL" : "armR";
+    const arm = joint(scene, name, chest, side * 0.9, 1.05, 0);
+    box(scene, rig, arm, { width: 0.42, height: 0.95, depth: 0.45 }, 0, -0.45, 0, stone);
+    box(scene, rig, arm, { width: 0.6, height: 0.55, depth: 0.6 }, 0, -1.1, 0.05, dark);
+    rig.joints[name] = arm;
+  }
+  Object.assign(rig.joints, { legL, legR, chest, head });
+  return rig;
+}
+
 export function buildEnemyRig(scene: Scene, kind: EnemyKind): Rig {
-  return kind === "spider" ? buildSpiderRig(scene) : buildZombieRig(scene);
+  switch (kind) {
+    case "spider": return buildSpiderRig(scene);
+    case "wolf": return buildWolfRig(scene);
+    case "boar": return buildBoarRig(scene);
+    case "wretch": return buildWretchRig(scene);
+    case "wisp": return buildWispRig(scene);
+    case "golem": return buildGolemRig(scene);
+    default: return buildZombieRig(scene);
+  }
 }
 
 // --- animation -----------------------------------------------------------------
@@ -215,6 +410,9 @@ export type Action =
   | { type: "cast"; spell: SpellId; combo: number; start: number }
   | { type: "windup"; start: number; ms: number }
   | { type: "blow"; start: number };
+
+/** Strides per metre-per-second: how fast each kind's legs cycle for its size. */
+const STRIDE: Partial<Record<RigKind, number>> = { spider: 3.4, wolf: 2.6, boar: 2.4, golem: 1.3, wretch: 1.8 };
 
 const ease = (t: number): number => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 const easeOut = (t: number): number => (t <= 0 ? 0 : t >= 1 ? 1 : 1 - (1 - t) * (1 - t));
@@ -333,7 +531,7 @@ export class Animator {
     }
     this.lastX = x;
     this.lastZ = z;
-    this.phase += dt * this.speed * (this.rig.kind === "spider" ? 3.4 : 2.1);
+    this.phase += dt * this.speed * (STRIDE[this.rig.kind] ?? 2.1);
 
     this.flash(now);
 
@@ -341,6 +539,11 @@ export class Animator {
       case "player": this.posePlayer(now, sprinting); break;
       case "zombie": this.poseZombie(now); break;
       case "spider": this.poseSpider(now); break;
+      case "wolf": this.poseQuadruped(now, 0.8, 5.5); break;
+      case "boar": this.poseQuadruped(now, 0.6, 4.5); break;
+      case "wretch": this.poseWretch(now); break;
+      case "wisp": this.poseWisp(now); break;
+      case "golem": this.poseGolem(now); break;
     }
   }
 
@@ -542,6 +745,183 @@ export class Animator {
       thorax.rotation.x = keys(t, [[0, -0.5], [70, 0.3], [260, 0]]);
       thorax.position.z = keys(t, [[0, -0.18], [70, 0.4], [260, 0]]);
       if (t > 260) this.action = undefined;
+    }
+  }
+
+  /**
+   * Wolves and boars. A trot on diagonal pairs; the windup and blow differ by
+   * kind — a wolf crouches and lunges, a boar lowers its head and paws the
+   * ground, then its charge is simply it running very fast, which the gait
+   * already draws.
+   */
+  private poseQuadruped(now: number, swingAmount: number, fullSpeed: number): void {
+    const j = this.rig.joints;
+    const torso = j["torso"]!, head = j["head"]!;
+    const legs = [j["legFL"]!, j["legFR"]!, j["legBL"]!, j["legBR"]!];
+    const baseY = this.rig.kind === "boar" ? 0.66 : 0.58;
+    torso.rotation.set(0, 0, 0);
+    torso.position.set(0, baseY, 0);
+    head.rotation.set(0, 0, 0);
+    for (const leg of legs) leg.rotation.set(0, 0, 0);
+    if (!this.poseCommon(now, 1, "z")) return;
+
+    const stride = Math.min(1, this.speed / fullSpeed);
+    const swing = Math.sin(this.phase) * swingAmount * stride;
+    legs[0]!.rotation.x = swing;
+    legs[3]!.rotation.x = swing;
+    legs[1]!.rotation.x = -swing;
+    legs[2]!.rotation.x = -swing;
+    torso.position.y = baseY + Math.abs(Math.cos(this.phase)) * 0.05 * stride;
+    head.rotation.x = Math.sin(this.clock / 900) * 0.06 + stride * 0.1;
+    const tail = j["tail"];
+    if (tail) tail.rotation.y = Math.sin(this.clock / 160) * 0.35 * (0.3 + stride);
+
+    const action = this.action;
+    if (!action) return;
+    const t = now - action.start;
+    if (action.type === "windup") {
+      const p = easeOut(t / action.ms);
+      if (this.rig.kind === "boar") {
+        head.rotation.x = 0.45 * p;
+        torso.rotation.x = 0.12 * p;
+        // Paw the ground with a front foot, faster as it nears the charge.
+        legs[0]!.rotation.x = Math.max(0, Math.sin(now / (70 - 30 * p))) * -0.7;
+        this.rig.body.position.x = Math.sin(now / 25) * 0.02 * p;
+      } else {
+        torso.position.y = baseY - 0.14 * p;
+        torso.rotation.x = 0.18 * p;
+        head.rotation.x = 0.3 * p;
+      }
+      if (t >= action.ms) this.action = { type: "blow", start: action.start + action.ms };
+    } else if (action.type === "blow") {
+      if (this.rig.kind === "boar") {
+        head.rotation.x = keys(t, [[0, 0.5], [500, 0.35], [800, 0]]);
+        if (t > 800) this.action = undefined;
+      } else {
+        torso.position.z = keys(t, [[0, -0.1], [80, 0.45], [300, 0]]);
+        head.rotation.x = keys(t, [[0, 0.3], [80, -0.35], [300, 0]]);
+        if (t > 300) this.action = undefined;
+      }
+    }
+  }
+
+  /** The Fen Wretch: squats, breathes, and rears back to spit. */
+  private poseWretch(now: number): void {
+    const j = this.rig.joints;
+    const torso = j["torso"]!, head = j["head"]!, jaw = j["jaw"]!, throat = j["throat"]!;
+    const armL = j["armL"]!, armR = j["armR"]!;
+    torso.rotation.set(0, 0, 0);
+    torso.scaling.set(1, 1, 1);
+    head.rotation.set(0, 0, 0);
+    jaw.rotation.set(0, 0, 0);
+    throat.scaling.setAll(0.01);
+    if (!this.poseCommon(now, 1, "x")) return;
+
+    const stride = Math.min(1, this.speed / 3);
+    const breathe = Math.sin(this.clock / 600);
+    torso.scaling.set(1 + breathe * 0.03, 1 - breathe * 0.04, 1);
+    head.rotation.y = Math.sin(this.clock / 1300) * 0.25;
+    // It moves in hops.
+    this.rig.body.position.y += Math.abs(Math.sin(this.phase * 1.5)) * 0.14 * stride;
+    armL.rotation.x = Math.sin(this.phase * 1.5) * 0.6 * stride;
+    armR.rotation.x = Math.sin(this.phase * 1.5) * 0.6 * stride;
+
+    const action = this.action;
+    if (!action) return;
+    const t = now - action.start;
+    if (action.type === "windup") {
+      const p = easeOut(t / action.ms);
+      torso.rotation.x = -0.4 * p;
+      jaw.rotation.x = 0.7 * p;
+      throat.scaling.setAll(0.2 + p * 1.4);
+      torso.scaling.set(1 + p * 0.12, 1 + p * 0.1, 1 + p * 0.12);
+      if (t >= action.ms) this.action = { type: "blow", start: action.start + action.ms };
+    } else if (action.type === "blow") {
+      torso.rotation.x = keys(t, [[0, -0.4], [70, 0.35], [320, 0]]);
+      jaw.rotation.x = keys(t, [[0, 0.7], [90, 0.9], [320, 0]]);
+      head.rotation.x = keys(t, [[0, 0], [70, 0.3], [320, 0]]);
+      if (t > 320) this.action = undefined;
+    }
+  }
+
+  /** The Cinder Wisp: always moving, swells before it bursts, and gutters out
+   *  rather than falling over. */
+  private poseWisp(now: number): void {
+    const j = this.rig.joints;
+    const heart = j["heart"]!, orbit = j["orbit"]!;
+    const hover = getArchetype("wisp").hover ?? 0.9;
+    this.rig.body.position.set(0, 0, 0);
+    this.rig.body.rotation.set(0, 0, 0);
+    heart.position.set(0, hover + Math.sin(this.clock / 420) * 0.12, 0);
+    heart.scaling.setAll(1);
+    orbit.rotation.y = this.clock / 300;
+
+    if (this.dead) {
+      const t = (now - this.diedAt) / 700;
+      // Drops, dims and shrinks to nothing.
+      heart.position.y = hover * (1 - easeOut(t));
+      heart.scaling.setAll(Math.max(0.01, 1 - t));
+      return;
+    }
+    const rise = (now - this.spawnAt) / 650;
+    if (rise < 1) heart.scaling.setAll(Math.max(0.01, easeOut(rise)));
+
+    const f = (now - this.flinchAt) / 220;
+    if (f >= 0 && f < 1) heart.position.z -= Math.sin(f * Math.PI) * 0.3 * this.flinchPower;
+
+    const action = this.action;
+    if (!action) return;
+    const t = now - action.start;
+    if (action.type === "windup") {
+      const p = t / action.ms;
+      // Swelling and spinning up — the whole windup says "get away".
+      heart.scaling.setAll(1 + easeOut(p) * 0.8 + Math.sin(now / 30) * 0.05 * p);
+      orbit.rotation.y = this.clock / (300 - 220 * p);
+      orbit.scaling.setAll(1 + p * 0.9);
+      if (t >= action.ms) this.action = { type: "blow", start: action.start + action.ms };
+    } else if (action.type === "blow") {
+      heart.scaling.setAll(keys(t, [[0, 1.8], [60, 2.3], [260, 1]]));
+      orbit.scaling.setAll(keys(t, [[0, 1.9], [80, 3], [300, 1]]));
+      if (t > 300) this.action = undefined;
+    } else {
+      orbit.scaling.setAll(1);
+    }
+  }
+
+  /** The Cairn Golem: slow, heavy, and its slam comes from very high up. */
+  private poseGolem(now: number): void {
+    const j = this.rig.joints;
+    const legL = j["legL"]!, legR = j["legR"]!, chest = j["chest"]!;
+    const armL = j["armL"]!, armR = j["armR"]!, head = j["head"]!;
+    for (const node of [legL, legR, chest, armL, armR, head]) node.rotation.set(0, 0, 0);
+    if (!this.poseCommon(now, 1, "x")) return;
+
+    const stride = Math.min(1, this.speed / 2.2);
+    const swing = Math.sin(this.phase) * 0.4 * stride;
+    legL.rotation.x = swing;
+    legR.rotation.x = -swing;
+    armL.rotation.x = -swing * 0.6;
+    armR.rotation.x = swing * 0.6;
+    this.rig.body.rotation.z = Math.sin(this.phase) * 0.06 * stride;
+    chest.rotation.x = 0.08 + Math.sin(this.clock / 1400) * 0.02;
+    head.rotation.y = Math.sin(this.clock / 2600) * 0.3;
+
+    const action = this.action;
+    if (!action) return;
+    const t = now - action.start;
+    if (action.type === "windup") {
+      const p = easeOut(t / action.ms);
+      armL.rotation.x = -3.0 * p;
+      armR.rotation.x = -3.0 * p;
+      chest.rotation.x = 0.08 - 0.35 * p;
+      if (p > 0.7) this.rig.body.position.x = Math.sin(now / 22) * 0.03;
+      if (t >= action.ms) this.action = { type: "blow", start: action.start + action.ms };
+    } else if (action.type === "blow") {
+      armL.rotation.x = keys(t, [[0, -3.0], [110, -0.3], [600, 0]]);
+      armR.rotation.x = keys(t, [[0, -3.0], [110, -0.3], [600, 0]]);
+      chest.rotation.x = keys(t, [[0, -0.27], [110, 0.55], [600, 0.08]]);
+      this.rig.body.position.y += keys(t, [[0, 0], [110, -0.2], [600, 0]]);
+      if (t > 600) this.action = undefined;
     }
   }
 }

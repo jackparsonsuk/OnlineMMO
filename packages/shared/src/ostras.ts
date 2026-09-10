@@ -1,7 +1,12 @@
-import type { SpawnGroup } from "./enemies.js";
-import type { BoxCollider } from "./movement.js";
-import { DASO, SETTLEMENTS, type SettlementDefinition } from "./settlements.js";
-import { heightAt, type FlatZone, type TerrainSettings } from "./terrain.js";
+import type { EnemyKind, SpawnGroup } from "./enemies.js";
+import { DASO, FANSHONA, SETTLEMENTS, type SettlementDefinition } from "./settlements.js";
+import {
+  heightAt,
+  type FlatZone,
+  type LakeDefinition,
+  type TerrainRegion,
+  type TerrainSettings,
+} from "./terrain.js";
 
 /**
  * The Ostras the game currently knows about, and the Gates between them.
@@ -100,13 +105,52 @@ export interface WaystoneDefinition {
   z: number;
 }
 
-/** A path, drawn into the ground and kept clear of trees and camps. On a map
- *  this size, roads are how people find their way without a map open. */
+/**
+ * A road, drawn into the ground and kept clear of trees and camps. On a map
+ * this size, roads are how people find their way without a map open.
+ *
+ * `points` are the places it must pass through — a waystone, a town. How it
+ * gets from one to the next is worked out over the terrain (`worldgen.ts`),
+ * so it bends around mountains and lakes the way a road a person walked into
+ * existence would, instead of running straight at them.
+ */
 export interface RoadDefinition {
   id: string;
-  /** Control points. The drawn road meanders between them. */
   points: Array<{ x: number; z: number }>;
   width: number;
+}
+
+/**
+ * A stretch of Terra with its own character: ground colour, trees, grass,
+ * and which creatures live there. The shape of the land in it is the
+ * `TerrainRegion` part, which the height function reads.
+ */
+export interface RegionDefinition extends TerrainRegion {
+  name: string;
+  /** Low ground and sunlit crests, as hex colours. */
+  ground: string;
+  crest: string;
+  /** Multiplies the woodland noise: 0 is bare, 1 normal, above is thick. */
+  woods: number;
+  /** Tree species, picked evenly; repeat one to weight it. */
+  trees: Array<"pine" | "oak" | "birch" | "dead">;
+  rock: "grey" | "red" | "dark";
+  grass: "grass" | "dry" | "heather" | "reeds" | "ash";
+  /** Relative odds of each creature for generated camps. */
+  creatures: Partial<Record<EnemyKind, number>>;
+}
+
+/**
+ * An old ruin: a landmark to navigate by and, usually, something guarding it.
+ * Its stones collide; `ruinParts` in worldgen says exactly where they are.
+ */
+export interface RuinDefinition {
+  id: string;
+  name: string;
+  kind: "ring" | "tower" | "spire" | "barrow";
+  x: number;
+  z: number;
+  radius: number;
 }
 
 /**
@@ -156,6 +200,10 @@ export interface OstraDefinition {
   roads: RoadDefinition[];
   /** Present on Ostras big enough to need generating. */
   wilds?: WildsSettings;
+  /** Areas with their own character. The same objects are the terrain's
+   *  `regions`, so the land and its look can never disagree about borders. */
+  regions: RegionDefinition[];
+  ruins: RuinDefinition[];
 }
 
 /** Face the middle of the Ostra from a point on its edge. */
@@ -181,42 +229,124 @@ const TERRA_WAYSTONES: WaystoneDefinition[] = [
   { id: "southwest", name: "Ashfall Stone", x: -2450, z: -2150 },
   { id: "northeast", name: "Brightwater Stone", x: 2450, z: 2300 },
   { id: "southeast", name: "Redstep Stone", x: 2500, z: -2350 },
+  { id: "fanshona", name: "Fanshona Stone", x: 2047, z: 1947 },
 ];
 
+const stone = (id: string): { x: number; z: number } => {
+  const found = TERRA_WAYSTONES.find((w) => w.id === id)!;
+  return { x: found.x, z: found.z };
+};
+
+const TERRA_RUINS: RuinDefinition[] = [
+  { id: "broken-crown", name: "The Broken Crown", kind: "ring", x: -420, z: 2150, radius: 13 },
+  { id: "greywood-watch", name: "Greywood Watch", kind: "tower", x: -1900, z: 1450, radius: 7 },
+  { id: "old-barrow", name: "The Old Barrow", kind: "barrow", x: -2050, z: -1800, radius: 11 },
+  { id: "cinder-spire", name: "Cinder Spire", kind: "spire", x: -2800, z: -2550, radius: 6 },
+  { id: "the-anvil", name: "The Anvil", kind: "spire", x: 2150, z: -1950, radius: 8 },
+  { id: "sunken-hall", name: "The Sunken Hall", kind: "tower", x: -520, z: -2230, radius: 8 },
+  { id: "sunward-ring", name: "Sunward Ring", kind: "ring", x: 1650, z: 520, radius: 10 },
+];
+
+const ruin = (id: string): { x: number; z: number } => {
+  const found = TERRA_RUINS.find((r) => r.id === id)!;
+  return { x: found.x, z: found.z };
+};
+
+/**
+ * The roads, as the places each must pass through. A network with loops, not
+ * a plus sign: you can ride a circuit of the outer stones, and most places
+ * have two ways in.
+ */
 const TERRA_ROADS: RoadDefinition[] = [
+  // The only road that goes anywhere a person lives, so the widest.
+  { id: "westroad", width: 5, points: [{ x: -32, z: -4 }, stone("westroad"), { x: DASO.x + 30, z: DASO.z + 2 }] },
+  { id: "northroad", width: 4, points: [{ x: 0, z: 34 }, stone("north"), stone("far-north")] },
+  { id: "eastroad", width: 4, points: [{ x: 34, z: 0 }, stone("east"), stone("far-east")] },
+  { id: "southroad", width: 4, points: [{ x: 0, z: -36 }, stone("south"), stone("far-south")] },
+  { id: "lakeroad", width: 4, points: [stone("far-east"), stone("fanshona"), stone("northeast")] },
+  { id: "highroad", width: 3, points: [stone("far-north"), stone("fanshona")] },
+  { id: "greywood-track", width: 3, points: [{ x: DASO.x - 5, z: DASO.z + 30 }, ruin("greywood-watch"), stone("northwest")] },
+  { id: "moor-track", width: 3, points: [stone("northwest"), ruin("broken-crown"), stone("far-north")] },
+  { id: "ash-road", width: 3, points: [{ x: DASO.x + 5, z: DASO.z - 30 }, stone("southwest")] },
+  { id: "fen-track", width: 3, points: [stone("southwest"), ruin("old-barrow"), stone("far-south")] },
+  { id: "red-road", width: 3, points: [stone("far-south"), stone("southeast")] },
+  { id: "anvil-road", width: 3, points: [stone("far-east"), ruin("the-anvil"), stone("southeast")] },
+  { id: "ring-lane", width: 3, points: [stone("east"), ruin("sunward-ring"), stone("north")] },
+];
+
+/**
+ * Terra's regions. The heartland round the Gate Circle is gentle and green;
+ * everything further out has a character of its own, and creatures to match.
+ * Waystones sit roughly at each centre and are named for them.
+ */
+const TERRA_REGIONS: RegionDefinition[] = [
   {
-    // The only road that goes anywhere a person lives.
-    id: "westroad",
-    width: 5,
-    points: [
-      { x: -6, z: -4 }, { x: -320, z: -30 }, { x: -700, z: -58 },
-      { x: -1080, z: -132 }, { x: -1405, z: -172 },
-    ],
+    id: "heartland", name: "The Heartland", x: 0, z: 0,
+    ground: "#41703f", crest: "#79a355", woods: 0.7, trees: ["oak", "oak", "pine", "birch"],
+    rock: "grey", grass: "grass", creatures: { zombie: 3, spider: 2, wolf: 1 },
   },
   {
-    id: "northroad",
-    width: 4,
-    points: [
-      { x: 0, z: 28 }, { x: 36, z: 420 }, { x: -34, z: 1116 },
-      { x: 90, z: 1760 }, { x: 180, z: 2346 },
-    ],
+    id: "westwood", name: "Westwood", x: -1500, z: -150, relief: 1.1,
+    ground: "#3b673a", crest: "#6c974d", woods: 1.15, trees: ["oak", "oak", "pine", "birch"],
+    rock: "grey", grass: "grass", creatures: { wolf: 3, spider: 2, zombie: 1 },
   },
   {
-    id: "eastroad",
-    width: 4,
-    points: [
-      { x: 30, z: -2 }, { x: 520, z: 50 }, { x: 1196, z: -38 },
-      { x: 1800, z: 60 }, { x: 2346, z: 160 },
-    ],
+    id: "greywood", name: "Greywood", x: -2400, z: 1950, lift: 12, relief: 1.3, mountains: 1.2,
+    ground: "#33523a", crest: "#56794c", woods: 1.4, trees: ["pine", "pine", "pine", "birch"],
+    rock: "grey", grass: "grass", creatures: { wolf: 4, spider: 3, golem: 0.4 },
   },
   {
-    id: "southroad",
-    width: 4,
-    points: [
-      { x: 0, z: -30 }, { x: -60, z: -620 }, { x: 44, z: -1296 },
-      { x: -40, z: -1900 }, { x: -160, z: -2496 },
-    ],
+    id: "highmoor", name: "Highmoor", x: 200, z: 2450, lift: 20, relief: 0.8, mountains: 1.3,
+    ground: "#6b6248", crest: "#927a70", woods: 0.22, trees: ["pine", "dead"],
+    rock: "grey", grass: "heather", creatures: { golem: 1.5, wolf: 2.5, zombie: 1 },
   },
+  {
+    id: "brightwater", name: "Brightwater", x: 2350, z: 2250, relief: 0.55, mountains: 0.3,
+    ground: "#487a4a", crest: "#8ab45e", woods: 0.55, trees: ["birch", "birch", "oak"],
+    rock: "grey", grass: "grass", creatures: { wretch: 3, boar: 2, spider: 1 },
+  },
+  {
+    id: "sunward", name: "Sunward", x: 2500, z: 100, relief: 0.5, mountains: 0.15,
+    ground: "#7a8844", crest: "#c7b66a", woods: 0.15, trees: ["oak"],
+    rock: "grey", grass: "dry", creatures: { boar: 4, zombie: 2, wolf: 1 },
+  },
+  {
+    id: "redstep", name: "Redstep", x: 2500, z: -2350, lift: 10, relief: 1.7, mountains: 0.6, terrace: 9,
+    ground: "#8a5a3a", crest: "#c3844f", woods: 0.06, trees: ["dead"],
+    rock: "red", grass: "dry", creatures: { golem: 2, boar: 1.5, wisp: 1 },
+  },
+  {
+    id: "ashfall", name: "Ashfall", x: -2450, z: -2150, relief: 1.2,
+    ground: "#4a4642", crest: "#706860", woods: 0.55, trees: ["dead", "dead", "pine"],
+    rock: "dark", grass: "ash", creatures: { wisp: 4, zombie: 3 },
+  },
+  {
+    id: "lowfen", name: "Lowfen", x: -200, z: -2550, lift: -8, relief: 0.25, mountains: 0,
+    ground: "#3d5839", crest: "#5f7a47", woods: 0.4, trees: ["dead", "birch", "birch"],
+    rock: "dark", grass: "reeds", creatures: { wretch: 4, spider: 2, zombie: 1 },
+  },
+];
+
+/** Fanshona's lake sits just below the town, fixed together so the dock
+ *  always reaches the water whatever the ground around them does. */
+const FANSHONA_LAKE_LEVEL = (FANSHONA.level ?? 0) - 1.1;
+
+const TERRA_LAKES: LakeDefinition[] = [
+  // Brightwater: the lake country.
+  { x: 2150, z: 2050, radius: 70, shore: 18, depth: 0.85, level: FANSHONA_LAKE_LEVEL },
+  { x: 2620, z: 2560, radius: 110, shore: 22, depth: 0.9 },
+  { x: 2280, z: 2720, radius: 55, shore: 16, depth: 0.8 },
+  { x: 2800, z: 2080, radius: 62, shore: 18, depth: 0.8 },
+  // Lowfen: pools and meres.
+  { x: -330, z: -2380, radius: 42, shore: 12, depth: 0.6 },
+  { x: -60, z: -2700, radius: 58, shore: 14, depth: 0.7 },
+  { x: 180, z: -2430, radius: 34, shore: 10, depth: 0.55 },
+  { x: -520, z: -2720, radius: 46, shore: 12, depth: 0.6 },
+  { x: 150, z: -2860, radius: 40, shore: 12, depth: 0.6 },
+  { x: -720, z: -2480, radius: 30, shore: 10, depth: 0.5 },
+  // A pond in the heartland, and Daso's millpond.
+  { x: 420, z: 640, radius: 45, shore: 14, depth: 0.8 },
+  { x: -1180, z: 180, radius: 50, shore: 14, depth: 0.8 },
 ];
 
 /** Every place a person might stand or wake is levelled, so none of them is
@@ -229,10 +359,14 @@ function terraFlats(): FlatZone[] {
     // Daso sits on a level shelf. A logging town on a hillside would look
     // like an accident.
     { x: DASO.x, z: DASO.z, radius: DASO.radius + 6, falloff: 50 },
+    { x: FANSHONA.x, z: FANSHONA.z, radius: FANSHONA.radius + 6, falloff: 40, level: FANSHONA.level },
   ];
-  for (const stone of TERRA_WAYSTONES) {
-    if (stone.id === "gate-circle" || stone.id === "daso") continue;
-    flats.push({ x: stone.x, z: stone.z, radius: 7, falloff: 26 });
+  for (const w of TERRA_WAYSTONES) {
+    if (w.id === "gate-circle" || w.id === "daso" || w.id === "fanshona") continue;
+    flats.push({ x: w.x, z: w.z, radius: 7, falloff: 26 });
+  }
+  for (const r of TERRA_RUINS) {
+    flats.push({ x: r.x, z: r.z, radius: r.radius + 4, falloff: 28 });
   }
   return flats;
 }
@@ -300,8 +434,10 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       mountains: { amplitude: 95, wavelength: 760, coverage: 0.34 },
       rim: { halfExtent: TERRA_SIZE / 2, width: 420, height: 120 },
       flats: terraFlats(),
+      regions: TERRA_REGIONS,
+      lakes: TERRA_LAKES,
     },
-    settlements: ["daso"],
+    settlements: ["daso", "fanshona"],
     // Gentle enough to learn the fight in. Level carries the danger further
     // out; this is the floor.
     difficulty: { damage: 0.6, health: 1 },
@@ -312,9 +448,19 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     spawns: [
       { kind: "zombie", count: 4, x: 20, z: -40, radius: 11 },
       { kind: "spider", count: 3, x: 44, z: 22, radius: 8 },
+      // Guardians of the ruins. Level comes from distance, like any camp.
+      { kind: "golem", count: 2, ...ruin("broken-crown"), radius: 6 },
+      { kind: "golem", count: 2, ...ruin("the-anvil"), radius: 5 },
+      { kind: "golem", count: 1, ...ruin("sunward-ring"), radius: 3 },
+      { kind: "wolf", count: 5, ...ruin("greywood-watch"), radius: 9 },
+      { kind: "wisp", count: 4, ...ruin("old-barrow"), radius: 9 },
+      { kind: "wisp", count: 3, ...ruin("cinder-spire"), radius: 8 },
+      { kind: "wretch", count: 3, ...ruin("sunken-hall"), radius: 9 },
     ],
     waystones: TERRA_WAYSTONES,
     roads: TERRA_ROADS,
+    regions: TERRA_REGIONS,
+    ruins: TERRA_RUINS,
     wilds: {
       seed: 9001,
       forest: 0.5,
@@ -370,6 +516,8 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     ],
     waystones: [],
     roads: [],
+    regions: [],
+    ruins: [],
   },
 
   barals: {
@@ -424,6 +572,8 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     ],
     waystones: [],
     roads: [],
+    regions: [],
+    ruins: [],
   },
 };
 
@@ -461,32 +611,6 @@ export function respawnPoint(ostra: OstraDefinition, x: number, z: number): { x:
     }
   }
   return best;
-}
-
-const boxColliderCache = new Map<OstraId, readonly BoxCollider[]>();
-
-/** Buildings, as rectangles. Built once and reused; identical on both sides,
- *  so walking around a wall predicts perfectly. */
-export function buildingColliders(ostra: OstraDefinition): readonly BoxCollider[] {
-  let cached = boxColliderCache.get(ostra.id);
-  if (!cached) {
-    const boxes: BoxCollider[] = [];
-    for (const settlement of settlementsIn(ostra)) {
-      for (const building of settlement.buildings) {
-        boxes.push({
-          id: building.id,
-          x: building.x,
-          z: building.z,
-          halfWidth: building.width / 2,
-          halfDepth: building.depth / 2,
-          yaw: building.yaw,
-        });
-      }
-    }
-    cached = boxes;
-    boxColliderCache.set(ostra.id, cached);
-  }
-  return cached;
 }
 
 export function settlementsIn(ostra: OstraDefinition): SettlementDefinition[] {
