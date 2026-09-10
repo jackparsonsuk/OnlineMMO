@@ -50,9 +50,26 @@ export interface EnemyArchetype {
   maxHealth: number;
   /** Damage per hit on a player. */
   attackDamage: number;
-  /** Reach from its centre to the player's, ignoring radii — creatures are
-   *  already stopped by collision at roughly this distance. */
+  /** Starts an attack once its centre is this close to the player's, ignoring
+   *  radii — creatures are already stopped by collision at roughly this
+   *  distance. */
   attackRange: number;
+  /**
+   * How long it telegraphs before the blow lands, in ms.
+   *
+   * This is what makes a fight something you play rather than something that
+   * happens to you. The creature commits to a direction, the client draws the
+   * danger zone on the ground, and a player who steps out of it takes nothing.
+   * Before this, damage simply ticked off whenever something stood next to
+   * you, and there was no decision to make.
+   */
+  windupMs: number;
+  /** When the blow lands, it hits whatever of the player is inside this reach
+   *  (measured to the player's surface, like spells) ... */
+  attackReach: number;
+  /** ... and inside this wedge, centred on where it faced at windup. Shared
+   *  with the client, which paints exactly this shape as the telegraph. */
+  attackArc: number;
   attackCooldownMs: number;
   /** 0xRRGGBB body colour. */
   colour: number;
@@ -80,7 +97,12 @@ export const ENEMY_ARCHETYPES: Record<EnemyKind, EnemyArchetype> = {
     // Hits hard but slowly: being cornered by three is the danger, not one.
     attackDamage: 11,
     attackRange: 1.9,
-    attackCooldownMs: 1400,
+    // A big, slow overhead. Plenty of time to see it and step back — the
+    // Risen punishes standing still, not bad reflexes.
+    windupMs: 560,
+    attackReach: 1.6,
+    attackArc: Math.PI * 0.62,
+    attackCooldownMs: 1500,
     // Shifted grey-yellow: the old green was almost exactly Terra's grass,
     // and a creature you cannot pick out of the ground is not a threat, it
     // is an ambush the player never gets to answer.
@@ -107,7 +129,12 @@ export const ENEMY_ARCHETYPES: Record<EnemyKind, EnemyArchetype> = {
     // Fragile, but it lands three hits for every one a Risen manages.
     attackDamage: 6,
     attackRange: 1.6,
-    attackCooldownMs: 500,
+    // Barely a flinch of warning. The spider is the one you cannot dance
+    // around; you kill it or you pay.
+    windupMs: 300,
+    attackReach: 1.2,
+    attackArc: Math.PI * 0.42,
+    attackCooldownMs: 650,
     colour: 0x4a4266,
     idleSeconds: 1.1,
   },
@@ -123,7 +150,8 @@ export function getArchetype(kind: EnemyKind): EnemyArchetype {
   return ENEMY_ARCHETYPES[kind];
 }
 
-/** A cluster of creatures placed in an Ostra when its room is created. */
+/** A hand-placed cluster of creatures. Terra's wilds add generated camps of
+ *  the same shape — see `worldgen.ts`. */
 export interface SpawnGroup {
   kind: EnemyKind;
   count: number;
@@ -131,4 +159,27 @@ export interface SpawnGroup {
   x: number;
   z: number;
   radius: number;
+  /** Defaults to 1. */
+  level?: number;
+}
+
+// --- levels -----------------------------------------------------------------
+
+/**
+ * How dangerous one particular creature is, on top of its Ostra's difficulty.
+ *
+ * There is no XP in this game — proficiency grows by use — so a level here is
+ * not a gate, it is a WARNING: it tells you, before you swing, how far out of
+ * your depth you are. On an eight-kilometre Terra it rises with distance from
+ * the Gate Circle, which is what gives the map a shape: the further you go,
+ * the more it costs and the better it pays.
+ */
+export const MAX_ENEMY_LEVEL = 12;
+
+export function levelHealthScale(level: number): number {
+  return 1 + 0.3 * (level - 1);
+}
+
+export function levelDamageScale(level: number): number {
+  return 1 + 0.2 * (level - 1);
 }

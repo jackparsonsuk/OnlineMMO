@@ -66,9 +66,14 @@ export interface SettlementDefinition {
   trees: Array<{ x: number; z: number; radius: number; height: number }>;
 }
 
-/** West of Vareto, per the vault. Terra's west is negative X. */
-const DASO_X = -20;
-const DASO_Z = -2;
+/**
+ * West of Vareto, per the vault. Terra's west is negative X — and now that
+ * Terra is eight kilometres across, "west" means a real journey: a
+ * kilometre and a half out along the Westroad from the Gate Circle, which is
+ * about right for a town nobody visits on purpose.
+ */
+const DASO_X = -1450;
+const DASO_Z = -180;
 
 /** Relative to the town centre, so the whole place can be moved by editing two
  *  numbers rather than sixty. */

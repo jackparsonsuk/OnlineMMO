@@ -313,7 +313,6 @@ export function buildTree(
   }, scene));
   trunk.position.y = height * 0.225;
   trunk.material = bark;
-  trunk.metadata = { blocksCamera: true };
   trunk.parent = pivot;
 
   const lower = facet(MeshBuilder.CreateCylinder("canopyLower", {
@@ -324,7 +323,6 @@ export function buildTree(
   }, scene));
   lower.position.y = height * 0.56;
   lower.material = leafDark;
-  lower.metadata = { blocksCamera: true };
   lower.parent = pivot;
 
   const upper = facet(MeshBuilder.CreateCylinder("canopyUpper", {

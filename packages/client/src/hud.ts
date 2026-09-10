@@ -41,14 +41,36 @@ export class Hud {
   private bagTotals = document.getElementById("bag-totals") as HTMLElement;
   private toast = document.getElementById("toast") as HTMLElement;
   private toastTimer: number | undefined;
+  private targetFrame = document.getElementById("target-frame") as HTMLElement;
+  private targetName = document.getElementById("tf-name") as HTMLElement;
+  private targetLevel = document.getElementById("tf-level") as HTMLElement;
+  private targetFill = document.querySelector("#tf-bar i") as HTMLElement;
+  private targetText = document.getElementById("tf-text") as HTMLElement;
+  private shownTarget = "";
+  private combatFlag = document.getElementById("combat-flag") as HTMLElement;
+  private vignette = document.getElementById("vignette") as HTMLElement;
+  private soundToggle = document.getElementById("sound-toggle") as HTMLButtonElement;
+  private lowHealth = false;
+  private shownCombo = -1;
   private shownHealth = -1;
   private shownMana = -1;
   private shownMaxHealth = -1;
   private shownMaxMana = -1;
   /** Set by main so a click in the bag can reach the server. */
   onEquip: ((itemId: string) => void) | undefined;
+  /** Set by main; returns whether sound is now muted. */
+  onToggleSound: (() => boolean) | undefined;
   onUnequip: ((slot: EquipSlot) => void) | undefined;
   private slots = new Map<SpellId, { root: HTMLElement; cool: HTMLElement; prof: HTMLElement }>();
+
+  constructor() {
+    this.soundToggle.onclick = () => this.setMuted(this.onToggleSound?.() ?? false);
+  }
+
+  setMuted(muted: boolean): void {
+    this.soundToggle.textContent = muted ? "Sound off" : "Sound on";
+    this.soundToggle.classList.toggle("off", muted);
+  }
 
   setOstra(ostra: OstraDefinition): void {
     this.ostraName.textContent = ostra.name;
@@ -99,6 +121,64 @@ export class Hud {
     // Below a quarter the bar turns; you should not have to read a number to
     // know you are in trouble.
     this.healthFill.classList.toggle("low", fraction <= 0.25);
+    // ...and the edges of the screen start to pulse, so you know without
+    // looking at the bar at all.
+    const low = health > 0 && fraction <= 0.25;
+    if (low !== this.lowHealth) {
+      this.lowHealth = low;
+      this.vignette.classList.toggle("low", low);
+    }
+  }
+
+  /**
+   * A red flash at the screen's edges when you are hit, stronger for bigger
+   * hits. Restarted from full on every hit, so a flurry reads as a flurry.
+   */
+  hurt(fraction: number): void {
+    const strength = Math.min(1, 0.35 + fraction * 3);
+    this.vignette.style.transition = "none";
+    this.vignette.style.opacity = String(strength);
+    // Force the reset to take before the fade starts.
+    void this.vignette.offsetWidth;
+    this.vignette.style.transition = "opacity 520ms ease-out";
+    this.vignette.style.opacity = "";
+  }
+
+  setCombat(inCombat: boolean): void {
+    if (this.combatFlag.hidden === !inCombat) return;
+    this.combatFlag.hidden = !inCombat;
+  }
+
+  /**
+   * The selected creature: name, level, and exact health — the nametag's bar
+   * says roughly, this says exactly, which is what you want when deciding
+   * whether one more Strike finishes it.
+   */
+  setTarget(target: {
+    name: string; level: number; health: number; maxHealth: number; hunting: boolean; dead: boolean;
+  } | undefined): void {
+    const key = target
+      ? `${target.name}|${target.level}|${target.health}|${target.maxHealth}|${target.hunting}|${target.dead}`
+      : "";
+    if (key === this.shownTarget) return;
+    this.shownTarget = key;
+    this.targetFrame.hidden = target === undefined;
+    if (!target) return;
+    this.targetName.textContent = target.name;
+    this.targetLevel.textContent = String(target.level);
+    const fraction = Math.max(0, Math.min(1, target.health / Math.max(1, target.maxHealth)));
+    this.targetFill.style.width = `${fraction * 100}%`;
+    this.targetText.textContent = target.dead ? "dead" : `${target.health} / ${target.maxHealth}`;
+    this.targetFrame.classList.toggle("hunting", target.hunting);
+    this.targetFrame.classList.toggle("dead", target.dead);
+  }
+
+  /** Light the Strike slot's chain pips: 0 means no chain in progress. */
+  setCombo(step: number): void {
+    if (step === this.shownCombo) return;
+    this.shownCombo = step;
+    const pips = this.slots.get("strike")?.root.querySelectorAll(".pips i");
+    pips?.forEach((pip, index) => pip.classList.toggle("lit", index < step));
   }
 
   setMana(mana: number, max: number): void {
@@ -119,6 +199,7 @@ export class Hud {
   buildAbilityBar(): void {
     this.abilities.innerHTML = "";
     this.slots.clear();
+    this.shownCombo = -1;
 
     SPELL_IDS.forEach((id, index) => {
       const spell = SPELLS[id];
@@ -130,6 +211,7 @@ export class Hud {
         `<span class="meta">Aequum ${spell.aequum}` +
         `${spell.manaCost > 0 ? ` \u00b7 ${spell.manaCost} mana` : " \u00b7 free"}</span>` +
         `<span class="prof"></span>` +
+        (id === "strike" ? `<span class="pips"><i></i><i></i><i></i></span>` : "") +
         `<span class="cool"></span>`;
       this.abilities.appendChild(root);
 
@@ -175,6 +257,10 @@ export class Hud {
 
   toggleBag(): void {
     this.bag.hidden = !this.bag.hidden;
+  }
+
+  get bagOpen(): boolean {
+    return !this.bag.hidden;
   }
 
   /**

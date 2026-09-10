@@ -10,7 +10,32 @@
     <canvas id="game"></canvas>
 
     <div id="title" hidden></div>
+    <div id="vignette"></div>
     <div id="nametags"></div>
+    <div id="combat-text"></div>
+
+    <div id="compass">
+      <div id="compass-strip"></div>
+      <div id="compass-target" hidden></div>
+      <div id="compass-centre"></div>
+    </div>
+
+    <div id="target-frame" hidden>
+      <div class="tf-head"><span id="tf-level"></span><span id="tf-name"></span></div>
+      <div id="tf-bar"><i></i></div>
+      <div id="tf-text"></div>
+    </div>
+
+    <div id="minimap">
+      <canvas id="minimap-canvas" width="176" height="176"></canvas>
+      <div id="minimap-info"></div>
+    </div>
+
+    <div id="worldmap" hidden>
+      <div id="worldmap-title"></div>
+      <canvas id="worldmap-canvas"></canvas>
+      <div class="worldmap-hint"><kbd>M</kbd> or <kbd>Esc</kbd> to close</div>
+    </div>
 
     <div id="hud">
       <div id="ostra-name">&nbsp;</div>
@@ -28,6 +53,7 @@
     </div>
 
     <div id="vitals">
+      <div id="combat-flag" hidden>In combat</div>
       <div id="health-bar"><i></i></div>
       <div id="health-text"></div>
       <div id="mana-bar"><i></i></div>
@@ -38,6 +64,7 @@
     <div id="affinity"></div>
 
     <div id="toast" hidden></div>
+    <button id="sound-toggle" type="button">Sound on</button>
 
     <div id="bag" hidden>
       <h2>Pack</h2>
@@ -54,10 +81,12 @@
 
     <div id="hint">
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;&middot;&nbsp;
+      <kbd>Shift</kbd> sprint &nbsp;&middot;&nbsp;
       <kbd>Space</kbd>/<kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> cast &nbsp;&middot;&nbsp;
+      <kbd>Tab</kbd>/click target &nbsp;&middot;&nbsp;
+      <kbd>M</kbd> map &nbsp;&middot;&nbsp;
       <kbd>I</kbd> pack &nbsp;&middot;&nbsp;
-      drag to orbit &nbsp;&middot;&nbsp; scroll to zoom &nbsp;&middot;&nbsp;
-      walk into a ring to travel
+      drag to orbit &nbsp;&middot;&nbsp; scroll to zoom
     </div>
 
     <script type="module" src="/src/main.ts"></script>

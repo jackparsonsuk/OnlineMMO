@@ -5,7 +5,7 @@
  * step* — not how many OS key-repeat events happened to fire in between.
  */
 
-type Action = "forward" | "back" | "left" | "right" | "spell1" | "spell2" | "spell3";
+type Action = "forward" | "back" | "left" | "right" | "spell1" | "spell2" | "spell3" | "sprint";
 
 const BINDINGS: Record<string, Action> = {
   KeyW: "forward", ArrowUp: "forward",
@@ -19,6 +19,8 @@ const BINDINGS: Record<string, Action> = {
   Space: "spell1", Digit1: "spell1",
   Digit2: "spell2",
   Digit3: "spell3",
+  // Out of combat only — the server decides, the client predicts the same.
+  ShiftLeft: "sprint", ShiftRight: "sprint",
 };
 
 export interface MoveAxes {
@@ -80,6 +82,11 @@ export class KeyboardInput {
     if (this.held.has("spell2")) return 2;
     if (this.held.has("spell1")) return 1;
     return 0;
+  }
+
+  /** Shift held. Whether it is honoured is up to the simulation. */
+  sprinting(): boolean {
+    return this.held.has("sprint");
   }
 
   dispose(): void {

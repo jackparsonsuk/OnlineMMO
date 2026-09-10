@@ -11,6 +11,7 @@ import {
   WorldState,
 } from "@mmo/shared";
 import { AccountClient } from "./account.js";
+import { SoundBoard } from "./audio.js";
 import { showTitleScreen } from "./titleScreen.js";
 import { Hud } from "./hud.js";
 import { KeyboardInput } from "./input.js";
@@ -42,12 +43,36 @@ const canvas = document.getElementById("game") as HTMLCanvasElement;
 const hud = new Hud();
 const world = createWorld(canvas);
 const keyboard = new KeyboardInput();
+const audio = new SoundBoard();
+hud.setMuted(audio.isMuted);
+hud.onToggleSound = () => audio.toggleMute();
 
-// The pack toggle is deliberately NOT part of KeyboardInput: that class feeds
-// the fixed-step simulation, and opening a bag is a UI action with no place on
-// the wire.
+// UI keys are deliberately NOT part of KeyboardInput: that class feeds the
+// fixed-step simulation, and opening a bag or picking a target is a UI action
+// with no place on the wire.
 window.addEventListener("keydown", (event) => {
-  if (event.code === "KeyI" && !event.repeat) hud.toggleBag();
+  // The title screen's inputs need their keys.
+  if ((event.target as HTMLElement | null)?.tagName === "INPUT") return;
+  if (event.repeat) return;
+  switch (event.code) {
+    case "KeyI":
+      hud.toggleBag();
+      break;
+    case "KeyM":
+      session?.toggleMap();
+      break;
+    case "Tab":
+      // Otherwise the browser moves focus off the canvas.
+      event.preventDefault();
+      session?.cycleTarget();
+      break;
+    case "Escape":
+      // Close whatever is open first; only then drop the target.
+      if (session?.mapOpen) session.toggleMap();
+      else if (hud.bagOpen) hud.toggleBag();
+      else session?.clearTarget();
+      break;
+  }
 });
 
 /**
@@ -124,6 +149,7 @@ async function main(): Promise<void> {
         character,
         keyboard,
         world,
+        audio,
         get room() { return room; },
         get session() { return session; },
         frame: (now: number) => session?.frame(now),
@@ -137,7 +163,7 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   room = next;
   currentOstra = ostra;
   applyOstra(world, ostra);
-  session = createSession(world, next, ostra, hud, keyboard, cameraYaw);
+  session = createSession(world, next, ostra, hud, keyboard, cameraYaw, audio);
 
   hud.setOstra(ostra);
   hud.setStatus("connected");
@@ -153,6 +179,7 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   });
   next.onMessage("picked", (payload: { itemId: string }) => {
     hud.flash(`Picked up ${getItem(payload.itemId)?.name ?? "something"}`);
+    audio.play("pickup");
   });
   next.onMessage("pickupFailed", () => hud.flash("Your pack is full."));
 
@@ -208,7 +235,7 @@ async function travel(client: Client, payload: GateMessage): Promise<void> {
     // Rebuild the session we tore down so the player isn't left frozen. They
     // never left, so this is the Ostra they were already standing in.
     if (previous && room === previous && currentOstra) {
-      session = createSession(world, previous, currentOstra, hud, keyboard, cameraYaw);
+      session = createSession(world, previous, currentOstra, hud, keyboard, cameraYaw, audio);
     }
   } finally {
     travelling = false;

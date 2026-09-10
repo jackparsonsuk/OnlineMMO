@@ -29,8 +29,9 @@ one.
 | `npm run dev:server` / `npm run dev:client` | One side only |
 | `npm run typecheck` | Type-checks all three packages |
 
-Controls: **WASD** move, **Space / 1 / 2 / 3** cast, **I** pack, drag to orbit,
-scroll to zoom, walk into a Gate ring to travel.
+Controls: **WASD** move, **Shift** sprint (out of combat), **Space / 1 / 2 / 3**
+cast, **Tab** or click to target, **Esc** to let go, **M** map, **I** pack, drag
+to orbit, scroll to zoom, walk into a Gate ring to travel.
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
@@ -145,7 +146,8 @@ Ostra repopulates the moment somebody walks back into it.
 
 ## Combat
 
-Space swings. The server resolves everything; the client only draws.
+Space swings. The server resolves everything; the client only draws — but it
+draws *immediately*, which is most of what makes a hit feel like a hit.
 
 **Hits are lag-compensated.** A client renders creatures ~120 ms in the past, so
 a Void Spider closing at 7.2 m/s is nearly a metre from where it appears by the
@@ -160,17 +162,92 @@ client paints the arc, the server judges it, and if those disagreed the game
 would look like it was cheating you. Reach extends to the target's *surface*, so
 a wide creature is easier to hit than a narrow one.
 
-One swing hits the nearest creature in the arc, not everything in it. With five
-things on you that makes numbers matter, where a cleave would make a crowd
-easier than a single creature.
+One swing hits one creature in the arc, not everything in it — your selected
+target if it is in there, otherwise the nearest. With five things on you that
+makes numbers matter, where a cleave would make a crowd easier than a single
+creature.
+
+### Aim
+
+`MoveInput` carries an `aim` separate from `yaw`. Yaw follows the camera and
+steers movement; aim follows your target, so hitting something off to one side
+doesn't bend the direction you are walking. With a target selected (Tab, or
+click it) every cast turns to face it while in reach. Without one, Strike leans
+toward whatever is within ~75° of where you are looking, and Voidbolt toward
+anything within ~17° — reach is its reward, accuracy its price. Aim is computed
+from the *drawn* positions, which are exactly what lag compensation rewinds to,
+so aiming at the picture is aiming at the truth.
+
+### Making a hit feel like a hit
+
+Before this, a hit was a creature swelling 16% for a tenth of a second and a
+health bar getting shorter. Now, all of it on the client and none of it
+deciding anything:
+
+- **Bodies animate** (`rigs.ts`). Every figure is built around shoulder, hip and
+  waist pivots and posed procedurally each frame: walk cycles from measured
+  speed, a three-beat Strike chain, a Voidbolt punch, a Sunder slam, flinches,
+  falls, and creatures climbing out of the ground when a camp wakes.
+- **Impact is predicted.** At the moment the blade connects (`castContact`) the
+  client runs the same `isInArc` test the server will, and plays the flash,
+  the shards, the thud and a small camera shake *then* — not a round trip
+  later. The server's `cast` message follows with the numbers.
+- **Hitstop.** A struck body's animation freezes for ~55 ms. It is the cheapest
+  way to give a blow weight.
+- **Numbers** float off everything (`combatText.ts`): yellow and large for a
+  crit, red for damage you take, "Evaded" when a dodge works, "Staggered" when
+  a heavy blow interrupts.
+- **Sound** is synthesised with Web Audio (`audio.ts`) — nothing loaded, same
+  rule as the art.
+- **Everyone sees everyone's fights.** Casts are broadcast to players within
+  180 m, so another player's swings, bolts and kills are visible, not just their
+  target's health bar moving.
+
+### Telegraphs, and why fights are now a thing you play
+
+Creatures used to deal damage whenever they stood next to you — no decision to
+make. Now an attack **commits**: the creature picks a direction, winds up
+(`windupMs` — 560 ms for a Risen, 300 for a spider), and the blow lands on
+whoever is still inside `attackReach` × `attackArc` when it ends. The client
+paints exactly that wedge on the ground, filling as the windup runs, so
+stepping out of the red is stepping out of the hit. The Risen is a slow
+overhead you should never take twice; the spider barely warns you at all.
+
+Heavy blows (every third Strike, and Sunder) **stagger**: the windup is
+cancelled and the creature can't attack for 700 ms. Hitting a Risen's overhead
+with a finisher is a blow you never take. Hits also **knock back** — a
+decaying velocity spent through `moveBody`, so a shoved creature still stops at
+a tree.
+
+Crits (12%, ×1.8) and the Strike chain (third link ×1.5) give the free spell a
+rhythm instead of a metronome.
+
+### Threat
+
+Creatures chase whoever has hurt them most, not whoever is nearest, with a 10%
+edge to the current quarry so two players trading blows don't make it
+flip-flop. A player who has done damage is chased 4 m further than the aggro
+radius, so a Voidbolt from the edge of range is never free. Hitting one member
+of a camp brings camp-mates within 7 m. A creature that leashes home heals to
+full — otherwise it could be chipped down from the edge of its leash one pull
+at a time.
+
+### Recovering
+
+Health used to never regenerate; since it persists, the only way to heal was to
+die. Now, out of combat, you regain 5% of your cap per second, and mana comes
+back nearly three times faster. "In combat" means you dealt or took damage in
+the last 5 s, *or something is hunting you*. It is replicated on the player,
+because sprint is denied in combat and the client has to predict that.
 
 Cooldowns are enforced server-side, so holding Space auto-attacks and spamming
 it gains nothing. The client mirrors the same constant purely so the swing draws
 on the frame you press rather than a round trip later.
 
 Death: creatures drop to a `Dead` state — still in the map, so the client can
-tip them over — and return to their spawn after 12 s. Players wake at the Ostra's
-spawn point after 4 s, and anything still locked onto them lets go.
+play them falling — and return to their spawn after 12 s. Players wake after
+4 s at the **nearest waystone** to where they fell (the Ostra's spawn if it has
+none), and anything still locked onto them lets go.
 
 Player health persists (see the migration in `SqliteCharacterStore`), so logging
 out at 3 HP and back in is not a free heal.
@@ -228,7 +305,10 @@ character id fell into.
 ### Difficulty by Ostra
 
 Creatures scale per Ostra, so travel is a difficulty choice rather than a change
-of palette:
+of palette. Creature **level** stacks on top (`levelHealthScale`,
+`levelDamageScale`): there is no XP in this game, so a level is a warning, not a
+gate. On Terra it rises by one every 380 m from the Gate Circle, to 12 at the
+edge, and loot rarity tilts with it.
 
 | Ostra | Creature damage | Creature health |
 | --- | --- | --- |
@@ -324,15 +404,26 @@ predicts where the ground will be, and a centimetre of disagreement is
 permanent vertical rubber-banding. A function both sides call is identical by
 construction — no asset to load, no sampling convention to get subtly wrong.
 
-It is a sum of three waves rather than real noise: smooth (so walking never
-jitters), cheap (called once per body per tick *and* once per terrain vertex),
-and stateless. Height is **derived** from the final x/z each step rather than
-integrated, so there is no vertical velocity to drift out of sync.
+It is layered gradient noise (`noise.ts`): kilometre-scale uplands, rolling
+hills, ridged mountain ranges in patches, and a wall of peaks at the rim. The
+noise is built from `Math.imul` hashing and plain arithmetic only — **no
+`Math.sin`, `Math.hypot` or `**` anywhere in `noise.ts`, `terrain.ts` or
+`worldgen.ts`**, because the spec lets each JS engine round those differently
+and Node and every browser must agree to the last bit. (The previous sum of
+sine waves was fine over 80 m and would have tiled visibly over 8 km.) Height
+is **derived** from the final x/z each step rather than integrated, so there is
+no vertical velocity to drift out of sync.
 
-Flat zones blend the hills away under a settlement, because a logging town on a
-hillside looks like an accident. The visible mesh is built from the same
-function and flat-shaded, coloured by height and steepness through vertex
-colours — soil on the flats, stone where it gets steep.
+Flat zones blend the hills away under a settlement or waystone, levelled to
+whatever the natural ground is at their centre, and mountains are kept 320 m
+clear of them — a town should never have a cliff for a back wall. The visible
+mesh is built from the same function and flat-shaded, coloured through vertex
+colours: grass by height, drier patches, darker under woods, stone where steep,
+snow on peaks, dirt on roads.
+
+The client's prediction now passes the terrain and building colliders to
+`applyInput` too. It used to leave them out, so it predicted you walking
+through walls and at the wrong height, and was corrected every patch.
 
 Buildings needed **box colliders**, added alongside the circles. A twelve-metre
 inn approximated by a circle either blocks the street outside it or lets you
@@ -344,7 +435,8 @@ view around.
 
 ## Daso
 
-Terra's west, per the vault: a logging town of fifty, a few houses and an inn,
+Terra's west, per the vault — a kilometre and a half out along the Westroad
+from the Gate Circle, deep in woodland: a logging town of fifty, a few houses and an inn,
 and nobody passing through except for work or by accident. That last detail
 shapes the layout — it is built around the timber yard, not a square.
 
@@ -361,6 +453,46 @@ props and villagers are drawn client-side and cost no bandwidth.
 `unsafeSpawns()` now checks camps against **settlements** as well as spawn
 points — and caught a Risen camp reaching within 10.6 m of Daso on its first
 run, which would have put zombies in the streets of the one calm place.
+
+## A world eight kilometres wide
+
+Terra is 8000 m on a side — a hundred times the 80 it was. Crossing it on foot
+takes twenty-two minutes, fourteen sprinting. What makes that workable:
+
+**Most of it is generated, and none of it is sent.** `worldgen.ts` derives
+woodland, boulders and ~700 creature camps from `wilds.seed`, lazily, one 64 m
+cell at a time. The server asks a cell for its colliders; the client asks the
+same cell for things to draw. Same deterministic function, so the tree you see
+is the tree that stops you. What is placed by hand — the Gate Circle, Daso,
+four roads and thirteen waystones — is the skeleton the rest hangs off, and
+the placement rules are mostly about where things may *not* go: nothing on a
+road, no camp that can see a town or a waystone.
+
+**Collision is bucketed.** `MoveWorld.scenery` is a `SceneryIndex`; a body only
+tests the 3×3 cells around it, in a fixed order so both sides sum contacts
+identically. Without it, every body would test tens of thousands of trees
+every tick.
+
+**Camps sleep.** A camp's creatures only exist while a player is within 190 m
+of it, and are removed 20 s after nobody is within 280 m and nothing in it is
+fighting. Terra holds ~3000 creatures; the server simulates and replicates the
+dozens near someone.
+
+**The ground streams.** Detailed 64 m chunks (2 m quads) are built nearest-first
+around the camera, two per frame, out to 330 m, each with a skirt to hide seams.
+Beyond that, one coarse mesh of the whole Ostra at 64 m per quad is the
+horizon — with its quad cut out wherever a detailed chunk stands. Trees, rocks
+and grass are thin instances, one draw call per kind. Fog and a sky dome fade
+the far ground into the sky; the depth buffer is reversed, because a normal one
+runs out of precision long before eight kilometres.
+
+**You can find your way.** A minimap (north up), a compass strip with bearings
+to landmarks, and a world map on **M** that paints itself in tiles in the
+background from the same `groundTone` as the terrain. Waystones have light
+columns that show above the haze.
+
+The size is one number (`TERRA_SIZE` in `ostras.ts`); everything above scales
+with it.
 
 ## Ostras and Gates
 
@@ -410,16 +542,19 @@ Ordered roughly by how much they would hurt in production.
   so Postgres can replace it; nothing else needs to change.
 - **No economy.** Items drop and are worn; nothing buys, sells, repairs or
   trades them, and there is nowhere to store them beyond twelve carried slots.
-- **No settlements and no NPCs.** Daso and Fanshona exist in the vault and
-  nowhere in the game, which means players still have no reason to be in the
-  same place at the same time.
-- **No threat or targeting.** Creatures always chase whoever is nearest; you
-  cannot taunt, and there is no target selection — spells hit whatever is in the
-  shape.
+- **No interest management.** Camps only exist near players, which keeps state
+  small, but every active creature is still replicated to everyone in the
+  room. With players spread across Terra that grows with the player count;
+  Colyseus `StateView` (per-client filtering) is the fix.
+- **One settlement.** Daso exists; Fanshona and the rest of the vault do not.
+  Eight kilometres of Terra is mostly wilds.
+- **No taunt, no group threat tools.** Threat is damage-based; there is no way
+  to deliberately hold a creature off a friend.
 - **Spells are found nowhere.** The lore says spells come from scrolls and books
   and that the Library Ostracon holds them all; here you simply start with three.
-- **No damage feedback beyond a flinch.** No numbers, no death animation; a
-  killed creature just tips over.
+- **No fast travel.** Waystones are where you wake, not where you can go.
+- **Distant trees pop in** at ~330 m, where the detailed chunks end; the
+  horizon mesh has darker ground under woods but no trees.
 - **Player-vs-player is possible but untested.** Nothing stops a swing landing on
   another player except that `isInSwing` is only ever run against creatures.
 - **A stray player twice appeared after the server was killed under live tabs.**
@@ -435,25 +570,23 @@ Ordered roughly by how much they would hurt in production.
 - **The duplicate-character guard is per-room.** One character can't be in the
   same Ostra twice, but two clients racing could briefly hold it in two
   different Ostras.
-- **Only position persists.** No inventory, stats, or progression yet, and
-  creatures reset with their room.
+- **Creatures reset.** Camps are never persisted; a sleeping camp wakes fresh.
 - **AI has no pathfinding.** A creature walks straight at its goal and slides
-  along whatever it hits. Daso's camps are placed well clear of the buildings so
-  this does not show yet, but it is the next thing that will.
-- **Terrain does not affect movement.** Slopes cost nothing to climb and there
-  is no jumping; you simply follow the surface.
+  along whatever it hits. Generated camps sit in clearings, but a chase through
+  thick woodland shows it.
+- **Terrain does not affect movement.** Slopes cost nothing to climb — including
+  the rim's 120 m peaks — and there is no jumping; you simply follow the
+  surface.
 - **Villagers are scenery.** They stand where they are put and say one line.
   No trading, no quests, no schedule.
-- **`y` is always 0.** It is in the schema and the movement state so terrain and
-  jumping don't need a wire format change, but nothing moves vertically.
 
 ## Debugging
 
 `GET /debug/rooms` lists every live room with its client count, player count and
 names — the fastest way to tell a rendering problem from a state problem.
 
-In dev, `window.mmo` exposes `{ character, world, keyboard, room, session, frame }`,
-and `session.debug` carries `{ predict, meshes, colliders }`. Reading a pose two
+In dev, `window.mmo` exposes `{ character, world, keyboard, audio, room, session, frame }`,
+and `session.debug` carries `{ predict, meshes, colliders, input, target }`. Reading a pose two
 ways — what prediction holds versus what is drawn — is how the yaw seam bug below
 was pinned down.
 `frame(now)` runs a single render/network frame on a clock you supply — useful

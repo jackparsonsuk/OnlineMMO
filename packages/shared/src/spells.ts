@@ -40,6 +40,11 @@ export interface Spell {
    *  around you, where facing stops mattering. */
   arc: number;
   targeting: SpellTargeting;
+  /** Metres a struck creature is shoved away from the caster. Weight, mostly —
+   *  a hit that moves nothing reads as a miss. */
+  knockback: number;
+  /** Interrupts a creature's windup. */
+  stagger: boolean;
   /** One line, shown under the ability bar. */
   description: string;
 }
@@ -60,7 +65,10 @@ export const SPELLS: Record<SpellId, Spell> = {
     range: 2.4,
     arc: Math.PI * 0.62,
     targeting: "nearest",
-    description: "No mana. Best damage, worst reach.",
+    knockback: 0.45,
+    // The finisher staggers; see STRIKE_COMBO_LENGTH.
+    stagger: false,
+    description: "No mana. Every third blow staggers.",
   },
 
   /** Reach. Lower damage than Strike, but you can open on something before it
@@ -76,6 +84,8 @@ export const SPELLS: Record<SpellId, Spell> = {
     // Narrow: reach is the reward, and it should cost you accuracy.
     arc: Math.PI * 0.16,
     targeting: "nearest",
+    knockback: 0.7,
+    stagger: false,
     description: "Strikes one foe at distance.",
   },
 
@@ -93,7 +103,10 @@ export const SPELLS: Record<SpellId, Spell> = {
     range: 4.6,
     arc: Math.PI * 2,
     targeting: "all",
-    description: "Hits everything around you.",
+    // Throws the crowd off you. Buys the second the ring is for.
+    knockback: 2.6,
+    stagger: true,
+    description: "Hits and hurls back everything near.",
   },
 };
 

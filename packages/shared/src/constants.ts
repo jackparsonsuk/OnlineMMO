@@ -16,6 +16,14 @@ export const PATCH_RATE_MS = 50;
 /** Metres per second at full stick. */
 export const MOVE_SPEED = 6;
 
+/**
+ * Shift, out of combat. Terra is eight kilometres across and walking it at 6 m/s
+ * takes the best part of half an hour; this makes it fourteen minutes. Denied
+ * in combat so it can never be used to outrun a Void Spider (7.2 m/s), which
+ * is the whole point of the spider.
+ */
+export const SPRINT_MULTIPLIER = 1.6;
+
 /** Player cube dimensions. */
 export const PLAYER_SIZE = 1;
 export const PLAYER_HALF = PLAYER_SIZE / 2;

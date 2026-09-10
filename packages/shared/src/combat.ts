@@ -7,11 +7,54 @@
 export const PLAYER_MAX_HEALTH = 100;
 export const PLAYER_MAX_MANA = 100;
 
-/** Mana per second, regenerated server-side whether or not you are fighting. */
+/** Mana per second while fighting. */
 export const MANA_REGEN_PER_SECOND = 5;
 
-/** How long a cast's effect is drawn for. Purely cosmetic. */
+/** Mana per second once the fight is over — nobody wants to stand and wait
+ *  for a bar after every camp. */
+export const MANA_REGEN_OUT_OF_COMBAT = 14;
+
+/**
+ * Health per second out of combat, as a fraction of the cap.
+ *
+ * There used to be no health regeneration at all, and health persists — so
+ * the only way to heal was to die. Twenty seconds from empty to full once you
+ * stop fighting, and nothing at all during.
+ */
+export const HEALTH_REGEN_FRACTION_PER_SECOND = 0.05;
+
+/** You count as fighting for this long after you last dealt or took damage.
+ *  Gates regeneration and sprint, and is shown on the HUD. */
+export const COMBAT_LINGER_MS = 5000;
+
+/** Odds any single hit is a critical, and what one is worth. Rare enough to
+ *  notice, common enough that a fight usually has one. */
+export const CRIT_CHANCE = 0.12;
+export const CRIT_MULTIPLIER = 1.8;
+
+/**
+ * Strike chains. Three in a row, each inside this window of the last, and the
+ * third is a heavy finisher that staggers.
+ *
+ * A single repeating swing has no rhythm to it; a three-beat chain gives the
+ * free spell a shape — and a reason to keep pressing rather than holding.
+ */
+export const STRIKE_COMBO_WINDOW_MS = 1200;
+export const STRIKE_COMBO_LENGTH = 3;
+export const COMBO_FINISHER_MULTIPLIER = 1.5;
+export const COMBO_FINISHER_KNOCKBACK = 1.7;
+
+/** A staggered creature drops whatever it was winding up and cannot attack
+ *  again for this long. The reward for landing the heavy hit at the right
+ *  moment: an interrupted Risen overhead is a blow you never take. */
+export const STAGGER_MS = 700;
+
+/** How long a cast's ground marker is drawn for. Purely cosmetic. */
 export const SWING_VISUAL_MS = 180;
+
+/** Where in the swing the blade connects, in ms. The client plays impact
+ *  effects at this moment rather than a round trip later. */
+export const STRIKE_CONTACT_MS = 95;
 
 /** A felled creature lies there this long before it comes back at its spawn. */
 export const ENEMY_RESPAWN_MS = 12_000;

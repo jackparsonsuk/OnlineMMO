@@ -23,6 +23,17 @@ export const MoveInput = schema({
    * this every tick gains nothing.
    */
   cast: t.uint8().default(0),
+  /**
+   * Which way a cast is aimed, separate from `yaw`.
+   *
+   * `yaw` follows the camera and steers movement; aim follows your target. Kept
+   * apart so attacking something off to one side doesn't bend the direction
+   * you are walking in, which would make kiting feel like fighting the
+   * controls. Only read on a frame that casts.
+   */
+  aim: t.angle().default(0),
+  /** Shift held. Honoured only out of combat. */
+  sprint: t.boolean().default(false),
 }, "MoveInput");
 export type MoveInput = SchemaType<typeof MoveInput>;
 
@@ -47,6 +58,12 @@ export const Player = schema({
    */
   maxHealth: t.uint16().default(PLAYER_MAX_HEALTH),
   maxMana: t.uint16().default(PLAYER_MAX_MANA),
+  /**
+   * Dealt or took damage recently. Replicated because the client's movement
+   * prediction needs it — sprint is denied in combat, and predicting a sprint
+   * the server refuses is a rubber-band — and because the HUD shows it.
+   */
+  inCombat: t.boolean().default(false),
 }, "Player");
 export type Player = SchemaType<typeof Player>;
 
@@ -63,6 +80,12 @@ export const Enemy = schema({
   z: t.float32().default(0),
   yaw: t.angle().default(0),
   health: t.uint16().default(1),
+  /** Scaled by Ostra and level, so the client cannot derive it from the
+   *  archetype — which is exactly the bug that let a Barals creature's bar
+   *  start at 150% and look untouched for its first few hits. */
+  maxHealth: t.uint16().default(1),
+  /** See `levelHealthScale`. Shown on the label as a warning. */
+  level: t.uint8().default(1),
   /** An `EnemyState`. The client lights a creature that is hunting, so you can
    *  tell at a glance whether it has seen you. */
   state: t.uint8().default(0),

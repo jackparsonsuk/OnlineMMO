@@ -14,7 +14,9 @@ import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight.js";
 import { Color3, Color4, Vector3 } from "@babylonjs/core/Maths/math.js";
 import { Ray } from "@babylonjs/core/Culling/ray.js";
 import "@babylonjs/core/Culling/ray.js";
+import type { Mesh } from "@babylonjs/core/Meshes/mesh.js";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder.js";
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js";
 
@@ -23,25 +25,24 @@ import {
   GATE_RADIUS,
   getOstra,
   heightAt,
-  PLAYER_SIZE,
   settlementsIn,
-  type EnemyKind,
+  WAYSTONE_RADIUS,
   type OstraDefinition,
   type Rarity,
   type Spell,
+  type WaystoneDefinition,
 } from "@mmo/shared";
 import {
   buildCastArc,
-  buildEnemy,
-  buildGroundCover,
   buildGroundItem,
   buildObstacle,
-  buildPlayer,
   facet,
   flatMaterial,
+  hexColour,
 } from "./lowpoly.js";
+import { SceneryStreamer } from "./scenery.js";
 import { buildSettlement, buildVillager } from "./settlement.js";
-import { buildTerrain } from "./terrain.js";
+import { TerrainStreamer } from "./terrain.js";
 
 export interface World {
   engine: Engine;
@@ -55,15 +56,24 @@ export interface World {
   /** True while a wall or hill is holding the camera closer than asked. */
   cameraBlocked: boolean;
   /**
-   * Everything belonging to the current Ostra — ground, walls, Gates. Replaced
+   * Everything belonging to the current Ostra — walls, Gates, towns. Replaced
    * wholesale on arrival rather than rebuilding the engine, which would drop
    * the WebGL context and re-show a loading flash on every trip.
    */
   ostraRoot: TransformNode | undefined;
+  /** The ground and what grows on it, streamed around the camera. */
+  terrain: TerrainStreamer | undefined;
+  scenery: SceneryStreamer | undefined;
+  ostra: OstraDefinition | undefined;
+  sky: Mesh;
 }
 
 export function createWorld(canvas: HTMLCanvasElement): World {
   const engine = new Engine(canvas, true, { stencil: true }, true);
+  // Terra is seen from one end to the other; a conventional depth buffer runs
+  // out of precision long before eight kilometres and distant hills shimmer
+  // through each other. Reversed depth spends the precision evenly.
+  engine.useReverseDepthBuffer = true;
   const scene = new Scene(engine);
 
   // Classic third-person orbit: behind and slightly above, mouse-look on drag.
@@ -72,17 +82,21 @@ export function createWorld(canvas: HTMLCanvasElement): World {
     -Math.PI / 2,   // alpha — horizontal angle; drives the player's heading
     Math.PI / 3.2,  // beta  — pitch
     9,              // radius
-    new Vector3(0, PLAYER_SIZE, 0),
+    new Vector3(0, 1, 0),
     scene,
   );
   camera.attachControl(canvas, true);
-  camera.lowerRadiusLimit = 3;
-  camera.upperRadiusLimit = 24;
-  // Stop the camera swinging under the floor or snapping over the top.
+  camera.lowerRadiusLimit = 1.6;
+  camera.upperRadiusLimit = 26;
+  // Down to nearly overhead, and a little below the horizon so you can look
+  // up at a mountain — the ground check in updateCameraCollision keeps the
+  // camera out of the hill behind you.
   camera.lowerBetaLimit = 0.15;
-  camera.upperBetaLimit = Math.PI / 2.05;
+  camera.upperBetaLimit = 1.66;
   camera.wheelDeltaPercentage = 0.02;
   camera.panningSensibility = 0; // right-drag panning would desync the follow
+  camera.minZ = 0.25;
+  camera.maxZ = 14000;
 
   const ambient = new HemisphericLight("ambient", new Vector3(0, 1, 0), scene);
   // Lifted from 0.65: faceted low-poly geometry loses its shape in shadow,
@@ -105,7 +119,52 @@ export function createWorld(canvas: HTMLCanvasElement): World {
     preferredRadius: camera.radius,
     cameraBlocked: false,
     ostraRoot: undefined,
+    terrain: undefined,
+    scenery: undefined,
+    ostra: undefined,
+    sky: buildSky(scene),
   };
+}
+
+/** A dome, horizon to zenith, that follows the camera. Its horizon colour is
+ *  the fog colour, so the far ground fades into the sky instead of meeting it
+ *  at a line. */
+function buildSky(scene: Scene): Mesh {
+  const sky = MeshBuilder.CreateSphere("sky", { diameter: 24000, segments: 12, sideOrientation: 1 }, scene);
+  const material = new StandardMaterial("skyMaterial", scene);
+  material.disableLighting = true;
+  material.emissiveColor = Color3.White();
+  material.diffuseColor = Color3.Black();
+  material.specularColor = Color3.Black();
+  material.fogEnabled = false;
+  material.backFaceCulling = false;
+  sky.material = material;
+  // Follows the camera by hand rather than with `infiniteDistance`, which
+  // pushes the dome's depth to 1 — the FAR plane normally, but the NEAR plane
+  // under a reversed depth buffer, where it paints over the whole world.
+  scene.onBeforeRenderObservable.add(() => {
+    const camera = scene.activeCamera;
+    if (camera) sky.position.copyFrom(camera.globalPosition);
+  });
+  sky.isPickable = false;
+  sky.useVertexColors = true;
+  return sky;
+}
+
+function paintSky(sky: Mesh, horizon: Color3, zenith: Color3): void {
+  const positions = sky.getVerticesData(VertexBuffer.PositionKind);
+  if (!positions) return;
+  const colours = new Float32Array((positions.length / 3) * 4);
+  for (let i = 0; i < positions.length / 3; i++) {
+    const up = positions[i * 3 + 1]! / 12000;
+    const t = Math.min(1, Math.max(0, up * 2.2));
+    const c = Color3.Lerp(horizon, zenith, t);
+    colours[i * 4] = c.r;
+    colours[i * 4 + 1] = c.g;
+    colours[i * 4 + 2] = c.b;
+    colours[i * 4 + 3] = 1;
+  }
+  sky.setVerticesData(VertexBuffer.ColorKind, colours);
 }
 
 /**
@@ -115,44 +174,49 @@ export function createWorld(canvas: HTMLCanvasElement): World {
  */
 export function applyOstra(world: World, ostra: OstraDefinition): void {
   world.ostraRoot?.dispose(false, true);
+  world.terrain?.dispose();
+  world.scenery?.dispose();
 
   const scene = world.scene;
   const palette = ostra.palette;
   const root = new TransformNode(`ostra:${ostra.id}`, scene);
   world.ostraRoot = root;
+  world.ostra = ostra;
 
-  scene.clearColor = Color4.FromHexString(`${palette.sky}ff`);
+  const sky = Color3.FromHexString(palette.sky);
+  scene.clearColor = Color4.FromColor3(sky, 1);
   world.ambient.groundColor = Color3.FromHexString(palette.bounce);
+  paintSky(world.sky, sky, sky.scale(ostra.wilds ? 0.62 : 0.5));
 
-  // The ground is now built from the same height function the simulation
-  // walks on, so what you see and what you stand on cannot drift apart.
-  buildTerrain(scene, ostra).parent = root;
+  // Haze. On a big Ostra it is what gives distance its depth; on a small one
+  // it keeps the edge of the world soft.
+  scene.fogMode = Scene.FOGMODE_EXP2;
+  scene.fogColor = sky;
+  scene.fogDensity = ostra.size > 1000 ? 0.0008 : 0.012;
 
-  addWorldEdges(scene, root, ostra);
+  // The ground is built from the same height function the simulation walks on,
+  // so what you see and what you stand on cannot drift apart.
+  world.scenery = new SceneryStreamer(scene, ostra);
+  world.terrain = new TerrainStreamer(scene, ostra, world.scenery);
+
+  // A rim of mountains is boundary enough; the low wall is for small Ostras.
+  if (!ostra.terrain.rim) addWorldEdges(scene, root, ostra);
   addObstacles(scene, root, ostra);
   for (const gate of ostra.gates) addGate(scene, root, ostra, gate.x, gate.z, gate.target);
+  for (const stone of ostra.waystones) addWaystone(scene, root, ostra, stone);
 
-  // Towns first, so their footprints can be excluded from the scatter.
-  const settlements = settlementsIn(ostra);
-  const exclusions: Array<{ x: number; z: number; radius: number }> = [];
-
-  for (const settlement of settlements) {
+  for (const settlement of settlementsIn(ostra)) {
     buildSettlement(scene, ostra, settlement).parent = root;
     for (const villager of settlement.villagers) {
       buildVillager(scene, ostra, villager).parent = root;
     }
-    // Grass stops at the edge of the yard; the trees are placed by hand.
-    exclusions.push({ x: settlement.x, z: settlement.z, radius: settlement.radius * 0.72 });
   }
+}
 
-  for (const obstacle of ostra.obstacles) {
-    exclusions.push({ x: obstacle.x, z: obstacle.z, radius: obstacle.radius + 0.6 });
-  }
-  for (const gate of ostra.gates) {
-    exclusions.push({ x: gate.x, z: gate.z, radius: GATE_RADIUS + 1.2 });
-  }
-
-  buildGroundCover(scene, ostra, exclusions).parent = root;
+/** Stream the ground around where the camera is looking. Once per frame. */
+export function updateWorld(world: World, x: number, z: number): void {
+  world.terrain?.update(x, z);
+  world.scenery?.update(x, z);
 }
 
 /** A low wall marking where `applyInput` clamps you, so the boundary isn't an
@@ -281,12 +345,54 @@ function addGate(
   beam.parent = root;
 }
 
-export function createPlayerMesh(scene: Scene, colour: number): TransformNode {
-  return buildPlayer(scene, colour);
-}
+/**
+ * A waystone: a tall faceted obelisk on a plinth with a glowing rune, and a
+ * faint column of light above it so it can be found from a long way off.
+ */
+function addWaystone(scene: Scene, root: TransformNode, ostra: OstraDefinition, stone: WaystoneDefinition): void {
+  const pivot = new TransformNode(`waystone:${stone.id}`, scene);
+  pivot.position.set(stone.x, heightAt(stone.x, stone.z, ostra.terrain), stone.z);
+  pivot.parent = root;
 
-export function createEnemyMesh(scene: Scene, kind: EnemyKind): TransformNode {
-  return buildEnemy(scene, kind);
+  const stoneMaterial = flatMaterial(scene, "waystoneStone", Color3.FromHexString("#8c8a80"));
+  const plinth = facet(MeshBuilder.CreateCylinder("plinth", {
+    diameterTop: WAYSTONE_RADIUS * 2.2, diameterBottom: WAYSTONE_RADIUS * 2.6, height: 0.5, tessellation: 6,
+  }, scene));
+  plinth.position.y = 0.2;
+  plinth.material = stoneMaterial;
+  plinth.parent = pivot;
+
+  const obelisk = facet(MeshBuilder.CreateCylinder("obelisk", {
+    diameterTop: 0.35, diameterBottom: WAYSTONE_RADIUS * 1.5, height: 4.2, tessellation: 4,
+  }, scene));
+  obelisk.position.y = 2.4;
+  obelisk.rotation.y = Math.PI / 4;
+  obelisk.material = stoneMaterial;
+  obelisk.metadata = { blocksCamera: true };
+  obelisk.parent = pivot;
+
+  const rune = new StandardMaterial("waystoneRune", scene);
+  rune.diffuseColor = Color3.Black();
+  rune.specularColor = Color3.Black();
+  rune.emissiveColor = hexColour(0x9fd8ff);
+  const glyph = MeshBuilder.CreatePolyhedron("rune", { type: 1, size: 0.2 }, scene);
+  glyph.position.set(0, 2.9, 0);
+  glyph.material = rune;
+  glyph.parent = pivot;
+
+  const beamMaterial = new StandardMaterial("waystoneBeam", scene);
+  beamMaterial.emissiveColor = hexColour(0x9fd8ff);
+  beamMaterial.diffuseColor = Color3.Black();
+  beamMaterial.specularColor = Color3.Black();
+  beamMaterial.alpha = 0.09;
+  beamMaterial.backFaceCulling = false;
+  // A landmark has to survive the haze, or it is not much of a landmark.
+  beamMaterial.fogEnabled = false;
+  const beam = MeshBuilder.CreateCylinder("waystoneBeam", { diameter: 0.9, height: 60, tessellation: 6 }, scene);
+  beam.position.y = 34;
+  beam.material = beamMaterial;
+  beam.isPickable = false;
+  beam.parent = pivot;
 }
 
 export function createCastArc(scene: Scene, spell: Spell, colour: number): TransformNode {
@@ -301,14 +407,18 @@ export function createGroundItemMesh(scene: Scene, rarity: Rarity): TransformNod
  *  plane never cuts into the geometry. */
 const CAMERA_PADDING = 0.45;
 
+/** The camera is kept at least this far above the ground beneath it. */
+const CAMERA_GROUND_CLEARANCE = 0.6;
+
 /**
  * Pull the camera in when something solid is between it and the player.
  *
  * Without this, backing against a wall in Daso puts the camera inside the
- * building and you are looking at the inside of a roof. A ray from the player
- * outwards is the cheapest correct test, and only things tagged
- * `blocksCamera` are considered — grass, villagers, loot and creatures should
- * never shove the view around.
+ * building and you are looking at the inside of a roof. Two tests: the ground
+ * is checked by marching along the ray against `heightAt` directly — exact,
+ * and far cheaper than picking against hundreds of terrain chunks — and
+ * everything else by a ray pick against meshes tagged `blocksCamera`, so grass,
+ * trees, villagers, loot and creatures never shove the view around.
  *
  * The viewer's chosen distance is remembered separately, so walking away from
  * a wall returns the camera to where they had it. Scrolling *while* pressed
@@ -325,17 +435,30 @@ export function updateCameraCollision(world: World): void {
   if (distance < 1e-3) return;
   direction.scaleInPlace(1 / distance);
 
-  const ray = new Ray(target, direction, world.preferredRadius);
+  let limit = world.preferredRadius;
+
+  const terrain = world.ostra?.terrain;
+  if (terrain) {
+    for (let d = 0.8; d <= limit; d += 0.4) {
+      const x = target.x + direction.x * d;
+      const y = target.y + direction.y * d;
+      const z = target.z + direction.z * d;
+      if (y < heightAt(x, z, terrain) + CAMERA_GROUND_CLEARANCE) {
+        limit = Math.max(0, d - 0.3);
+        break;
+      }
+    }
+  }
+
+  const ray = new Ray(target, direction, limit);
   const hit = world.scene.pickWithRay(
     ray,
     (mesh) => mesh.isEnabled() && mesh.metadata?.blocksCamera === true,
   );
+  if (hit?.hit && hit.distance < limit) limit = hit.distance - CAMERA_PADDING;
 
-  if (hit?.hit && hit.distance < world.preferredRadius) {
-    camera.radius = Math.max(
-      camera.lowerRadiusLimit ?? 1.5,
-      hit.distance - CAMERA_PADDING,
-    );
+  if (limit < world.preferredRadius) {
+    camera.radius = Math.max(camera.lowerRadiusLimit ?? 1.5, limit);
     world.cameraBlocked = true;
     return;
   }

@@ -1,4 +1,4 @@
-import { COLLISION_ITERATIONS, MOVE_SPEED, PLAYER_RADIUS } from "./constants.js";
+import { COLLISION_ITERATIONS, MOVE_SPEED, PLAYER_RADIUS, SPRINT_MULTIPLIER } from "./constants.js";
 import { heightAt, type TerrainSettings } from "./terrain.js";
 
 /**
@@ -28,6 +28,26 @@ export interface MoveCommand {
   moveX: number;
   moveZ: number;
   yaw: number;
+  /** Asking to run. Only honoured out of combat — see `applyInput`. */
+  sprint?: boolean;
+}
+
+/**
+ * Static scenery, bucketed into square cells.
+ *
+ * An eight-kilometre Ostra holds tens of thousands of trees and rocks. Testing
+ * every body against every one of them each step would cost more than the rest
+ * of the simulation combined, so a body only looks at the 3x3 block of cells
+ * around it. The cell must be wider than any collider's radius plus the
+ * largest body's, or a contact straddling two cells could be missed.
+ *
+ * Both sides build the index from the same deterministic data and visit cells
+ * in the same fixed order, so the summed push-out stays identical.
+ */
+export interface SceneryIndex {
+  cellSize: number;
+  /** Everything whose centre lies in cell (cx, cz). Never null. */
+  cell(cx: number, cz: number): readonly Collider[];
 }
 
 /** A circle you cannot walk into: a rock, a pillar, a creature or a player. */
@@ -74,6 +94,9 @@ export interface MoveWorld {
    * Scenery is identical on both sides and so predicts perfectly.
    */
   colliders: readonly Collider[];
+  /** Rocks, trees and pillars, looked up by cell. Identical on both sides, so
+   *  walking into a tree predicts perfectly. */
+  scenery?: SceneryIndex;
   /** Buildings. Identical on both sides, so they predict perfectly. */
   boxes?: readonly BoxCollider[];
   /** The collider representing the body being simulated, skipped so nobody
@@ -90,11 +113,19 @@ function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
 }
 
+/**
+ * @param canSprint Whether a sprint request is honoured this step. The server
+ *   passes "not in combat"; the client passes its latest copy of the same
+ *   replicated flag. They disagree only for the round trip after combat starts
+ *   or ends, which the reconciler absorbs as a small correction — the price of
+ *   not letting anyone outrun a spider by holding Shift.
+ */
 export function applyInput(
   state: MoveState,
   command: MoveCommand,
   dt: number,
   world: MoveWorld,
+  canSprint = false,
 ): void {
   // Facing is client-driven (it follows their camera) but still sanitised:
   // a NaN from a malformed packet would poison the position permanently.
@@ -117,8 +148,9 @@ export function applyInput(
     // (sin yaw, 0, cos yaw), and its right is (cos yaw, 0, -sin yaw).
     const sin = Math.sin(yaw);
     const cos = Math.cos(yaw);
-    deltaX = (inputX * cos + inputZ * sin) * MOVE_SPEED * dt;
-    deltaZ = (inputZ * cos - inputX * sin) * MOVE_SPEED * dt;
+    const speed = command.sprint === true && canSprint ? MOVE_SPEED * SPRINT_MULTIPLIER : MOVE_SPEED;
+    deltaX = (inputX * cos + inputZ * sin) * speed * dt;
+    deltaZ = (inputZ * cos - inputX * sin) * speed * dt;
   }
 
   moveBody(state, deltaX, deltaZ, world, PLAYER_RADIUS);
@@ -216,32 +248,31 @@ function resolveCollisions(state: MoveState, world: MoveWorld, radius: number): 
       contacts++;
     }
 
+    const scenery = world.scenery;
+    if (scenery) {
+      const size = scenery.cellSize;
+      const cx = Math.floor(state.x / size);
+      const cz = Math.floor(state.z / size);
+      // Fixed visiting order, so both sides sum contacts identically.
+      for (let oz = -1; oz <= 1; oz++) {
+        for (let ox = -1; ox <= 1; ox++) {
+          for (const collider of scenery.cell(cx + ox, cz + oz)) {
+            const push = circlePush(state, collider, radius);
+            if (push === undefined) continue;
+            pushX += push.x;
+            pushZ += push.z;
+            contacts++;
+          }
+        }
+      }
+    }
+
     for (const collider of world.colliders) {
       if (collider.id === world.selfId) continue;
-
-      const dx = state.x - collider.x;
-      const dz = state.z - collider.z;
-      const minimum = collider.radius + radius;
-      const distanceSq = dx * dx + dz * dz;
-      if (distanceSq >= minimum * minimum) continue;
-
-      const distance = Math.sqrt(distanceSq);
-      let normalX: number;
-      let normalZ: number;
-      if (distance < 1e-6) {
-        // Exactly concentric — there is no separating direction to compute, so
-        // pick a fixed one. Arbitrary, but both sides must pick the SAME
-        // arbitrary answer or they drift apart.
-        normalX = 1;
-        normalZ = 0;
-      } else {
-        normalX = dx / distance;
-        normalZ = dz / distance;
-      }
-
-      const overlap = minimum - distance;
-      pushX += normalX * overlap;
-      pushZ += normalZ * overlap;
+      const push = circlePush(state, collider, radius);
+      if (push === undefined) continue;
+      pushX += push.x;
+      pushZ += push.z;
       contacts++;
     }
 
@@ -249,4 +280,34 @@ function resolveCollisions(state: MoveState, world: MoveWorld, radius: number): 
     state.x += pushX;
     state.z += pushZ;
   }
+}
+
+/** Reused result, so the hot loop allocates nothing. */
+const pushScratch = { x: 0, z: 0 };
+
+/** How far a body must move to stop overlapping one circle, if it overlaps. */
+function circlePush(
+  state: MoveState,
+  collider: Collider,
+  radius: number,
+): { x: number; z: number } | undefined {
+  const dx = state.x - collider.x;
+  const dz = state.z - collider.z;
+  const minimum = collider.radius + radius;
+  const distanceSq = dx * dx + dz * dz;
+  if (distanceSq >= minimum * minimum) return undefined;
+
+  const distance = Math.sqrt(distanceSq);
+  const overlap = minimum - distance;
+  if (distance < 1e-6) {
+    // Exactly concentric — there is no separating direction to compute, so
+    // pick a fixed one. Arbitrary, but both sides must pick the SAME
+    // arbitrary answer or they drift apart.
+    pushScratch.x = overlap;
+    pushScratch.z = 0;
+  } else {
+    pushScratch.x = (dx / distance) * overlap;
+    pushScratch.z = (dz / distance) * overlap;
+  }
+  return pushScratch;
 }

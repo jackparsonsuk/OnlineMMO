@@ -2,6 +2,12 @@ import { matchMaker, Room, ServerError, type Client, type Rewind } from "@colyse
 import {
   applyInput,
   buildingColliders,
+  campsIn,
+  COMBAT_LINGER_MS,
+  COMBO_FINISHER_KNOCKBACK,
+  COMBO_FINISHER_MULTIPLIER,
+  CRIT_CHANCE,
+  CRIT_MULTIPLIER,
   DROP_CHANCE,
   Enemy,
   ENEMY_RESPAWN_MS,
@@ -16,6 +22,7 @@ import {
   GroundItem,
   LOOT_CLAIM_MS,
   grownProficiency,
+  HEALTH_REGEN_FRACTION_PER_SECOND,
   INVENTORY_SIZE,
   isInArc,
   isItemId,
@@ -25,17 +32,24 @@ import {
   getOstra,
   isEnemyKind,
   isOstraId,
+  levelDamageScale,
+  levelHealthScale,
   MoveInput,
+  MANA_REGEN_OUT_OF_COMBAT,
   MANA_REGEN_PER_SECOND,
   PICKUP_RADIUS,
   PLAYER_MAX_HEALTH,
   PLAYER_MAX_MANA,
   PLAYER_RADIUS,
   PLAYER_RESPAWN_MS,
+  respawnPoint,
   rollRarity,
+  sceneryIndex,
   spellDamage,
   spellFromWire,
-  staticColliders,
+  STRIKE_COMBO_LENGTH,
+  STRIKE_COMBO_WINDOW_MS,
+  type CampDefinition,
   type Collider,
   type EnemyArchetype,
   type MoveWorld,
@@ -54,7 +68,15 @@ import {
   type SpellProficiency,
   WorldState,
 } from "@mmo/shared";
-import { createBrain, stepEnemy, type AITarget, type EnemyBrain } from "../ai/enemyAI.js";
+import {
+  calmDown,
+  createBrain,
+  rally,
+  stepEnemy,
+  takeHit,
+  type AITarget,
+  type EnemyBrain,
+} from "../ai/enemyAI.js";
 import { verifyToken } from "../auth.js";
 import { getServerContext } from "../context.js";
 import { isCharacterId } from "../identity.js";
@@ -96,15 +118,58 @@ interface Session {
   /** Carried items, and what is worn. Private: nobody else sees a bag. */
   inventory: string[];
   equipment: Equipment;
-  /** Fractional mana carried between ticks, so a 30Hz regen of 5/s is not
-   *  rounded away to nothing every step. */
+  /** Fractional mana and health carried between ticks, so a regen of a few
+   *  points a second is not rounded away to nothing at 30Hz. */
   manaCarry: number;
-  /** Wall-clock ms when a fallen player wakes at the spawn point. */
+  healthCarry: number;
+  /** Wall-clock ms when a fallen player wakes at a waystone. */
   respawnAt: number;
+  /** Where they fell, to pick the nearest waystone. */
+  diedAtX: number;
+  diedAtZ: number;
+  /** Wall-clock ms until which they count as fighting. */
+  combatUntil: number;
+  /** Where they are in the Strike chain, and when the last link landed. */
+  comboStep: number;
+  comboAt: number;
+  /** The creature they have selected. Spells that hit one thing prefer it. */
+  targetId: string | undefined;
+}
+
+/** A camp whose creatures currently exist. */
+interface ActiveCamp {
+  camp: CampDefinition;
+  enemyIds: string[];
+  /** Last time a player was close enough to want it. */
+  wantedAt: number;
 }
 
 /** How long to wait for a client to act on a gate handoff before evicting it. */
 const TRANSFER_TIMEOUT_MS = 10_000;
+
+/**
+ * Camps are only populated while somebody is near them.
+ *
+ * Terra holds ~700 camps and ~3000 creatures. Simulating and replicating all of
+ * them for a map where everyone is standing in one corner would be the most
+ * expensive thing the server does, for nothing anyone can see. A camp wakes
+ * when a player comes within ACTIVATE of it — well beyond draw distance, so
+ * nobody sees one pop in — and is removed once nobody has been within DORMANT
+ * for CAMP_SLEEP_MS and nothing in it is still fighting.
+ */
+const CAMP_ACTIVATE = 190;
+const CAMP_DORMANT = 280;
+const CAMP_SLEEP_MS = 20_000;
+/** Ticks between camp checks. Twice a second is plenty for something that
+ *  cares about hundreds of metres. */
+const CAMP_CHECK_TICKS = 15;
+
+/** Combat events are only sent to players this close to them. On a map this
+ *  size, a fight three kilometres away is none of your business. */
+const EVENT_RANGE = 180;
+
+/** A hit on one creature brings camp-mates this close to join in. */
+const RALLY_RADIUS = 7;
 
 export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   /**
@@ -127,11 +192,19 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   private readonly brains = new Map<string, EnemyBrain>();
   /** Reused each tick so the AI loop does not allocate a target list 30x a second. */
   private readonly aiTargets: AITarget[] = [];
+  /** Players some creature is hunting this tick. Being hunted counts as
+   *  combat — otherwise you could sprint away from a spider that has not
+   *  landed a blow yet. */
+  private readonly hunted = new Set<string>();
   /** Position history, so a swing is judged against the world the attacker
    *  actually saw rather than the one that exists by the time it arrives. */
   private rewind!: Rewind;
   /** Building footprints. Constant for the room's life. */
   private boxes!: readonly BoxCollider[];
+  private camps!: readonly CampDefinition[];
+  private readonly activeCamps = new Map<string, ActiveCamp>();
+  private nextEnemyId = 0;
+  private tick = 0;
   /** When each dropped item expires, keyed as `state.ground`. Server-only:
    *  clients have no use for the deadline, only for the item. */
   private readonly groundExpiry = new Map<string, number>();
@@ -149,12 +222,11 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     this.realmId = context.realmId;
     this.ostra = getOstra(options.ostraId);
     this.boxes = buildingColliders(this.ostra);
+    this.camps = campsIn(this.ostra);
 
     this.state = new WorldState({ ostraId: this.ostra.id });
     this.maxClients = 64;
     this.patchRate = PATCH_RATE_MS;
-
-    this.spawnEnemies();
 
     // Lag compensation. A client renders creatures INTERP_DELAY_MS in the past,
     // so a spider closing at 7.2 m/s is nearly a metre from where it is drawn by
@@ -168,16 +240,27 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       mode: "snapshot",
     });
 
-    // The authoritative simulation. Nothing else in this room is allowed to
-    // move a player or a creature: positions change here, from buffered input
-    // or from the AI, or not at all.
     this.onMessage("requestProfile", (client) => this.onRequestProfile(client));
     this.onMessage("equip", (client, message: { itemId?: unknown }) =>
       this.onEquip(client, message?.itemId));
     this.onMessage("unequip", (client, message: { slot?: unknown }) =>
       this.onUnequip(client, message?.slot));
+    this.onMessage("target", (client, message: { id?: unknown }) => {
+      const session = this.sessions.get(client.sessionId);
+      if (!session) return;
+      const id = message?.id;
+      session.targetId = typeof id === "string" && this.state.enemies.has(id) ? id : undefined;
+    });
 
+    const scenery = sceneryIndex(this.ostra);
+
+    // The authoritative simulation. Nothing else in this room is allowed to
+    // move a player or a creature: positions change here, from buffered input
+    // or from the AI, or not at all.
     this.setFixedTimestep((ctx) => {
+      const now = Date.now();
+      this.tick++;
+
       // One snapshot for the whole tick, taken before anyone moves. Rebuilding
       // it per player would mean players simulated later collide against
       // already-moved positions, making the result depend on map iteration
@@ -186,6 +269,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const world = {
         halfExtent: this.ostra.size / 2,
         colliders,
+        scenery,
         boxes: this.boxes,
         terrain: this.ostra.terrain,
         selfId: "",
@@ -210,17 +294,19 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         // keeps the server's ack aligned with the client's pending-input list,
         // so its rollback replays exactly the frames we haven't applied yet.
         for (const input of this.inputs.get(sessionId)) {
-          applyInput(player, input, ctx.dt, world);
-          if (input.cast) this.tryCast(sessionId, session, player, input.cast);
+          applyInput(player, input, ctx.dt, world, !player.inCombat);
+          if (input.cast) this.tryCast(sessionId, session, player, input.cast, input.aim, now);
         }
 
         this.checkGates(sessionId, session, player);
       }
 
-      this.regenerateMana(ctx.dt);
-      this.stepEnemies(ctx.dt, world);
-      this.processRespawns();
-      this.processGround();
+      this.stepEnemies(ctx.dt, world, now);
+      this.updateCombatFlags(now);
+      this.regenerate(ctx.dt);
+      this.processRespawns(now);
+      this.processGround(now);
+      if (this.tick % CAMP_CHECK_TICKS === 0) this.updateCamps(now);
     }, TICK_RATE);
   }
 
@@ -266,14 +352,19 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       throw new ServerError(409, `That character is on ${getOstra(character.ostraId).name}.`);
     }
 
+    // A save from before an Ostra shrank could sit outside it now.
+    const limit = this.ostra.size / 2 - PLAYER_RADIUS;
+    const x = Math.max(-limit, Math.min(limit, character.x));
+    const z = Math.max(-limit, Math.min(limit, character.z));
+
     this.state.players.set(client.sessionId, new Player({
       name: character.name,
       colour: character.colour,
-      x: character.x,
+      x,
       // Recomputed rather than restored: the ground may have been reshaped
       // since they logged out, and a saved height would bury or float them.
-      y: groundHeight(this.ostra, character.x, character.z),
-      z: character.z,
+      y: groundHeight(this.ostra, x, z),
+      z,
       yaw: character.yaw,
       // A character stored at 0 HP died as the process went down; wake them
       // whole rather than dead on arrival with no respawn timer running.
@@ -292,7 +383,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     this.sessions.set(client.sessionId, {
       characterId: character.id,
       // Covers arriving through a Gate and logging in on top of one alike.
-      suppressedGate: this.gateContaining(character.x, character.z)?.id,
+      suppressedGate: this.gateContaining(x, z)?.id,
       transferring: false,
       nextCastAt: {},
       affinity: character.affinity,
@@ -300,8 +391,19 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       inventory: [...character.inventory],
       equipment: { ...character.equipment },
       manaCarry: 0,
+      healthCarry: 0,
       respawnAt: 0,
+      diedAtX: x,
+      diedAtZ: z,
+      combatUntil: 0,
+      comboStep: 0,
+      comboAt: 0,
+      targetId: undefined,
     });
+
+    // Wake the camps around them now rather than up to half a second later,
+    // so arriving somewhere never shows an empty field filling up.
+    this.updateCamps(Date.now());
   }
 
   /**
@@ -340,6 +442,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
     this.sessions.delete(client.sessionId);
     this.state.players.delete(client.sessionId);
+    for (const brain of this.brains.values()) {
+      brain.threat.delete(client.sessionId);
+      if (brain.quarry === client.sessionId) brain.quarry = undefined;
+    }
   }
 
   /** Fire a Gate the moment a player steps into it, once per entry. */
@@ -358,9 +464,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     if (client) void this.beginTransfer(client, session, player, gate);
   }
 
-  /** Scenery, every player, and every creature, as circles. */
+  /** Every player and every living creature, as circles. Scenery is looked up
+   *  by cell through the world's `scenery` index instead. */
   private collectColliders(): Collider[] {
-    const colliders: Collider[] = [...staticColliders(this.ostra)];
+    const colliders: Collider[] = [];
     for (const [sessionId, player] of this.state.players) {
       colliders.push({
         id: sessionId,
@@ -382,44 +489,90 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     return colliders;
   }
 
-  /**
-   * Populate the Ostra from its spawn table. Creatures live and die with the
-   * room and are never persisted, so an emptied Ostra repopulates the moment
-   * somebody walks back into it.
-   */
-  private spawnEnemies(): void {
-    let index = 0;
-    for (const group of this.ostra.spawns) {
-      const archetype = getArchetype(group.kind);
-      for (let n = 0; n < group.count; n++) {
-        // Scatter over the camp's area rather than its circumference: the sqrt
-        // spreads them evenly instead of bunching them at the edge.
-        const angle = Math.random() * Math.PI * 2;
-        const reach = group.radius * Math.sqrt(Math.random());
-        const x = group.x + Math.cos(angle) * reach;
-        const z = group.z + Math.sin(angle) * reach;
+  // --- camps -----------------------------------------------------------------
 
-        const id = `e${index++}`;
-        this.state.enemies.set(id, new Enemy({
-          kind: archetype.kind,
-          x,
-          y: groundHeight(this.ostra, x, z),
-          z,
-          yaw: Math.random() * Math.PI * 2,
-          health: this.scaledHealth(archetype.maxHealth),
-          state: EnemyState.Idle,
-        }));
-        this.brains.set(id, createBrain(x, z));
+  /** Wake camps someone is near; put to sleep the ones nobody is. */
+  private updateCamps(now: number): void {
+    const watchers: Array<{ x: number; z: number }> = [];
+    for (const [sessionId, player] of this.state.players) {
+      const session = this.sessions.get(sessionId);
+      if (session && !session.transferring) watchers.push({ x: player.x, z: player.z });
+    }
+
+    for (const camp of this.camps) {
+      let nearest = Infinity;
+      for (const watcher of watchers) {
+        const d = Math.hypot(watcher.x - camp.x, watcher.z - camp.z) - camp.radius;
+        if (d < nearest) nearest = d;
       }
+
+      const active = this.activeCamps.get(camp.id);
+      if (nearest <= CAMP_ACTIVATE) {
+        if (active) active.wantedAt = now;
+        else this.wakeCamp(camp, now);
+        continue;
+      }
+      if (!active) continue;
+      if (nearest <= CAMP_DORMANT) {
+        active.wantedAt = now;
+        continue;
+      }
+
+      // Never pull the rug out from under a fight in progress.
+      const fighting = active.enemyIds.some((id) => this.brains.get(id)?.quarry !== undefined);
+      if (!fighting && now - active.wantedAt > CAMP_SLEEP_MS) this.sleepCamp(active);
     }
   }
+
+  private wakeCamp(camp: CampDefinition, now: number): void {
+    const archetype = getArchetype(camp.kind);
+    const maxHealth = this.scaledHealth(archetype.maxHealth, camp.level);
+    const enemyIds: string[] = [];
+
+    for (let n = 0; n < camp.count; n++) {
+      // Scatter over the camp's area rather than its circumference: the sqrt
+      // spreads them evenly instead of bunching them at the edge.
+      const angle = Math.random() * Math.PI * 2;
+      const reach = camp.radius * Math.sqrt(Math.random());
+      const x = camp.x + Math.cos(angle) * reach;
+      const z = camp.z + Math.sin(angle) * reach;
+
+      const id = `e${this.nextEnemyId++}`;
+      this.state.enemies.set(id, new Enemy({
+        kind: archetype.kind,
+        x,
+        y: groundHeight(this.ostra, x, z),
+        z,
+        yaw: Math.random() * Math.PI * 2,
+        health: maxHealth,
+        maxHealth,
+        level: camp.level,
+        state: EnemyState.Idle,
+      }));
+      this.brains.set(id, createBrain(x, z, camp.id, maxHealth));
+      enemyIds.push(id);
+    }
+
+    this.activeCamps.set(camp.id, { camp, enemyIds, wantedAt: now });
+  }
+
+  private sleepCamp(active: ActiveCamp): void {
+    for (const id of active.enemyIds) {
+      this.state.enemies.delete(id);
+      this.brains.delete(id);
+    }
+    this.activeCamps.delete(active.camp.id);
+  }
+
+  // --- the fight -------------------------------------------------------------
 
   private stepEnemies(
     dt: number,
     world: MoveWorld & { selfId: string },
+    now: number,
   ): void {
+    this.hunted.clear();
     if (this.state.enemies.size === 0) return;
-    const now = Date.now();
 
     // Players only — a zombie should not hunt another zombie, so this can't
     // just reuse the collider snapshot.
@@ -436,23 +589,32 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const brain = this.brains.get(enemyId);
       if (!brain) continue;
       world.selfId = enemyId;
-      const struck = stepEnemy(
-        enemy,
-        brain,
-        this.archetypeFor(enemy.kind),
-        dt,
-        world,
-        this.aiTargets,
-        now,
-      );
-      if (struck) {
-        // The same creature hits harder in a harder place.
-        this.damagePlayer(
-          struck,
-          Math.max(1, Math.round(
-            this.archetypeFor(enemy.kind).attackDamage * this.ostra.difficulty.damage,
-          )),
-        );
+      const archetype = this.archetypeFor(enemy.kind);
+      const event = stepEnemy(enemy, brain, archetype, dt, world, this.aiTargets, now);
+      if (brain.quarry !== undefined) this.hunted.add(brain.quarry);
+      if (!event) continue;
+
+      switch (event.type) {
+        case "windup":
+          // Everyone nearby sees it coming, not just the target: a friend
+          // standing in the wedge should step out too.
+          this.broadcastNear(enemy.x, enemy.z, "enemySwing", {
+            id: enemyId, yaw: event.yaw, ms: event.ms, target: event.target,
+          });
+          break;
+        case "hit":
+          // The same creature hits harder in a harder place, and further out.
+          this.damagePlayer(
+            event.target,
+            Math.max(1, Math.round(
+              archetype.attackDamage * this.ostra.difficulty.damage * levelDamageScale(enemy.level),
+            )),
+            enemyId,
+          );
+          break;
+        case "miss":
+          this.broadcastNear(enemy.x, enemy.z, "evade", { id: event.target, by: enemyId });
+          break;
       }
     }
   }
@@ -463,24 +625,48 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
    * Every spell runs through the same shape test — a ring is just an arc of
    * 2*PI — so adding a spell is a table entry rather than a new code path.
    */
-  private tryCast(sessionId: string, session: Session, player: Player, wire: number): void {
+  private tryCast(
+    sessionId: string,
+    session: Session,
+    player: Player,
+    wire: number,
+    aim: number,
+    now: number,
+  ): void {
     const spell = spellFromWire(wire);
     if (!spell) return;
 
-    const now = Date.now();
     if (now < (session.nextCastAt[spell.id] ?? 0)) return;
     if (player.mana < spell.manaCost) return;
 
     session.nextCastAt[spell.id] = now + spell.cooldownMs;
     player.mana -= spell.manaCost;
 
-    const hits = this.resolveSpell(sessionId, player, spell, session);
+    // The chain advances only if the last Strike was recent enough.
+    let combo = 0;
+    if (spell.id === "strike") {
+      combo = now - session.comboAt <= STRIKE_COMBO_WINDOW_MS
+        ? (session.comboStep % STRIKE_COMBO_LENGTH) + 1
+        : 1;
+      session.comboStep = combo;
+      session.comboAt = now;
+    }
 
-    // Tell the caster either way: the client draws the effect on its own, and
-    // silence on a miss is indistinguishable from a dropped packet.
-    this.clients.getById(sessionId)?.send("cast", { spell: spell.id, hits: hits.length });
+    // Aim is client-supplied, like facing always was: it is only a direction,
+    // and the shape test still bounds what it can reach.
+    const yaw = Number.isFinite(aim) ? aim : player.yaw;
+    const hits = this.resolveSpell(sessionId, player, spell, session, yaw, combo, now);
+
+    // Everyone nearby sees the cast, so a fight between other players and a
+    // camp is something you can watch rather than a set of numbers changing.
+    // The caster is told either way: silence on a miss is indistinguishable
+    // from a dropped packet.
+    this.broadcastNear(player.x, player.z, "cast", {
+      by: sessionId, spell: spell.id, yaw, combo, hits,
+    });
 
     if (hits.length === 0) return;
+    session.combatUntil = now + COMBAT_LINGER_MS;
 
     // Proficiency only grows on a LANDED cast. "The more you use magic the
     // better you become" would otherwise mean facing a wall and holding a key,
@@ -493,19 +679,23 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     }
   }
 
-  /** Apply a spell to whatever it catches, and return what it hit. */
+  /** Apply a spell to whatever it catches, and describe what happened. */
   private resolveSpell(
     sessionId: string,
     player: Player,
     spell: Spell,
     session: Session,
-  ): string[] {
+    yaw: number,
+    combo: number,
+    now: number,
+  ): CastHit[] {
     // Where this player saw the world when they cast, not where it is now.
     const seen = this.rewind.lastSeenBy(sessionId);
     // Training scales the spell; gear adds on top. Two axes, kept separate
     // so neither makes the other pointless.
-    const damage = spellDamage(spell, session.spells[spell.id] ?? 0)
+    const base = spellDamage(spell, session.spells[spell.id] ?? 0)
       + equipmentStats(session.equipment).damage;
+    const finisher = spell.id === "strike" && combo === STRIKE_COMBO_LENGTH;
 
     const caught: Array<{ id: string; enemy: Enemy; range: number }> = [];
 
@@ -516,7 +706,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const x = seen.value(enemy, "x");
       const z = seen.value(enemy, "z");
       const inside = isInArc(
-        player.x, player.z, player.yaw,
+        player.x, player.z, yaw,
         x, z, archetype.radius,
         spell.range, spell.arc,
       );
@@ -527,27 +717,73 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
     if (caught.length === 0) return [];
 
+    // One-target spells take your selected target when it is in the shape,
+    // and the nearest thing otherwise. Aiming at one creature and hitting the
+    // one that wandered in front of it reads as the game ignoring you.
     const struck = spell.targeting === "all"
       ? caught
-      : [caught.reduce((closest, next) => (next.range < closest.range ? next : closest))];
+      : [caught.find((entry) => entry.id === session.targetId)
+        ?? caught.reduce((closest, next) => (next.range < closest.range ? next : closest))];
 
+    const hits: CastHit[] = [];
     for (const { id, enemy } of struck) {
-      enemy.health = Math.max(0, enemy.health - damage);
-      this.broadcast("damage", { id, amount: damage, by: sessionId });
+      const crit = Math.random() < CRIT_CHANCE;
+      const amount = Math.max(1, Math.round(
+        base * (finisher ? COMBO_FINISHER_MULTIPLIER : 1) * (crit ? CRIT_MULTIPLIER : 1),
+      ));
+      enemy.health = Math.max(0, enemy.health - amount);
+      const killed = enemy.health === 0;
+      const brain = this.brains.get(id);
 
-      if (enemy.health === 0) {
+      let staggered = false;
+      if (killed) {
         enemy.state = EnemyState.Dead;
-        const brain = this.brains.get(id);
         if (brain) {
-          brain.quarry = undefined;
+          calmDown(brain);
           brain.returning = false;
-          brain.respawnAt = Date.now() + ENEMY_RESPAWN_MS;
+          brain.respawnAt = now + ENEMY_RESPAWN_MS;
         }
         this.rollDrop(enemy, sessionId);
+      } else if (brain) {
+        // Shoved directly away from the caster — from where it is now, since
+        // that is where the shove happens.
+        const dx = enemy.x - player.x;
+        const dz = enemy.z - player.z;
+        const length = Math.hypot(dx, dz) || 1;
+        const knockback = finisher ? COMBO_FINISHER_KNOCKBACK : spell.knockback;
+        staggered = spell.stagger || finisher;
+        takeHit(brain, sessionId, amount, dx / length, dz / length, knockback, staggered, now);
+        this.rallyCampMates(id, brain, enemy, sessionId);
       }
+
+      hits.push({ id, amount, crit, killed, staggered });
     }
 
-    return struck.map((entry) => entry.id);
+    return hits;
+  }
+
+  /** Hit one of a camp and the others close by come too. Tight radius: pulling
+   *  a whole camp with one bolt would make every fight the same fight. */
+  private rallyCampMates(struckId: string, struck: EnemyBrain, enemy: Enemy, attacker: string): void {
+    const camp = this.activeCamps.get(struck.campId);
+    if (!camp) return;
+    for (const id of camp.enemyIds) {
+      if (id === struckId) continue;
+      const mate = this.state.enemies.get(id);
+      const brain = this.brains.get(id);
+      if (!mate || !brain || mate.state === EnemyState.Dead) continue;
+      if (Math.hypot(mate.x - enemy.x, mate.z - enemy.z) <= RALLY_RADIUS) rally(brain, attacker);
+    }
+  }
+
+  /** Being hunted or having traded blows recently both count as fighting. */
+  private updateCombatFlags(now: number): void {
+    for (const [sessionId, session] of this.sessions) {
+      const player = this.state.players.get(sessionId);
+      if (!player) continue;
+      const fighting = player.health > 0 && (now < session.combatUntil || this.hunted.has(sessionId));
+      if (player.inCombat !== fighting) player.inCombat = fighting;
+    }
   }
 
   /**
@@ -567,17 +803,29 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     });
   }
 
+  /** Send to everyone whose player is within EVENT_RANGE of a point. */
+  private broadcastNear(x: number, z: number, type: string, payload: unknown): void {
+    for (const client of this.clients) {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) continue;
+      if (Math.hypot(player.x - x, player.z - z) > EVENT_RANGE) continue;
+      client.send(type, payload);
+    }
+  }
+
   /**
    * Maybe leave something behind.
    *
-   * Rarity is tilted by the Ostra's danger, so Barals pays better than Terra —
-   * without that, a harder place is pure downside and nobody would go.
+   * Rarity is tilted by danger — the Ostra's, and the creature's level — so
+   * Barals pays better than Terra and the far wilds better than the Gate
+   * Circle. Without that, a harder place is pure downside and nobody would go.
    */
   private rollDrop(enemy: Enemy, killerSessionId: string): void {
     const chance = DROP_CHANCE[enemy.kind] ?? 0;
     if (Math.random() >= chance) return;
 
-    const rarity = rollRarity(Math.random(), this.ostra.difficulty.health);
+    const danger = this.ostra.difficulty.health * (1 + 0.06 * (enemy.level - 1));
+    const rarity = rollRarity(Math.random(), danger);
     const pool = itemsOfRarity(rarity);
     const item = pool[Math.floor(Math.random() * pool.length)];
     if (!item) return;
@@ -596,9 +844,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
   /** Hand out anything a living player is standing on, and clear what has
    *  lain too long. */
-  private processGround(): void {
+  private processGround(now: number): void {
     if (this.state.ground.size === 0) return;
-    const now = Date.now();
 
     for (const [groundId, dropped] of this.state.ground) {
       if ((this.groundExpiry.get(groundId) ?? 0) <= now) {
@@ -693,43 +940,65 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     this.sendProfile(sessionId, session, player);
   }
 
-  /** Mana ticks back up whether or not you are fighting. */
-  private regenerateMana(dt: number): void {
+  /** Mana always comes back, faster at rest; health only at rest. */
+  private regenerate(dt: number): void {
     for (const [sessionId, session] of this.sessions) {
       const player = this.state.players.get(sessionId);
-      if (!player || player.health === 0 || player.mana >= player.maxMana) {
-        if (player && player.health === 0) session.manaCarry = 0;
+      if (!player) continue;
+      if (player.health === 0) {
+        session.manaCarry = 0;
+        session.healthCarry = 0;
         continue;
       }
 
-      // Accumulate the fraction: at 5/s and 30Hz each step is 0.167 mana, and
-      // rounding that per-tick would regenerate exactly nothing.
-      session.manaCarry += MANA_REGEN_PER_SECOND * dt;
-      const whole = Math.floor(session.manaCarry);
-      if (whole <= 0) continue;
-      session.manaCarry -= whole;
-      player.mana = Math.min(player.maxMana, player.mana + whole);
+      if (player.mana < player.maxMana) {
+        // Accumulate the fraction: at 5/s and 30Hz each step is 0.167 mana, and
+        // rounding that per-tick would regenerate exactly nothing.
+        session.manaCarry += (player.inCombat ? MANA_REGEN_PER_SECOND : MANA_REGEN_OUT_OF_COMBAT) * dt;
+        const whole = Math.floor(session.manaCarry);
+        if (whole > 0) {
+          session.manaCarry -= whole;
+          player.mana = Math.min(player.maxMana, player.mana + whole);
+        }
+      } else {
+        session.manaCarry = 0;
+      }
+
+      if (!player.inCombat && player.health < player.maxHealth) {
+        session.healthCarry += player.maxHealth * HEALTH_REGEN_FRACTION_PER_SECOND * dt;
+        const whole = Math.floor(session.healthCarry);
+        if (whole > 0) {
+          session.healthCarry -= whole;
+          player.health = Math.min(player.maxHealth, player.health + whole);
+        }
+      } else {
+        session.healthCarry = 0;
+      }
     }
   }
 
-  private damagePlayer(sessionId: string, amount: number): void {
+  private damagePlayer(sessionId: string, amount: number, byEnemyId: string): void {
     const player = this.state.players.get(sessionId);
     const session = this.sessions.get(sessionId);
     if (!player || !session || player.health === 0) return;
 
+    const now = Date.now();
     player.health = Math.max(0, player.health - amount);
-    this.broadcast("damage", { id: sessionId, amount });
+    session.combatUntil = now + COMBAT_LINGER_MS;
+    this.broadcastNear(player.x, player.z, "damage", { id: sessionId, amount, by: byEnemyId });
 
     if (player.health === 0) {
-      session.respawnAt = Date.now() + PLAYER_RESPAWN_MS;
-      this.broadcast("died", { id: sessionId });
+      session.respawnAt = now + PLAYER_RESPAWN_MS;
+      session.diedAtX = player.x;
+      session.diedAtZ = player.z;
+      session.combatUntil = 0;
+      player.inCombat = false;
+      this.broadcastNear(player.x, player.z, "died", { id: sessionId });
     }
   }
 
   /** Stand the dead back up once their timer is out. */
-  private processRespawns(): void {
-    const now = Date.now();
-
+  private processRespawns(now: number): void {
     for (const [enemyId, enemy] of this.state.enemies) {
       if (enemy.state !== EnemyState.Dead) continue;
       const brain = this.brains.get(enemyId);
@@ -740,8 +1009,9 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       enemy.x = brain.homeX;
       enemy.z = brain.homeZ;
       enemy.y = groundHeight(this.ostra, brain.homeX, brain.homeZ);
-      enemy.health = this.scaledHealth(this.archetypeFor(enemy.kind).maxHealth);
+      enemy.health = enemy.maxHealth;
       enemy.state = EnemyState.Idle;
+      calmDown(brain);
       brain.timer = 0;
       brain.returning = false;
     }
@@ -750,26 +1020,37 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const player = this.state.players.get(sessionId);
       if (!player || player.health > 0 || now < session.respawnAt) continue;
 
-      const spawn = this.ostra.spawn;
-      player.x = spawn.x;
-      player.z = spawn.z;
-      player.y = groundHeight(this.ostra, spawn.x, spawn.z);
+      // The nearest waystone to where they fell, not the far side of the map.
+      const spot = respawnPoint(this.ostra, session.diedAtX, session.diedAtZ);
+      player.x = spot.x;
+      player.z = spot.z;
+      player.y = groundHeight(this.ostra, spot.x, spot.z);
       player.health = player.maxHealth;
       player.mana = player.maxMana;
       session.manaCarry = 0;
+      session.healthCarry = 0;
+      session.comboStep = 0;
       // Whatever they were standing in when they died must not fire on arrival.
-      session.suppressedGate = this.gateContaining(spawn.x, spawn.z)?.id;
+      session.suppressedGate = this.gateContaining(spot.x, spot.z)?.id;
       // Anything still locked onto them lets go. Without this a creature that
       // followed them keeps its quarry and resumes the moment they stand up.
       for (const brain of this.brains.values()) {
+        brain.threat.delete(sessionId);
         if (brain.quarry === sessionId) brain.quarry = undefined;
+        if (brain.windupTarget === sessionId) {
+          brain.windupUntil = 0;
+          brain.windupTarget = undefined;
+        }
       }
-      this.clients.getById(sessionId)?.send("respawned", { x: spawn.x, z: spawn.z });
+      this.clients.getById(sessionId)?.send("respawned", { x: spot.x, z: spot.z });
+      // A waystone in the wilds has camps around it that went to sleep while
+      // they were away.
+      this.updateCamps(now);
     }
   }
 
-  private scaledHealth(base: number): number {
-    return Math.max(1, Math.round(base * this.ostra.difficulty.health));
+  private scaledHealth(base: number, level: number): number {
+    return Math.max(1, Math.round(base * this.ostra.difficulty.health * levelHealthScale(level)));
   }
 
   /** Falls back rather than throwing: a stored kind this build no longer knows
@@ -848,4 +1129,14 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       client.send("gateFailed", { message: "The Gate would not hold." });
     }
   }
+}
+
+/** One creature's share of a cast, as broadcast to everyone nearby. */
+interface CastHit {
+  id: string;
+  amount: number;
+  crit: boolean;
+  killed: boolean;
+  /** Interrupted — the client cancels its telegraph and plays a stagger. */
+  staggered: boolean;
 }

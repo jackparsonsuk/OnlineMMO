@@ -1,7 +1,7 @@
-import { getArchetype, type SpawnGroup } from "./enemies.js";
-import type { BoxCollider, Collider } from "./movement.js";
+import type { SpawnGroup } from "./enemies.js";
+import type { BoxCollider } from "./movement.js";
 import { DASO, SETTLEMENTS, type SettlementDefinition } from "./settlements.js";
-import { heightAt, type TerrainSettings } from "./terrain.js";
+import { heightAt, type FlatZone, type TerrainSettings } from "./terrain.js";
 
 /**
  * The Ostras the game currently knows about, and the Gates between them.
@@ -12,6 +12,11 @@ import { heightAt, type TerrainSettings } from "./terrain.js";
  * are hand-authored and persistent, like these. Unnamed Ostras — the small,
  * beast-ridden ones — are meant to be generated into this same shape later, so
  * keep this a plain data table rather than anything clever.
+ *
+ * Terra is the exception in scale: eight kilometres on a side, most of it
+ * generated from `wilds` by `worldgen.ts` rather than placed by hand. What IS
+ * placed by hand — the Gate Circle, Daso, the roads and waystones — is the
+ * skeleton the generated land hangs off.
  */
 
 export type OstraId = "terra" | "ascendant" | "barals";
@@ -37,15 +42,18 @@ export interface GateDefinition {
 
 /** Per-Ostra look. Travel only feels like travel if the place looks different. */
 export interface OstraPalette {
-  /** Background, behind everything. */
+  /** Background, behind everything — and the fog, so distance fades into it. */
   sky: string;
-  /** Ground fill and grid lines. */
+  /** Low ground. */
   ground: string;
+  /** Sunlit crests, and grass. */
   grid: string;
-  /** Boundary walls. */
+  /** Rock, boundary walls. */
   edge: string;
   /** Ambient bounce colour, tinting everything in shadow. */
   bounce: string;
+  /** High peaks. Defaults to `edge`. */
+  peak?: string;
 }
 
 /** A solid circular prop. Collided against by both sides, and identical on
@@ -64,7 +72,7 @@ export interface ObstacleDefinition {
  * Travel should be a difficulty choice, not just a change of palette: Terra is
  * where you learn, Barals is where the lore says you suffer. Applied on the
  * server when a creature spawns and when it hits, so the same archetype is
- * genuinely tougher in a harder place.
+ * genuinely tougher in a harder place. Creature LEVEL stacks on top.
  */
 export interface OstraDifficulty {
   /** Scales creature damage against players. */
@@ -76,6 +84,51 @@ export interface OstraDifficulty {
 /** How an Ostra's scenery is drawn. Collision is a circle either way — this
  *  only decides which low-poly form sits on top of it. */
 export type ObstacleStyle = "pillar" | "boulder";
+
+/**
+ * A standing stone you wake beside after dying.
+ *
+ * On an eighty-metre Ostra, respawning at the one spawn point was fine. On an
+ * eight-kilometre one it would mean a twenty-minute walk back to your corpse,
+ * so you wake at the nearest stone instead. They double as landmarks: they are
+ * on the map, on the compass, and visible from a long way off.
+ */
+export interface WaystoneDefinition {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+}
+
+/** A path, drawn into the ground and kept clear of trees and camps. On a map
+ *  this size, roads are how people find their way without a map open. */
+export interface RoadDefinition {
+  id: string;
+  /** Control points. The drawn road meanders between them. */
+  points: Array<{ x: number; z: number }>;
+  width: number;
+}
+
+/**
+ * Generated content for a large Ostra: woodland, boulders, and creature camps,
+ * all derived deterministically from `seed` so every client and the server
+ * agree on where every tree is without sending any of it.
+ */
+export interface WildsSettings {
+  seed: number;
+  /** Chance per 8 m plot of a tree, where the woods are thickest. */
+  forest: number;
+  /** Feature size of woodland patches, in metres. */
+  forestWavelength: number;
+  /** Chance per plot of a boulder. */
+  rocks: number;
+  /** One candidate camp per square of this side, in metres. */
+  campSpacing: number;
+  /** Chance a candidate becomes a camp (before the safety rules reject it). */
+  campChance: number;
+  /** Creature level rises by one every this many metres from the spawn. */
+  metresPerLevel: number;
+}
 
 export interface OstraDefinition {
   id: OstraId;
@@ -96,8 +149,13 @@ export interface OstraDefinition {
   terrain: TerrainSettings;
   /** Settlement ids placed in this Ostra. */
   settlements: string[];
-  /** Creatures placed when the room is created. */
+  /** Hand-placed creature camps. */
   spawns: SpawnGroup[];
+  /** Respawn points. May be empty, in which case you wake at `spawn`. */
+  waystones: WaystoneDefinition[];
+  roads: RoadDefinition[];
+  /** Present on Ostras big enough to need generating. */
+  wilds?: WildsSettings;
 }
 
 /** Face the middle of the Ostra from a point on its edge. */
@@ -105,23 +163,99 @@ function facingCentre(x: number, z: number): number {
   return Math.atan2(-x, -z);
 }
 
+// --- Terra's skeleton ------------------------------------------------------
+
+const TERRA_SIZE = 8000;
+
+const TERRA_WAYSTONES: WaystoneDefinition[] = [
+  { id: "gate-circle", name: "The Gate Circle", x: 0, z: -9 },
+  { id: "westroad", name: "Westroad Stone", x: -700, z: -62 },
+  { id: "daso", name: "Daso Stone", x: -1402, z: -168 },
+  { id: "north", name: "North Stone", x: -34, z: 1120 },
+  { id: "far-north", name: "Highmoor Stone", x: 180, z: 2350 },
+  { id: "east", name: "East Stone", x: 1200, z: -38 },
+  { id: "far-east", name: "Sunward Stone", x: 2350, z: 160 },
+  { id: "south", name: "South Stone", x: 44, z: -1300 },
+  { id: "far-south", name: "Lowfen Stone", x: -160, z: -2500 },
+  { id: "northwest", name: "Greywood Stone", x: -2350, z: 1900 },
+  { id: "southwest", name: "Ashfall Stone", x: -2450, z: -2150 },
+  { id: "northeast", name: "Brightwater Stone", x: 2450, z: 2300 },
+  { id: "southeast", name: "Redstep Stone", x: 2500, z: -2350 },
+];
+
+const TERRA_ROADS: RoadDefinition[] = [
+  {
+    // The only road that goes anywhere a person lives.
+    id: "westroad",
+    width: 5,
+    points: [
+      { x: -6, z: -4 }, { x: -320, z: -30 }, { x: -700, z: -58 },
+      { x: -1080, z: -132 }, { x: -1405, z: -172 },
+    ],
+  },
+  {
+    id: "northroad",
+    width: 4,
+    points: [
+      { x: 0, z: 28 }, { x: 36, z: 420 }, { x: -34, z: 1116 },
+      { x: 90, z: 1760 }, { x: 180, z: 2346 },
+    ],
+  },
+  {
+    id: "eastroad",
+    width: 4,
+    points: [
+      { x: 30, z: -2 }, { x: 520, z: 50 }, { x: 1196, z: -38 },
+      { x: 1800, z: 60 }, { x: 2346, z: 160 },
+    ],
+  },
+  {
+    id: "southroad",
+    width: 4,
+    points: [
+      { x: 0, z: -30 }, { x: -60, z: -620 }, { x: 44, z: -1296 },
+      { x: -40, z: -1900 }, { x: -160, z: -2496 },
+    ],
+  },
+];
+
+/** Every place a person might stand or wake is levelled, so none of them is
+ *  on a cliff. */
+function terraFlats(): FlatZone[] {
+  const flats: FlatZone[] = [
+    // The Gate Circle: big, and dead level, because it is the first thing
+    // anyone sees.
+    { x: 0, z: 0, radius: 34, falloff: 60 },
+    // Daso sits on a level shelf. A logging town on a hillside would look
+    // like an accident.
+    { x: DASO.x, z: DASO.z, radius: DASO.radius + 6, falloff: 50 },
+  ];
+  for (const stone of TERRA_WAYSTONES) {
+    if (stone.id === "gate-circle" || stone.id === "daso") continue;
+    flats.push({ x: stone.x, z: stone.z, radius: 7, falloff: 26 });
+  }
+  return flats;
+}
+
 export const OSTRAS: Record<OstraId, OstraDefinition> = {
   terra: {
     id: "terra",
     name: "Terra Ostra",
     subtitle: "Earth Shard",
-    size: 80,
+    // Eight kilometres a side — a hundred times the eighty it used to be.
+    // Big enough that crossing it is a trip and distant peaks are landmarks.
+    size: TERRA_SIZE,
     spawn: { x: 0, z: 0 },
     // Daylight. The other two Ostras keep their gloom, which is the point:
     // arriving on Terra should feel like coming home, and a place described as
     // a mixing pot where most people live should not look like a crypt.
     palette: {
-      sky: "#8ab2d0",
+      sky: "#9dbfd8",
       ground: "#41703f",
-      // Now the CREST tone rather than a grid line — sunlit tops of the rises.
       grid: "#79a355",
       edge: "#7a6f5c",
       bounce: "#5a6f4c",
+      peak: "#dde4e6",
     },
     gates: [
       {
@@ -143,6 +277,7 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
         exitYaw: facingCentre(-20, 20),
       },
     ],
+    // The standing stones of the Gate Circle.
     obstacles: [
       { x: 6, z: -9, radius: 1.4, height: 3.2 },
       { x: 10, z: -16, radius: 1.1, height: 2.4 },
@@ -152,27 +287,43 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       { x: 24, z: -3, radius: 1.6, height: 3.6 },
     ],
     obstacleStyle: "pillar",
-    // Gentle rolling ground. Enough relief that the horizon moves as you walk,
-    // not so much that a creature disappears behind every rise.
     terrain: {
-      amplitude: 2.1,
-      frequency: 0.055,
-      phase: 0.7,
-      // Daso sits on a level shelf. A logging town on a hillside would look
-      // like an accident.
-      flats: [{ x: DASO.x, z: DASO.z, radius: DASO.radius, falloff: 11, level: 0.4 }],
+      seed: 1701,
+      // The ground you walk over: enough relief that the horizon moves as you
+      // walk, not so much that a creature disappears behind every rise.
+      hills: { amplitude: 7.5, wavelength: 320, octaves: 5 },
+      // Kilometre-scale uplands and basins.
+      continent: { amplitude: 26, wavelength: 2400 },
+      // Ranges in about a third of the map. They are climbable — terrain does
+      // not slow you — but they block sight, and sight is what makes a big map
+      // feel big.
+      mountains: { amplitude: 95, wavelength: 760, coverage: 0.34 },
+      rim: { halfExtent: TERRA_SIZE / 2, width: 420, height: 120 },
+      flats: terraFlats(),
     },
     settlements: ["daso"],
-    // Gentle enough to learn the fight in. A Risen here takes the same four
-    // Strikes but hits for well under half.
+    // Gentle enough to learn the fight in. Level carries the danger further
+    // out; this is the floor.
     difficulty: { damage: 0.6, health: 1 },
-    // Kept clear of spawn, and spread wide. Packed tighter than a Risen's aggro radius,
-    // every approach pulls the whole camp at once and a new player never gets
-    // a winnable first fight.
+    // The starter camps by the Gate Circle, kept from when Terra was eighty
+    // metres across. Spread wide: packed tighter than a Risen's aggro radius,
+    // every approach pulls the whole camp at once and a new player never gets a
+    // winnable first fight.
     spawns: [
-      { kind: "zombie", count: 4, x: 20, z: -26, radius: 11 },
-      { kind: "spider", count: 3, x: 24, z: 12, radius: 8 },
+      { kind: "zombie", count: 4, x: 20, z: -40, radius: 11 },
+      { kind: "spider", count: 3, x: 44, z: 22, radius: 8 },
     ],
+    waystones: TERRA_WAYSTONES,
+    roads: TERRA_ROADS,
+    wilds: {
+      seed: 9001,
+      forest: 0.5,
+      forestWavelength: 650,
+      rocks: 0.018,
+      campSpacing: 210,
+      campChance: 0.62,
+      metresPerLevel: 380,
+    },
   },
 
   ascendant: {
@@ -210,13 +361,15 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     obstacleStyle: "pillar",
     // Nearly level. The gods' realm should read as something built, and hills
     // would fight the columns.
-    terrain: { amplitude: 0.7, frequency: 0.08, phase: 2.4, flats: [] },
+    terrain: { seed: 24, hills: { amplitude: 0.9, wavelength: 40, octaves: 3 }, flats: [] },
     settlements: [],
     difficulty: { damage: 1, health: 1.2 },
     // The gods' realm is guarded, not infested.
     spawns: [
-      { kind: "spider", count: 2, x: 14, z: 10, radius: 4 },
+      { kind: "spider", count: 2, x: 14, z: 10, radius: 4, level: 4 },
     ],
+    waystones: [],
+    roads: [],
   },
 
   barals: {
@@ -258,17 +411,19 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     obstacleStyle: "boulder",
     // Broken and steep, so sightlines are short and a spider can be on you
     // before you see it come over a rise.
-    terrain: { amplitude: 3.4, frequency: 0.075, phase: 5.1, flats: [] },
+    terrain: { seed: 51, hills: { amplitude: 5.2, wavelength: 42, octaves: 4 }, flats: [] },
     settlements: [],
     // "A place of power and war." Going here before you are ready should be a
     // mistake you feel.
     difficulty: { damage: 1.6, health: 1.5 },
     // The realm of fire and pain earns its name.
     spawns: [
-      { kind: "zombie", count: 6, x: -8, z: -2, radius: 9 },
-      { kind: "zombie", count: 3, x: 16, z: -6, radius: 5 },
-      { kind: "spider", count: 4, x: -18, z: -12, radius: 7 },
+      { kind: "zombie", count: 6, x: -8, z: -2, radius: 9, level: 6 },
+      { kind: "zombie", count: 3, x: 16, z: -6, radius: 5, level: 6 },
+      { kind: "spider", count: 4, x: -18, z: -12, radius: 7, level: 7 },
     ],
+    waystones: [],
+    roads: [],
   },
 };
 
@@ -285,42 +440,30 @@ export function getOstra(id: OstraId): OstraDefinition {
   return OSTRAS[id];
 }
 
-/**
- * The scenery colliders for an Ostra, built once and reused. Both the server
- * room and the client's prediction call this every step, and they must get
- * identical values — deriving them from the same table is what guarantees it.
- */
-const staticColliderCache = new Map<OstraId, readonly Collider[]>();
-const boxColliderCache = new Map<OstraId, readonly BoxCollider[]>();
-
-export function staticColliders(ostra: OstraDefinition): readonly Collider[] {
-  let cached = staticColliderCache.get(ostra.id);
-  if (!cached) {
-    const colliders: Collider[] = ostra.obstacles.map((obstacle, index) => ({
-      id: `obstacle:${index}`,
-      x: obstacle.x,
-      z: obstacle.z,
-      radius: obstacle.radius,
-    }));
-
-    // Trees are circles like rocks. A wood you can walk through is not a wood,
-    // and this is a logging town.
-    for (const settlement of settlementsIn(ostra)) {
-      settlement.trees.forEach((tree, index) => {
-        colliders.push({
-          id: `${settlement.id}:tree:${index}`,
-          x: tree.x,
-          z: tree.z,
-          radius: tree.radius,
-        });
-      });
-    }
-
-    cached = colliders;
-    staticColliderCache.set(ostra.id, cached);
-  }
-  return cached;
+/** Where you stand when you wake at a waystone: just in front of it, rather
+ *  than inside its collider. */
+export function waystoneArrival(stone: WaystoneDefinition): { x: number; z: number } {
+  return { x: stone.x, z: stone.z + 3 };
 }
+
+/**
+ * Where to wake after dying at (x, z): the nearest waystone's arrival point,
+ * or the Ostra's spawn if it has none.
+ */
+export function respawnPoint(ostra: OstraDefinition, x: number, z: number): { x: number; z: number } {
+  let best = ostra.spawn;
+  let bestDistance = Infinity;
+  for (const stone of ostra.waystones) {
+    const d = (stone.x - x) * (stone.x - x) + (stone.z - z) * (stone.z - z);
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = waystoneArrival(stone);
+    }
+  }
+  return best;
+}
+
+const boxColliderCache = new Map<OstraId, readonly BoxCollider[]>();
 
 /** Buildings, as rectangles. Built once and reused; identical on both sides,
  *  so walking around a wall predicts perfectly. */
@@ -356,57 +499,6 @@ export function settlementsIn(ostra: OstraDefinition): SettlementDefinition[] {
  *  have to remember to reach for `.terrain`. */
 export function groundHeight(ostra: OstraDefinition, x: number, z: number): number {
   return heightAt(x, z, ostra.terrain);
-}
-
-/**
- * Ostras whose spawn point sits inside something's aggro radius.
- *
- * Found the hard way: Barals put new arrivals 10m from a camp of Risen that
- * notice you at 13m, so dying meant respawning into the same creatures that
- * had just killed you. The layout is hand-authored data, and hand-authored
- * data drifts — so this is checked at boot rather than by eye.
- *
- * Returns a human-readable line per problem, empty when all is well.
- */
-export function unsafeSpawns(): string[] {
-  const problems: string[] = [];
-
-  for (const ostra of Object.values(OSTRAS)) {
-    for (const group of ostra.spawns) {
-      const archetype = getArchetype(group.kind);
-
-      // Worst case is a creature scattered to the near edge of its camp.
-      const toSpawn = Math.max(0, Math.hypot(
-        group.x - ostra.spawn.x,
-        group.z - ostra.spawn.z,
-      ) - group.radius);
-
-      if (toSpawn <= archetype.aggroRadius) {
-        problems.push(
-          `${ostra.name}: ${archetype.name} camp can reach within ${toSpawn.toFixed(1)}m ` +
-          `of the spawn point, inside its ${archetype.aggroRadius}m aggro radius`,
-        );
-      }
-
-      // Towns are meant to be the safe part. A camp whose creatures can wander
-      // into the streets makes the one calm place in the Ostra not calm.
-      for (const settlement of settlementsIn(ostra)) {
-        const toTown = Math.max(0, Math.hypot(
-          group.x - settlement.x,
-          group.z - settlement.z,
-        ) - group.radius - settlement.radius);
-
-        if (toTown <= archetype.aggroRadius) {
-          problems.push(
-            `${ostra.name}: ${archetype.name} camp can reach within ${toTown.toFixed(1)}m ` +
-            `of ${settlement.name}, inside its ${archetype.aggroRadius}m aggro radius`,
-          );
-        }
-      }
-    }
-  }
-
-  return problems;
 }
 
 export function findGate(ostra: OstraDefinition, gateId: string): GateDefinition | undefined {

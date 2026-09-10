@@ -28,11 +28,13 @@ export interface NametagTarget {
   z: number;
   /** Overrides DEFAULT_HEIGHT. */
   height?: number;
+  /** Overrides MAX_DISTANCE — landmarks want to be readable from further. */
+  maxDistance?: number;
 }
 
 /** Which styling a label gets. `hunting` is how you tell, at a glance,
  *  that something has noticed you. */
-export type NametagVariant = "self" | "player" | "hostile" | "hunting" | "dead" | "villager";
+export type NametagVariant = "self" | "player" | "hostile" | "hunting" | "dead" | "villager" | "waystone" | "targeted";
 
 export class Nametags {
   private readonly container: HTMLElement;
@@ -88,7 +90,14 @@ export class Nametags {
    *  caller should only call it when the variant actually changed. */
   setVariant(sessionId: string, variant: NametagVariant): void {
     const tag = this.tags.get(sessionId);
-    if (tag) tag.className = `nametag ${variant}`;
+    if (!tag) return;
+    const targeted = tag.classList.contains("targeted");
+    tag.className = `nametag ${variant}${targeted ? " targeted" : ""}`;
+  }
+
+  /** Mark the label of whatever you have selected. */
+  setTargeted(sessionId: string, targeted: boolean): void {
+    this.tags.get(sessionId)?.classList.toggle("targeted", targeted);
   }
 
   remove(sessionId: string): void {
@@ -139,7 +148,7 @@ export class Nametags {
       // Points behind the camera still project to a screen position — a
       // mirrored, nonsensical one. Drop them before projecting.
       const facing = toX * forwardX + toY * forwardY + toZ * forwardZ;
-      if (facing <= 0 || Math.hypot(toX, toY, toZ) > MAX_DISTANCE) {
+      if (facing <= 0 || Math.hypot(toX, toY, toZ) > (target.maxDistance ?? MAX_DISTANCE)) {
         if (!tag.hidden) tag.hidden = true;
         continue;
       }
