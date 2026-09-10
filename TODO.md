@@ -19,6 +19,46 @@ design decision in README.md.
 - **Cross-room duplicate-character guard.** One character can't be in the same
   Ostra twice, but two clients racing could briefly hold it in two Ostras.
 
+## Big features
+
+The next large pieces of the game, roughly unordered. Several already have
+smaller entries below; those are the first step towards them.
+
+- **Quests.** Villagers stand still and say one line today (see below).
+- **Dungeons.** Instanced, for a party; the first real source of mythic loot.
+- **Raids.** Larger instances; where World and Ostra rarity come from.
+- **Player houses.** Also the answer to "somewhere to store more than thirty
+  items".
+- **The other Ostras.** Ascendant and Barals are small hand-built maps next to
+  eight-kilometre Terra; they need regions, roads and camps of their own.
+- **Weather** (and day/night, below).
+- **Fishing** — Fanshona is a fishing town on a lake nobody can fish.
+- **Life skills.** Gathering and crafting (logging for Daso, mining, cooking,
+  smithing), on the same 0–1000 proficiency scale as everything else.
+- **Mounts.** Terra takes fourteen minutes to cross at a sprint.
+- **Pets.**
+- **Graphics redo.**
+- **Parties and chat.** Nothing lets you group up or talk, and dungeons and
+  raids need it. Parties should share loot claims and XP credit.
+- **Trading, vendors and gold.** A currency, vendors in Daso and Fanshona, and
+  player-to-player trade — until then the only thing to do with loot you don't
+  want is destroy it.
+- **Classes**, gating which armour and weapons you wear well and, with the
+  weapon, which abilities you have.
+- **Rare named elites.** One roaming creature per region with a name, a ping
+  when it wakes, and the first chance at mythic loot (`source: "elite"`).
+- **World events.** The Black Tide breaking in; a camp spilling onto the road;
+  a Cairn Golem walking between towns.
+- **Achievements and a lore journal.** Every place found and every item's story
+  collected — the world is the point of the game, so exploring it should count.
+- **Guilds.**
+- **Player-vs-player**, eventually: duels and an opt-in arena first.
+- **Leaderboards per skill.** Everything already has a 0–1000 proficiency;
+  "best Swords in the realm" is nearly free.
+- **A death penalty.** Dying costs a walk from the nearest waystone and nothing
+  else, so danger has no weight.
+- **Music and ambience** — a theme per Ostra, a sound per region.
+
 ## The world
 
 - **Fast travel between waystones you have visited.** Needs discovery persisted
@@ -30,9 +70,10 @@ design decision in README.md.
 - **Rivers and bridges.** Roads already route round lakes; rivers would give
   them something to cross.
 - **Walkable docks and bridges.** Fanshona's dock is scenery: you wade beside it.
-- **Distant trees.** Trees pop in at ~330 m where detailed chunks end; the
-  horizon mesh has darker ground under woods but no trees. Billboards or a
-  coarse tree LOD on the horizon would fix it.
+- **Distant trees.** Trees appear at ~330 m where detailed chunks end; thicker
+  haze now fades them in, but the horizon mesh has no trees and the far hills
+  are hazier for it. Billboards or a coarse tree LOD on the horizon would let
+  the fog thin out again.
 - **Day/night and weather.** Terra is permanently mid-afternoon.
 - **Unnamed Ostras.** The lore's small, beast-ridden Ostras, generated into the
   same shape as the named ones.

@@ -195,11 +195,15 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
   world.ambient.groundColor = Color3.FromHexString(palette.bounce);
   paintSky(world.sky, sky, sky.scale(ostra.wilds ? 0.62 : 0.5));
 
-  // Haze. On a big Ostra it is what gives distance its depth; on a small one
-  // it keeps the edge of the world soft.
+  // Haze. On a big Ostra it is what gives distance its depth, and it hides the
+  // seam where detailed chunks end: trees appear at ~330 m, and at 0.0018 that
+  // band is already about a third fog, so they fade in rather than pop. (It was
+  // 0.0008 — 7% at 330 m, which hid nothing.) The price is a hazier horizon:
+  // past a kilometre the far hills are mostly sky. On a small Ostra it keeps
+  // the edge of the world soft.
   scene.fogMode = Scene.FOGMODE_EXP2;
   scene.fogColor = sky;
-  scene.fogDensity = ostra.size > 1000 ? 0.0008 : 0.012;
+  scene.fogDensity = ostra.size > 1000 ? 0.0018 : 0.012;
 
   // The ground is built from the same height function the simulation walks on,
   // so what you see and what you stand on cannot drift apart.
