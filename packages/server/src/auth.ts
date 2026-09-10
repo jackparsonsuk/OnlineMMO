@@ -137,6 +137,19 @@ export async function loginAccount(
  *  the success path. Computed once at import. */
 const DUMMY_HASH = await Hash.make(randomBytes(24).toString("hex"));
 
+/**
+ * A token good for two minutes, for carrying a player through a Gate.
+ *
+ * The server reserves the seat in the next Ostra itself, and Colyseus only
+ * runs `onAuth` for a reservation that brings an auth context — without one
+ * the seat arrives with no account, the destination's `onJoin` refuses it, and
+ * the player is stranded in the old Ostra with their save already moved.
+ */
+export async function issueTransferToken(accountId: string): Promise<string> {
+  const claims: SessionClaims = { sub: accountId, email: "" };
+  return JWT.sign(claims, { expiresIn: "2m" });
+}
+
 async function issueToken(account: AccountRecord): Promise<string> {
   const claims: SessionClaims = { sub: account.id, email: account.email };
   return JWT.sign(claims, { expiresIn: TOKEN_LIFETIME });

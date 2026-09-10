@@ -1474,3 +1474,94 @@ body.no-hud :is(#hud, #hint, #compass, #minimap, #abilities, #power, #target-fra
   #nametags, #gate-prompt, #speech, #vitals, #sound-toggle, #notes) {
   display: none;
 }
+
+/* --- xp and levels ------------------------------------------------------- */
+
+/* Middle of the right edge: every skill you are training, each filling to its next level. */
+#xp-tracker {
+  position: fixed;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 220px;
+  pointer-events: none;
+}
+
+.xp-row {
+  position: relative;
+  padding: 7px 10px 8px;
+  border-radius: 8px;
+  border: 1px solid rgb(232 194 63 / 35%);
+  background: rgb(13 17 23 / 82%);
+  font-size: 12px;
+  animation: xp-row-in 220ms ease-out;
+  transition: opacity 400ms ease;
+}
+
+.xp-row.leaving { opacity: 0; }
+
+@keyframes xp-row-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+.xp-head { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.xp-name { font-weight: 600; color: #f0d98a; }
+.xp-next { color: #8b98a5; font-variant-numeric: tabular-nums; }
+.xp-bar { height: 6px; border-radius: 3px; background: rgb(230 237 243 / 10%); overflow: hidden; }
+.xp-bar i { display: block; height: 100%; background: linear-gradient(90deg, #b8912a, #f0d98a); transition: width 250ms ease-out; }
+
+.xp-drop {
+  position: absolute;
+  right: 10px;
+  top: -4px;
+  font-weight: 700;
+  color: #f0d98a;
+  text-shadow: 0 1px 3px #000;
+  animation: xp-float 1.4s ease-out forwards;
+}
+
+@keyframes xp-float {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-34px); }
+}
+
+#level-ups {
+  position: fixed;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  pointer-events: none;
+  z-index: 7;
+}
+
+.level-up {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  z-index: 7;
+  text-shadow: 0 2px 12px rgb(0 0 0 / 90%);
+  animation: level-up 3s ease-out forwards;
+}
+
+.level-up small { font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase; color: #f0d98a; }
+.level-up b { font-size: 30px; color: #fff; }
+.level-up span { font-size: 44px; font-weight: 700; color: #e8c23f; line-height: 1; }
+
+@keyframes level-up {
+  0% { opacity: 0; transform: scale(0.7); }
+  12% { opacity: 1; transform: scale(1.08); }
+  20% { transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-16px); }
+}
+
+body.portrait #xp-tracker, body.no-hud #xp-tracker { display: none; }

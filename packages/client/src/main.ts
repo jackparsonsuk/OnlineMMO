@@ -14,6 +14,7 @@ import {
   type SkillId,
   SPELLS,
   WorldState,
+  XP_PER_LEVEL,
 } from "@mmo/shared";
 import { AccountClient } from "./account.js";
 import { SoundBoard } from "./audio.js";
@@ -139,8 +140,12 @@ function skillLabel(skill: SkillId): string {
 function applySkills(skills: Proficiency): void {
   if (knownSkills) {
     for (const [skill, value] of Object.entries(skills) as [SkillId, number][]) {
-      const before = Math.floor(knownSkills[skill] ?? 0);
-      if (Math.floor(value) > before) hud.note(`${skillLabel(skill)} ${Math.floor(value)}`);
+      const before = knownSkills[skill] ?? 0;
+      const gained = Math.round((value - before) * XP_PER_LEVEL);
+      if (gained <= 0) continue;
+      const level = Math.floor(value);
+      hud.xpDrop(skillLabel(skill), level, value - level, gained);
+      if (level > Math.floor(before)) hud.levelUp(skillLabel(skill), level);
     }
   }
   knownSkills = { ...skills };

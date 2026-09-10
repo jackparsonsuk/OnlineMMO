@@ -81,8 +81,12 @@ export const MAX_PROFICIENCY = 1000;
  */
 export const LEVEL_SCALE = 10;
 
-/** Proficiency one landed use adds, before the slowdown near the ceiling. */
-const GAIN_PER_USE = 1.5;
+/** Proficiency one landed use adds, before the slowdown near the ceiling.
+ *  Half a level at best: a level should be something you notice earning. */
+const GAIN_PER_USE = 0.5;
+
+/** The fraction of a level is shown as XP, RuneScape-style: 100 to a level. */
+export const XP_PER_LEVEL = 100;
 
 /** How far past a creature's own level (in proficiency points) it can still
  *  teach you anything. */

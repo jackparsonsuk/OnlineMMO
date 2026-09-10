@@ -343,8 +343,9 @@ at 1000.
 Proficiency is private, so it travels as a message rather than in replicated
 state — and the client **asks** for it once its handlers are up rather than
 being pushed it from `onJoin`, which is the same race the character id fell
-into. A small `skills` message follows every whole-point rise, and the HUD notes
-it in the corner.
+into. A small `skills` message follows every gain. The fraction of a level is
+shown as XP, RuneScape-style — 100 to a level, at most 50 from one blow — on a
+bar above the ability bar, and a level gained gets a banner mid-screen.
 
 ### Difficulty by Ostra
 

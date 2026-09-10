@@ -87,7 +87,7 @@ import {
   type AITarget,
   type EnemyBrain,
 } from "../ai/enemyAI.js";
-import { verifyToken } from "../auth.js";
+import { issueTransferToken, verifyToken } from "../auth.js";
 import { getServerContext } from "../context.js";
 import { isCharacterId } from "../identity.js";
 import type { CharacterStore } from "../store/CharacterStore.js";
@@ -111,6 +111,8 @@ interface JoinAuth {
 /** Per-connection bookkeeping that doesn't belong in replicated state. */
 interface Session {
   characterId: string;
+  /** Whose character this is — needed to reserve their seat through a Gate. */
+  accountId: string;
   /**
    * A Gate the player is standing in that must NOT fire — either the one they
    * just arrived through, or one they happened to log in on top of. Cleared
@@ -402,6 +404,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
     this.sessions.set(client.sessionId, {
       characterId: character.id,
+      accountId: auth.accountId,
       // Covers arriving through a Gate and logging in on top of one alike.
       suppressedGate: this.gateContaining(x, z)?.id,
       transferring: false,
@@ -715,16 +718,15 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   }
 
   /**
-   * One use of a skill against something of `level`. Returns whether it rose
-   * by a whole point — the only change anyone would see, and the only time
-   * stats need recomputing (effectiveness moves with the skill).
+   * One use of a skill against something of `level`. Returns whether it grew
+   * at all — every gain is shown as XP, so every gain is sent.
    */
   private train(session: Session, skill: SkillId, level: number, share = 1): boolean {
     const before = session.skills[skill] ?? 0;
     const after = grownProficiency(before, level, share);
     if (after === before) return false;
     session.skills[skill] = after;
-    return Math.floor(after) !== Math.floor(before);
+    return true;
   }
 
   private wearsTrinket(session: Session): boolean {
@@ -733,7 +735,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   }
 
   /**
-   * A skill crossed a whole point: tell the client, and recompute what the
+   * A skill grew: tell the client (it shows the XP), and recompute what the
    * gear is worth now that it fits a little better.
    */
   private skillsChanged(sessionId: string, session: Session, player: Player): void {
@@ -1360,10 +1362,12 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         equipment: session.equipment,
       });
 
+      // With an auth context, so the reserved seat carries the account — see
+      // `issueTransferToken`.
       const reservation = await matchMaker.joinOrCreate(ROOM_NAME, {
         ostraId: destination.id,
         characterId: session.characterId,
-      });
+      }, { token: await issueTransferToken(session.accountId), ip: "", headers: new Headers() });
 
       client.send("gate", {
         reservation,

@@ -9,6 +9,9 @@ import {
   type WorldState,
 } from "@mmo/shared";
 
+/** How long a skill's XP row lingers after its last gain. */
+const XP_ROW_MS = 8000;
+
 export class Hud {
   private ostraName = document.getElementById("ostra-name") as HTMLElement;
   private ostraSubtitle = document.getElementById("ostra-subtitle") as HTMLElement;
@@ -254,6 +257,58 @@ export class Hud {
     this.toast.hidden = false;
     if (this.toastTimer !== undefined) window.clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => { this.toast.hidden = true; }, 2600);
+  }
+
+  /**
+   * RuneScape-style XP drops: one row per skill you are training, each with
+   * its level, a bar filling to the next one, and the XP each hit landed
+   * floating off it. A blow that trains a weapon, a spell and your armour
+   * shows all three. A row stays for XP_ROW_MS after its last gain, so the
+   * list settles rather than flickering between hits.
+   */
+  xpDrop(skill: string, level: number, fraction: number, xp: number): void {
+    let row = this.xpRows.get(skill);
+    if (!row) {
+      const el = document.createElement("div");
+      el.className = "xp-row";
+      el.innerHTML = `<div class="xp-head"><span class="xp-name"></span><span class="xp-next"></span></div>` +
+        `<div class="xp-bar"><i></i></div>`;
+      document.getElementById("xp-tracker")?.appendChild(el);
+      row = { el, timer: 0 };
+      this.xpRows.set(skill, row);
+    }
+    const { el } = row;
+    el.classList.remove("leaving");
+    (el.querySelector(".xp-name") as HTMLElement).textContent = `${skill} ${level}`;
+    (el.querySelector(".xp-bar i") as HTMLElement).style.width = `${Math.round(fraction * 100)}%`;
+    (el.querySelector(".xp-next") as HTMLElement).textContent = `${Math.round(fraction * 100)} / 100 xp`;
+
+    const drop = document.createElement("div");
+    drop.className = "xp-drop";
+    drop.textContent = `+${xp} xp`;
+    el.appendChild(drop);
+    window.setTimeout(() => drop.remove(), 1400);
+
+    window.clearTimeout(row.timer);
+    row.timer = window.setTimeout(() => {
+      el.classList.add("leaving");
+      window.setTimeout(() => {
+        if (!el.classList.contains("leaving")) return;
+        el.remove();
+        this.xpRows.delete(skill);
+      }, 400);
+    }, XP_ROW_MS);
+  }
+  private readonly xpRows = new Map<string, { el: HTMLElement; timer: number }>();
+
+  /** A level gained: centre of the screen, big, and gone in a few seconds. */
+  levelUp(skill: string, level: number): void {
+    const banner = document.createElement("div");
+    banner.className = "level-up";
+    banner.innerHTML = `<small>Level up</small><b>${escapeHtml(skill)}</b><span>${level}</span>`;
+    // Stacked in one column, so a blow that levels two skills shows both.
+    document.getElementById("level-ups")?.appendChild(banner);
+    window.setTimeout(() => banner.remove(), 3000);
   }
 
   /**
