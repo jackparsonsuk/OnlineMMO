@@ -1,44 +1,52 @@
-# fly.toml app configuration file generated for onlinemmo on 2026-09-10T09:48:30Z
+@@ -0,0 +1,51 @@
+# Fly.io. One machine, one volume, one realm.
 #
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
+# Scaling this to several machines needs more than a number change: room state
+# lives in memory, so two machines would be two separate worlds unless a Redis
+# presence/driver is added first. Keep min/max at 1 per realm; run a second app
+# for a second realm.
 
-app = 'onlinemmo'
-primary_region = 'ams'
+app = "ostracon"
+primary_region = "lhr"
 
 [build]
-  dockerfile = 'Dockerfile'
+  dockerfile = "Dockerfile"
 
 [env]
-  DATABASE_FILE = '/app/data/ostracon.db'
-  NODE_ENV = 'production'
-  PORT = '2567'
-  REALM_ID = 'eu-1'
-  TRUST_PROXY = '1'
+  NODE_ENV = "production"
+  PORT = "2567"
+  REALM_ID = "eu-1"
+  DATABASE_FILE = "/app/data/ostracon.db"
+  # Fly puts exactly one proxy in front, so the client IP is the last hop.
+  TRUST_PROXY = "1"
 
+# Characters live here. Without this the filesystem is ephemeral and every
+# deploy silently wipes the realm.
 [[mounts]]
-  source = 'ostracon_data'
-  destination = '/app/data'
+  source = "ostracon_data"
+  destination = "/app/data"
 
 [http_service]
-  internal_port = 8080
+  internal_port = 2567
   force_https = true
-  auto_stop_machines = 'off'
+  # Never suspend: the simulation ticks at 30Hz whether or not a request is in
+  # flight, and a suspended machine is a stopped world.
+  auto_stop_machines = false
   auto_start_machines = false
   min_machines_running = 1
 
   [http_service.concurrency]
-    type = 'connections'
-    hard_limit = 250
+    type = "connections"
     soft_limit = 200
+    hard_limit = 250
 
   [[http_service.checks]]
-    interval = '30s'
-    timeout = '5s'
-    grace_period = '15s'
-    method = 'GET'
-    path = '/health'
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+    method = "GET"
+    path = "/health"
 
 [[vm]]
-  size = 'shared-cpu-1x'
-  memory = '512mb'
+  size = "shared-cpu-1x"
+  memory = "512mb"
