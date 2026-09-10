@@ -24,6 +24,9 @@ design decision in README.md.
 The next large pieces of the game, roughly unordered. Several already have
 smaller entries below; those are the first step towards them.
 
+- **The main story: reopening the Gates.** The lore says the Gates were shut;
+  the story is unlocking them, one at a time, each opening a new Ostra. Locked
+  Gates stand in the world as the goal you can see and cannot yet take.
 - **Quests.** Villagers stand still and say one line today (see below).
 - **Dungeons.** Instanced, for a party; the first real source of mythic loot.
 - **Raids.** Larger instances; where World and Ostra rarity come from.
@@ -45,8 +48,6 @@ smaller entries below; those are the first step towards them.
   want is destroy it.
 - **Classes**, gating which armour and weapons you wear well and, with the
   weapon, which abilities you have.
-- **Rare named elites.** One roaming creature per region with a name, a ping
-  when it wakes, and the first chance at mythic loot (`source: "elite"`).
 - **World events.** The Black Tide breaking in; a camp spilling onto the road;
   a Cairn Golem walking between towns.
 - **Achievements and a lore journal.** Every place found and every item's story
@@ -58,6 +59,23 @@ smaller entries below; those are the first step towards them.
 - **A death penalty.** Dying costs a walk from the nearest waystone and nothing
   else, so danger has no weight.
 - **Music and ambience** — a theme per Ostra, a sound per region.
+- **Bestiary.** Kill counts per creature, unlocking its lore and what it is weak
+  to. Pairs with the lore journal.
+- **Transmog.** Wear one item's look over another's stats — comes after gear is
+  drawn on the body.
+- **Seasonal events** through unique Gates that open for a season and close
+  again, with their own small Ostra and limited cosmetics.
+- **Moderation and anti-cheat tools.** A report button, mute, admin commands.
+  Needed the day chat exists.
+- **Server-side analytics.** Where players die, which items get destroyed, how
+  long each level takes — how loot and proficiency actually get balanced.
+
+### Lower tier / maybe
+
+- **Ostra reputation.** Standing with Daso, Fanshona, the gods of the
+  Ascendant, unlocking vendors, quests and cosmetics.
+- **Spells from scrolls** (see below) as a life-skill-style find-then-train loop.
+- **Housing trophies.** Mount rare drops and elite kills in your house.
 
 ## The world
 
@@ -87,8 +105,11 @@ smaller entries below; those are the first step towards them.
 - **Creature pathfinding.** Creatures walk straight at you and slide along
   whatever they hit, which shows in the new forests. The road router's A* is a
   starting point.
-- **A boss per region.** Each ruin has guardians; a named, rare, much tougher one
-  would give each region a goal.
+- **More from elites.** A unique named drop each; persist their timers (a
+  restart resets them); give Ascendant and Barals theirs; a map hint once one
+  wakes; an aura and a horn. Watch the tank rule for leeching — standing in the
+  way of blows is enough for credit, which is right for a tank and cheap for
+  someone who only wants the loot.
 - **World events.** A camp that spills over, a golem that walks the roads.
 - **Taunt and group threat tools.** Threat is damage-only; nothing lets you hold
   a creature off a friend.
@@ -103,8 +124,8 @@ smaller entries below; those are the first step towards them.
   bring its own abilities — Guild Wars-style, class × weapon. Weapon skills
   already train separately; only the swing is missing. Needs the worn weapon
   replicated so everyone draws the right swing.
-- **Somewhere for mythic and up to come from.** Rare named elites in the wilds
-  first (`source: "elite"` in `loot.ts` is ready), then dungeons and raids.
+- **More sources for mythic and up.** Elites drop mythic and legendary now;
+  dungeons and raids are next, and the only way to World and Ostra rarity.
 - **World items that are really one in the realm.** Needs a realm-wide registry
   of which World bases exist and who holds them, checked at drop time.
 - **Ostra items bound to their Ostra.** Name them after it (the name already

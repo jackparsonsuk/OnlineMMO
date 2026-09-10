@@ -36,6 +36,7 @@ packages/shared/   one copy of everything both sides must agree on
   itemNames.ts       names and lore from the item's seed
   skills.ts          proficiency 0-1000 for everything, training, effectiveness
   stats.ts           Might/Focus/Vigour/Spirit + secondaries, and what they do
+  elites.ts          rare named elites per region; unsafeElites() at boot
   combat.ts spells.ts enemies.ts settlements.ts schema.ts constants.ts
 packages/server/
   rooms/OstraRoom.ts one room per Ostra: sim loop, camps, casts, loot, gates

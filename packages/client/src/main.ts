@@ -19,7 +19,7 @@ import {
 import { AccountClient } from "./account.js";
 import { SoundBoard } from "./audio.js";
 import { CharacterScreen } from "./character.js";
-import { DevMenu } from "./devtools.js";
+import { DevMenu, type EliteStatus } from "./devtools.js";
 import { showTitleScreen } from "./titleScreen.js";
 import { Hud } from "./hud.js";
 import { KeyboardInput } from "./input.js";
@@ -261,6 +261,15 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   });
   next.onMessage("pickupFailed", () => hud.flash("Your pack is full."));
   next.onMessage("bagFull", () => hud.flash("No room in your pack for that."));
+  // Rare elites: the whole Ostra hears when one wakes and when one falls.
+  next.onMessage("elite", (payload: { event: string; name: string; title: string; region?: string; by?: string }) => {
+    if (payload.event === "woke") {
+      hud.announce("A rare foe stirs", payload.name, `${payload.title} — somewhere in ${payload.region}`, false);
+    } else {
+      hud.announce("Slain", payload.name, `Brought down by ${payload.by}`, true);
+    }
+  });
+  next.onMessage("eliteStatus", (payload: EliteStatus[]) => devMenu?.showElites(payload));
 
   sendToRoom = (type, payload) => next.send(type, payload);
   next.send("requestProfile");

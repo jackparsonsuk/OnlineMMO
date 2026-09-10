@@ -438,6 +438,49 @@ wears it.
 **Power** is one number for "is this better": an item's stat budget, and the sum
 of what you wear (after effectiveness) for the character.
 
+### Rare elites
+
+One named creature per Terra region (`elites.ts`) — Old Greymuzzle in the
+Greywood, the Crownless King at the Broken Crown, Mother Silt in the
+Brightwater shallows, eight in all — each by a ruin or deep in its region. An
+elite is its kind drawn and collided larger (`Enemy.scale`, read on both sides
+through `scaledArchetype`, so a bigger body is never a smaller hitbox), three
+levels above the ground it stands on, with several times the health and more
+damage. It is the **first source of mythic and legendary loot** (`source:
+"elite"`), always drops two or three items, and shows gold on nametags and the
+minimap.
+
+Each has **signature moves**, data in its `abilities` list, resolved by the
+room's `stepElites`. There are three kinds:
+
+- **Summon**: at set health thresholds its kind's allies join the fight, like
+  Old Greymuzzle's pack or the Crownless King's court. They drop nothing and
+  vanish when the fight ends.
+- **Slam**: it roots itself and a ring is telegraphed around it for over a
+  second, then it lands on everyone still inside. The ring is an ordinary
+  telegraph with a full-circle shape, so the client draws exactly what the
+  server tests.
+- **Enrage**: below a threshold it hits harder and swings more often.
+
+Each move comes with a line everyone nearby sees. A fight that ends (everyone
+dead, gone, or the leash snapped) resets it: summons vanish, triggers re-arm,
+and it walks home and heals, so it cannot be worn down in shifts.
+
+**Credit is earned, not touched.** Everyone who dealt at least 10% of its
+health, or who took at least 25% of their own health in its blows (holding its
+attention is work too), gets their own drops, reserved for them for as long as
+they lie there. One hit, or only the killing blow, earns nothing. Credit is read
+from the creature's threat table, which is exactly the damage each player dealt
+it this fight, and that table clears on a reset.
+
+When one falls, the whole Ostra is told who brought it down, and it stays gone
+for its own window — 15 to 35 minutes — before it wakes again, announced to
+everyone. The timers live at module level on the server rather than on the
+room, because a room is torn down when its last player leaves and a timer that
+died with it would let anyone kill an elite, log out, log back in and find it
+fresh. A server restart does still reset them. `unsafeElites()` holds them to
+the same "never near somewhere safe" rule as camps, at boot.
+
 ### Item level and effectiveness
 
 Item level is on the proficiency scale: **creature level × 10**, a nudge for a
@@ -737,8 +780,8 @@ build next live in [TODO.md](TODO.md).
 - **No economy.** Items drop, are worn, or are destroyed; nothing buys, sells,
   repairs or trades them, and there is nowhere to store them beyond thirty
   carried slots.
-- **The top of the loot table is unreachable.** Mythic and above need an elite,
-  a dungeon or a raid, and none exist yet. World items do not yet enforce
+- **The top of the loot table is thin.** Elites drop mythic and legendary, but
+  World and Ostra rarity need a raid, and none exist yet. World items do not yet enforce
   "one in the realm", Ostra items are not yet bound to an Ostra, and there are
   no Souls to find.
 - **Gear does not change your body or your swing.** Weapon types train

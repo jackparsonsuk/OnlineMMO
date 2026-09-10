@@ -54,11 +54,14 @@ export class Nametags {
     colour: number,
     variant: NametagVariant,
     withHealth = false,
+    /** A rare elite: drawn gold, and kept that way through variant changes. */
+    elite = false,
   ): void {
     this.remove(sessionId);
 
     const tag = document.createElement("div");
     tag.className = `nametag ${variant}`;
+    if (elite) tag.dataset["elite"] = "";
     tag.style.setProperty("--tag-colour", `#${colour.toString(16).padStart(6, "0")}`);
     tag.hidden = true;
 

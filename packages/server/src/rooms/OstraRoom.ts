@@ -11,7 +11,13 @@ import {
   COMBO_FINISHER_MULTIPLIER,
   critChanceFor,
   CRIT_MULTIPLIER,
+  CREDIT_DAMAGE_SHARE,
+  CREDIT_TAKEN_SHARE,
   describeItem,
+  eliteLevel,
+  elitesIn,
+  ENRAGE_COOLDOWN,
+  ENRAGE_DAMAGE,
   Enemy,
   ENEMY_RESPAWN_MS,
   EnemyState,
@@ -47,7 +53,9 @@ import {
   preferredSlot,
   RARITIES,
   recoveryMultiplier,
+  regionOf,
   respawnPoint,
+  scaledArchetype,
   sceneryIndex,
   slotsFor,
   spellDamage,
@@ -59,6 +67,9 @@ import {
   type CampDefinition,
   type CharacterStats,
   type Collider,
+  type EliteAbility,
+  type EliteDefinition,
+  type EnemyKind,
   type EnemyArchetype,
   type MoveWorld,
   type GateDefinition,
@@ -151,6 +162,24 @@ interface Session {
   god: boolean;
 }
 
+/** One live elite, and the fight it is in. Reset when the fight ends. */
+interface EliteFight {
+  elite: EliteDefinition;
+  /** Something is fighting it — abilities run, and a reset has work to do. */
+  engaged: boolean;
+  /** Damage each player has taken from it this fight: holding its attention
+   *  counts towards credit (see CREDIT_TAKEN_SHARE). */
+  taken: Map<string, number>;
+  /** Summon thresholds already spent, as "summon:0.5". */
+  spent: Set<string>;
+  /** What it summoned, still alive. */
+  adds: Set<string>;
+  enraged: boolean;
+  nextSlamAt: number;
+  /** A slam winding up: where it lands, when, and how hard. */
+  slam: { at: number; x: number; z: number; radius: number; damage: number } | undefined;
+}
+
 /** A camp whose creatures currently exist. */
 interface ActiveCamp {
   camp: CampDefinition;
@@ -185,6 +214,18 @@ const EVENT_RANGE = 180;
 
 /** A hit on one creature brings camp-mates this close to join in. */
 const RALLY_RADIUS = 7;
+
+/** A fallen elite lies this long before its body is gone. */
+const ELITE_CORPSE_MS = 15_000;
+
+/**
+ * When each elite may next wake, by realm and elite id. Module-level rather
+ * than on the room, deliberately: a room is torn down when its last player
+ * leaves, and a timer that died with it would let anyone kill an elite, log
+ * out, log back in and find it fresh. This survives that; a server restart
+ * still resets it (persisting it is a job for when elites matter more).
+ */
+const eliteTimers = new Map<string, number>();
 
 export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   /**
@@ -225,6 +266,11 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   private readonly groundExpiry = new Map<string, number>();
   /** When each drop stops belonging to whoever earned it. */
   private readonly groundClaimUntil = new Map<string, number>();
+  /** Which creatures are elites, by enemy id, and which elites are alive. */
+  private readonly eliteOf = new Map<string, EliteFight>();
+  private readonly liveElites = new Map<string, string>();
+  /** Creatures an elite summoned, by enemy id, and whose they are. */
+  private readonly addOf = new Map<string, string>();
   private nextGroundId = 0;
 
   onCreate(options: OstraRoomOptions): void {
@@ -324,11 +370,15 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       }
 
       this.stepEnemies(ctx.dt, world, now);
+      this.stepElites(now);
       this.updateCombatFlags(now);
       this.regenerate(ctx.dt);
       this.processRespawns(now);
       this.processGround(now);
-      if (this.tick % CAMP_CHECK_TICKS === 0) this.updateCamps(now);
+      if (this.tick % CAMP_CHECK_TICKS === 0) {
+        this.updateCamps(now);
+        this.updateElites(now);
+      }
     }, TICK_RATE);
   }
 
@@ -507,7 +557,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         id: enemyId,
         x: enemy.x,
         z: enemy.z,
-        radius: this.archetypeFor(enemy.kind).radius,
+        radius: this.archetypeFor(enemy).radius,
       });
     }
     return colliders;
@@ -613,7 +663,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const brain = this.brains.get(enemyId);
       if (!brain) continue;
       world.selfId = enemyId;
-      const archetype = this.archetypeFor(enemy.kind);
+      const archetype = this.archetypeFor(enemy);
       const event = stepEnemy(enemy, brain, archetype, dt, world, this.aiTargets, now);
       if (brain.quarry !== undefined) this.hunted.add(brain.quarry);
       if (!event) continue;
@@ -625,12 +675,17 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
           this.broadcastNear(enemy.x, enemy.z, "enemySwing", {
             id: enemyId, yaw: event.yaw, ms: event.ms, target: event.target,
           });
+          // Enraged, the next blow comes sooner.
+          if (this.eliteOf.get(enemyId)?.enraged) {
+            brain.nextAttackAt -= archetype.attackCooldownMs * (1 - ENRAGE_COOLDOWN);
+          }
           break;
         case "hit":
           // The same creature hits harder in a harder place, and further out.
           this.damagePlayer(
             event.target,
-            archetype.attackDamage * this.ostra.difficulty.damage * levelDamageScale(enemy.level),
+            archetype.attackDamage * this.ostra.difficulty.damage * levelDamageScale(enemy.level)
+              * this.eliteDamageScale(enemyId),
             enemyId,
             enemy.level,
           );
@@ -766,7 +821,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
     for (const [enemyId, enemy] of this.state.enemies) {
       if (enemy.state === EnemyState.Dead) continue;
-      const archetype = this.archetypeFor(enemy.kind);
+      const archetype = this.archetypeFor(enemy);
 
       const x = seen.value(enemy, "x");
       const z = seen.value(enemy, "z");
@@ -813,7 +868,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         const length = Math.hypot(dx, dz) || 1;
         const knockback = finisher ? COMBO_FINISHER_KNOCKBACK : spell.knockback;
         staggered = spell.stagger || finisher;
-        const archetype = this.archetypeFor(enemy.kind);
+        const archetype = this.archetypeFor(enemy);
         takeHit(brain, archetype, sessionId, amount, dx / length, dz / length, knockback, staggered, now);
         // A golem shrugs it off; tell the client so it doesn't claim otherwise.
         if (archetype.staggerImmune) staggered = false;
@@ -835,12 +890,24 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   private killEnemy(id: string, enemy: Enemy, killerSessionId: string, now: number): void {
     enemy.state = EnemyState.Dead;
     const brain = this.brains.get(id);
+    const fight = this.eliteOf.get(id);
+    // Before calmDown: an elite's credit is read from the threat it forgets.
+    if (fight) this.eliteFell(id, fight, enemy, killerSessionId, now);
+    // Summoned creatures are part of the elite's fight, not a loot source.
+    else if (!this.addOf.has(id)) this.rollDrop(enemy, killerSessionId);
     if (brain) {
       calmDown(brain);
       brain.returning = false;
-      brain.respawnAt = now + ENEMY_RESPAWN_MS;
+      brain.respawnAt = now + (fight ? ELITE_CORPSE_MS : ENEMY_RESPAWN_MS);
     }
-    this.rollDrop(enemy, killerSessionId);
+  }
+
+  /** How much harder than its kind this creature hits: an elite's multiplier,
+   *  and more once enraged. 1 for anything ordinary. */
+  private eliteDamageScale(enemyId: string): number {
+    const fight = this.eliteOf.get(enemyId);
+    if (!fight) return 1;
+    return fight.elite.damage * (fight.enraged ? ENRAGE_DAMAGE : 1);
   }
 
   /** Hit one of a camp and the others close by come too. Tight radius: pulling
@@ -902,7 +969,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
    * Circle. Without that, a harder place is pure downside and nobody would go.
    */
   private rollDrop(enemy: Enemy, killerSessionId: string): void {
-    const archetype = this.archetypeFor(enemy.kind);
+    const archetype = this.archetypeFor(enemy);
     if (Math.random() >= archetype.dropChance) return;
 
     const item = rollDrop(Math.random, {
@@ -916,7 +983,9 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     if (item !== undefined) this.dropOnGround(item, enemy.x, enemy.z, killerSessionId);
   }
 
-  private dropOnGround(item: ItemKey, x: number, z: number, claimedBy: string): void {
+  /** `claimMs`: how long only `claimedBy` may take it. An elite's drops are
+   *  personal for as long as they lie there. */
+  private dropOnGround(item: ItemKey, x: number, z: number, claimedBy: string, claimMs = LOOT_CLAIM_MS): void {
     const id = `g${this.nextGroundId++}`;
     this.state.ground.set(id, new GroundItem({
       item,
@@ -926,7 +995,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       z,
     }));
     this.groundExpiry.set(id, Date.now() + GROUND_ITEM_TTL_MS);
-    this.groundClaimUntil.set(id, Date.now() + LOOT_CLAIM_MS);
+    this.groundClaimUntil.set(id, Date.now() + claimMs);
   }
 
   // --- development cheats ------------------------------------------------------
@@ -996,6 +1065,33 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         this.skillsChanged(client.sessionId, session, player);
         break;
       }
+      case "elites": {
+        // Every elite in this Ostra: alive and where, or how long until it wakes.
+        client.send("eliteStatus", elitesIn(this.ostra.id).map((elite) => {
+          const enemyId = this.liveElites.get(elite.id);
+          const enemy = enemyId !== undefined ? this.state.enemies.get(enemyId) : undefined;
+          const timer = eliteTimers.get(this.eliteKey(elite)) ?? 0;
+          const alive = enemy !== undefined && enemy.state !== EnemyState.Dead;
+          return {
+            id: elite.id,
+            name: elite.name,
+            level: eliteLevel(this.ostra, elite),
+            alive,
+            x: enemy?.x ?? elite.x,
+            z: enemy?.z ?? elite.z,
+            // A corpse still lying there has already started its timer.
+            wakesInMs: alive ? 0 : Math.max(0, timer - now),
+          };
+        }));
+        break;
+      }
+      case "respawnElites":
+        // Timers set to now, so the next check wakes them — with the
+        // announcement, which is the point of testing it.
+        for (const elite of elitesIn(this.ostra.id)) {
+          if (eliteTimers.has(this.eliteKey(elite))) eliteTimers.set(this.eliteKey(elite), now);
+        }
+        break;
       case "killNear": {
         const radius = number(message["radius"], 25, 1, 200);
         for (const [id, enemy] of this.state.enemies) {
@@ -1223,6 +1319,9 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     const reduction = armourReduction(session.stats.totals.armour, attackerLevel);
     const amount = Math.max(1, Math.round(raw * (1 - reduction)));
     player.health = Math.max(0, player.health - amount);
+    // Holding an elite's attention is a share of the fight (see eliteFell).
+    const fight = this.eliteOf.get(byEnemyId);
+    if (fight) fight.taken.set(sessionId, (fight.taken.get(sessionId) ?? 0) + amount);
     session.combatUntil = now + COMBAT_LINGER_MS;
     this.broadcastNear(player.x, player.z, "damage", { id: sessionId, amount, by: byEnemyId });
 
@@ -1267,6 +1366,18 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const brain = this.brains.get(enemyId);
       if (!brain || now < brain.respawnAt) continue;
 
+      // An elite does not get back up; it comes back, much later, as a new
+      // spawn (see `updateElites`). What it summoned never comes back at all.
+      const fight = this.eliteOf.get(enemyId);
+      if (fight || this.addOf.has(enemyId)) {
+        this.state.enemies.delete(enemyId);
+        this.brains.delete(enemyId);
+        this.eliteOf.delete(enemyId);
+        this.addOf.delete(enemyId);
+        if (fight) this.liveElites.delete(fight.elite.id);
+        continue;
+      }
+
       // Back at its spawn rather than where it fell, so a cleared camp
       // reassembles instead of drifting wherever players dragged it.
       enemy.x = brain.homeX;
@@ -1310,9 +1421,277 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   }
 
   /** Falls back rather than throwing: a stored kind this build no longer knows
-   *  should not take the whole room's simulation down. */
-  private archetypeFor(kind: string): EnemyArchetype {
-    return isEnemyKind(kind) ? getArchetype(kind) : getArchetype("zombie");
+   *  should not take the whole room's simulation down. Elites get their kind
+   *  scaled to their size, the same way the client reads them. */
+  private archetypeFor(enemy: Enemy): EnemyArchetype {
+    return scaledArchetype(isEnemyKind(enemy.kind) ? enemy.kind : "zombie", enemy.scale);
+  }
+
+  // --- rare elites -------------------------------------------------------------
+
+  /** Wake any elite whose timer has run out. Checked with the camps. */
+  private updateElites(now: number): void {
+    for (const elite of elitesIn(this.ostra.id)) {
+      if (this.liveElites.has(elite.id)) continue;
+      const timer = eliteTimers.get(this.eliteKey(elite));
+      if (timer !== undefined && now < timer) continue;
+      // Only a return is news. The first spawn of a fresh room is just the
+      // world being as it is — announcing eight at once would be noise.
+      this.spawnElite(elite, timer !== undefined);
+    }
+  }
+
+  private eliteKey(elite: EliteDefinition): string {
+    return `${this.realmId}:${elite.id}`;
+  }
+
+  private spawnElite(elite: EliteDefinition, announce: boolean): void {
+    const level = eliteLevel(this.ostra, elite);
+    const maxHealth = Math.min(65535, Math.round(
+      this.scaledHealth(getArchetype(elite.kind).maxHealth, level) * elite.health,
+    ));
+    const id = `e${this.nextEnemyId++}`;
+    this.state.enemies.set(id, new Enemy({
+      kind: elite.kind,
+      name: elite.name,
+      // Rounded to the float32 it travels as, so the server's scaled
+      // archetype is bit-for-bit the one the client builds from the wire.
+      scale: Math.fround(elite.scale),
+      x: elite.x,
+      y: groundHeight(this.ostra, elite.x, elite.z),
+      z: elite.z,
+      yaw: Math.random() * Math.PI * 2,
+      health: maxHealth,
+      maxHealth,
+      level,
+      state: EnemyState.Idle,
+    }));
+    this.brains.set(id, createBrain(elite.x, elite.z, `elite:${elite.id}`, maxHealth));
+    this.eliteOf.set(id, {
+      elite,
+      engaged: false,
+      taken: new Map(),
+      spent: new Set(),
+      adds: new Set(),
+      enraged: false,
+      nextSlamAt: 0,
+      slam: undefined,
+    });
+    this.liveElites.set(elite.id, id);
+    // The whole Ostra hears it, not just whoever is nearby: an elite is worth
+    // crossing the map for.
+    if (!announce) return;
+    this.broadcast("elite", {
+      event: "woke",
+      name: elite.name,
+      title: elite.title,
+      region: regionOf(this.ostra, elite.x, elite.z)?.name ?? this.ostra.name,
+    });
+  }
+
+  /**
+   * An elite fell: start its long timer, tell everyone, and pay out — to every
+   * player who earned a share of the fight, each their own drops, reserved
+   * for them for as long as the drops lie there. The corpse is removed after
+   * ELITE_CORPSE_MS rather than getting back up like an ordinary creature.
+   *
+   * Called before the brain calms down, because credit is read from its
+   * threat, which is exactly the damage each player dealt it this fight.
+   */
+  private eliteFell(enemyId: string, fight: EliteFight, enemy: Enemy, killerSessionId: string, now: number): void {
+    const elite = fight.elite;
+    const [low, high] = elite.respawnMinutes;
+    eliteTimers.set(this.eliteKey(elite), now + (low + Math.random() * (high - low)) * 60_000);
+    this.removeAdds(fight);
+
+    const threat = this.brains.get(enemyId)?.threat;
+    const credited: string[] = [];
+    for (const [sessionId, player] of this.state.players) {
+      const dealt = threat?.get(sessionId) ?? 0;
+      const taken = fight.taken.get(sessionId) ?? 0;
+      if (dealt >= enemy.maxHealth * CREDIT_DAMAGE_SHARE || taken >= player.maxHealth * CREDIT_TAKEN_SHARE) {
+        credited.push(sessionId);
+      }
+    }
+    // Nobody reached a share — a dev kill, or one blow finishing something no
+    // one else fought. Whoever finished it still gets something.
+    if (credited.length === 0) credited.push(killerSessionId);
+
+    credited.forEach((sessionId, who) => {
+      for (let i = 0; i < elite.drops; i++) {
+        const item = rollDrop(Math.random, {
+          creatureLevel: enemy.level,
+          ostraDanger: this.ostra.difficulty.health,
+          danger: this.ostra.difficulty.health * (1 + 0.06 * (enemy.level - 1)),
+          source: "elite",
+        });
+        if (item === undefined) continue;
+        // Spread round the body, each player's in their own arc, so a pile of
+        // drops reads as several and yours are easy to tell apart.
+        const angle = ((who + i / elite.drops) / credited.length) * Math.PI * 2;
+        const reach = 1.2 + 0.4 * who;
+        this.dropOnGround(item, enemy.x + Math.sin(angle) * reach, enemy.z + Math.cos(angle) * reach, sessionId,
+          GROUND_ITEM_TTL_MS);
+      }
+    });
+
+    const names = credited.map((sessionId) => this.state.players.get(sessionId)?.name ?? "someone");
+    this.broadcast("elite", {
+      event: "fell",
+      name: elite.name,
+      title: elite.title,
+      by: names.length <= 3 ? names.join(", ") : `${names.slice(0, 2).join(", ")} and ${names.length - 2} others`,
+    });
+  }
+
+  /**
+   * Each tick, for each live elite: notice whether it is in a fight, and if so
+   * run its abilities. A fight that ends — everyone dead, gone, or the leash
+   * snapped — resets it: summons vanish, spent triggers re-arm, and it walks
+   * home to heal, so it cannot be worn down in shifts.
+   */
+  private stepElites(now: number): void {
+    for (const [id, fight] of this.eliteOf) {
+      const enemy = this.state.enemies.get(id);
+      const brain = this.brains.get(id);
+      if (!enemy || !brain || enemy.state === EnemyState.Dead) continue;
+
+      const engaged = brain.threat.size > 0 && !brain.returning;
+      if (!engaged) {
+        if (fight.engaged) this.resetFight(fight, brain);
+        continue;
+      }
+      fight.engaged = true;
+
+      const health = enemy.health / Math.max(1, enemy.maxHealth);
+      for (const ability of fight.elite.abilities) {
+        switch (ability.kind) {
+          case "summon":
+            for (const at of ability.at) {
+              const key = `summon:${at}`;
+              if (health > at || fight.spent.has(key)) continue;
+              fight.spent.add(key);
+              this.summon(id, enemy, brain, fight, ability.creature, ability.count);
+              this.eliteCry(enemy, ability.cry);
+            }
+            break;
+          case "enrage":
+            if (!fight.enraged && health <= ability.at) {
+              fight.enraged = true;
+              this.eliteCry(enemy, ability.cry);
+            }
+            break;
+          case "slam":
+            this.stepSlam(id, enemy, brain, fight, ability, now);
+            break;
+        }
+      }
+    }
+  }
+
+  private resetFight(fight: EliteFight, brain: EnemyBrain): void {
+    this.removeAdds(fight);
+    fight.engaged = false;
+    fight.taken.clear();
+    fight.spent.clear();
+    fight.enraged = false;
+    fight.nextSlamAt = 0;
+    fight.slam = undefined;
+    calmDown(brain);
+    // Home to heal: the AI restores its health on arrival.
+    brain.returning = true;
+  }
+
+  /** A slam: telegraphed as a ring for its windup, then it lands on everyone
+   *  still inside. Rooted the whole time — the answer is to step out. */
+  private stepSlam(
+    id: string,
+    enemy: Enemy,
+    brain: EnemyBrain,
+    fight: EliteFight,
+    ability: Extract<EliteAbility, { kind: "slam" }>,
+    now: number,
+  ): void {
+    const slam = fight.slam;
+    if (slam) {
+      if (now < slam.at) return;
+      fight.slam = undefined;
+      fight.nextSlamAt = now + ability.everyMs;
+      for (const [sessionId, player] of this.state.players) {
+        const session = this.sessions.get(sessionId);
+        if (!session || session.transferring || player.health === 0) continue;
+        // To the player's surface, as every other blow is measured.
+        if (Math.hypot(player.x - slam.x, player.z - slam.z) > slam.radius + PLAYER_RADIUS) continue;
+        this.damagePlayer(sessionId, slam.damage, id, enemy.level);
+      }
+      return;
+    }
+
+    // The first comes sooner than the rest, so every fight sees one.
+    if (fight.nextSlamAt === 0) fight.nextSlamAt = now + ability.everyMs * 0.5;
+    if (now < fight.nextSlamAt) return;
+
+    // Drop whatever single blow it was winding up, and stand still.
+    brain.windupUntil = 0;
+    brain.windupTarget = undefined;
+    brain.staggerUntil = Math.max(brain.staggerUntil, now + ability.windupMs);
+    brain.nextAttackAt = Math.max(brain.nextAttackAt, now + ability.windupMs + 400);
+    const archetype = this.archetypeFor(enemy);
+    fight.slam = {
+      at: now + ability.windupMs,
+      x: enemy.x,
+      z: enemy.z,
+      radius: ability.radius,
+      damage: archetype.attackDamage * this.ostra.difficulty.damage * levelDamageScale(enemy.level)
+        * this.eliteDamageScale(id) * ability.damage,
+    };
+    this.broadcastNear(enemy.x, enemy.z, "enemySwing", {
+      id, yaw: enemy.yaw, ms: ability.windupMs, target: "", reach: ability.radius, arc: Math.PI * 2, slam: true,
+    });
+    this.eliteCry(enemy, ability.cry);
+  }
+
+  /** Creatures joining an elite's fight, already hunting whoever it is. */
+  private summon(eliteId: string, enemy: Enemy, brain: EnemyBrain, fight: EliteFight, kind: EnemyKind, count: number): void {
+    let quarry: string | undefined;
+    let most = -1;
+    for (const [sessionId, amount] of brain.threat) {
+      if (amount > most) {
+        most = amount;
+        quarry = sessionId;
+      }
+    }
+    const level = Math.max(1, enemy.level - 2);
+    const maxHealth = this.scaledHealth(getArchetype(kind).maxHealth, level);
+    for (let n = 0; n < count; n++) {
+      const angle = (n / count) * Math.PI * 2 + Math.random();
+      const x = enemy.x + Math.sin(angle) * 3.5;
+      const z = enemy.z + Math.cos(angle) * 3.5;
+      const id = `e${this.nextEnemyId++}`;
+      this.state.enemies.set(id, new Enemy({
+        kind, x, y: groundHeight(this.ostra, x, z), z,
+        yaw: angle, health: maxHealth, maxHealth, level, state: EnemyState.Chase,
+      }));
+      const addBrain = createBrain(x, z, `add:${eliteId}`, maxHealth);
+      if (quarry) rally(addBrain, quarry);
+      this.brains.set(id, addBrain);
+      fight.adds.add(id);
+      this.addOf.set(id, eliteId);
+    }
+  }
+
+  private removeAdds(fight: EliteFight): void {
+    for (const id of fight.adds) {
+      this.state.enemies.delete(id);
+      this.brains.delete(id);
+      this.addOf.delete(id);
+    }
+    fight.adds.clear();
+  }
+
+  /** A line from an elite, to everyone near enough to see what it means. */
+  private eliteCry(enemy: Enemy, text: string): void {
+    this.broadcastNear(enemy.x, enemy.z, "eliteCry", { text });
   }
 
   private gateContaining(x: number, z: number): GateDefinition | undefined {

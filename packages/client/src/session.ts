@@ -16,7 +16,7 @@ import {
   type EnemyArchetype,
   type EnemyKind,
   EnemyState,
-  getArchetype,
+  scaledArchetype,
   INTERP_DELAY_MS,
   describeItem,
   type GroundItem,
@@ -458,7 +458,8 @@ export function createSession(
   /** Falls back rather than throwing, so a creature kind this build doesn't
    *  know about is drawn wrong instead of breaking the frame. */
   function archetypeOf(enemy: Enemy): EnemyArchetype {
-    return getArchetype(isEnemyKind(enemy.kind) ? enemy.kind : "zombie");
+    // Scaled for elites, exactly as the server reads it — see scaledArchetype.
+    return scaledArchetype(isEnemyKind(enemy.kind) ? enemy.kind : "zombie", enemy.scale);
   }
 
   function selfPosition(): { x: number; y: number; z: number } {
@@ -721,8 +722,11 @@ export function createSession(
     // climbs out of the ground rather than blinking into existence.
     if (performance.now() - born > 1500) animator.emerge(performance.now());
     if (enemy.state === EnemyState.Dead) animator.die(performance.now() - 10_000);
+    // An elite is its kind, bigger. The root carries the scale, so every
+    // pose the animator puts the parts in scales with it.
+    if (enemy.scale !== 1) rig.root.scaling.setAll(enemy.scale);
     enemies.set(enemyId, { swing: 0, rig, animator, archetype, state: enemy.state, health: enemy.health, variant: "hostile" });
-    nametags.add(enemyId, `${archetype.name} · ${enemy.level}`, archetype.colour, "hostile", true);
+    nametags.add(enemyId, `${enemy.name || archetype.name} · ${enemy.level}`, archetype.colour, "hostile", true, enemy.name !== "");
     nametags.setHealth(enemyId, enemy.health / Math.max(1, enemy.maxHealth));
   });
 
@@ -831,7 +835,11 @@ export function createSession(
     if (mine) predictedHits.clear();
   });
 
-  const offSwing = room.onMessage("enemySwing", (payload: { id: string; yaw: number; ms: number; target: string }) => {
+  const offSwing = room.onMessage("enemySwing", (payload: {
+    id: string; yaw: number; ms: number; target: string;
+    /** An elite's slam: its own reach and shape instead of the archetype's. */
+    reach?: number; arc?: number; slam?: boolean;
+  }) => {
     const view = enemies.get(payload.id);
     const enemy = room.state.enemies.get(payload.id);
     if (!view || !enemy) return;
@@ -839,23 +847,41 @@ export function createSession(
     view.animator.play({ type: "windup", start: now, ms: payload.ms });
     const x = predict.value(enemy, "x");
     const z = predict.value(enemy, "z");
+    const reach = payload.reach ?? view.archetype.attackReach;
     effects.telegraph(
       now, x, predict.value(enemy, "y"), z, payload.yaw,
       // The zone your CENTRE must leave: the server measures reach to your
       // surface, so the painted edge is reach plus your radius.
-      view.archetype.attackReach + PLAYER_RADIUS,
-      view.archetype.attackArc,
+      reach + PLAYER_RADIUS,
+      payload.arc ?? view.archetype.attackArc,
       payload.ms,
     );
     // Everyone near hears the warning; its target hears it loudest.
-    play(WINDUP_SOUND[view.archetype.kind], x, z, payload.target === room.sessionId ? 0.95 : 0.5);
+    play(WINDUP_SOUND[view.archetype.kind], x, z, payload.target === room.sessionId || payload.slam ? 0.95 : 0.5);
 
     const swing = ++view.swing;
     const y = predict.value(enemy, "y");
     later(now + payload.ms, () => {
       if (view.swing !== swing || !enemies.has(payload.id)) return;
-      blowEffect(view, x, y, z, payload.yaw);
+      if (payload.slam) slamEffect(x, y, z, reach);
+      else blowEffect(view, x, y, z, payload.yaw);
     });
+  });
+
+  /** An elite's slam landing: the whole ring goes up at once. */
+  function slamEffect(x: number, y: number, z: number, reach: number): void {
+    const t = performance.now();
+    effects.shockwave(t, x, y, z, reach + PLAYER_RADIUS, 0xe8c23f, 28);
+    effects.dust(x, y, z, 22);
+    play("slam", x, z, 1);
+    const self = selfPosition();
+    const near = Math.hypot(self.x - x, self.z - z);
+    if (near < reach * 2.5) shake(0.4 * (1 - near / (reach * 2.5)) + 0.1, 320, t);
+  }
+
+  // An elite's cry — "the pack answers!" — for everyone close enough to care.
+  const offCry = room.onMessage("eliteCry", (payload: { text: string }) => {
+    hud.flash(payload.text, "#e8c23f");
   });
 
   /** The moment a creature's blow lands: what it looks and sounds like
@@ -1132,7 +1158,11 @@ export function createSession(
       const dead = enemy.state === EnemyState.Dead;
       const hunting = enemy.state === EnemyState.Chase;
 
-      if (distance < 270 && !dead) {
+      if (!dead && enemy.name !== "" && distance < 400) {
+        // An elite shows gold on the minimap, and further out than anything
+        // else — close enough to hunt, not so far the map gives it away.
+        blips.push({ x, z, size: 4.2, colour: "#e8c23f", ring: enemyId === target });
+      } else if (distance < 270 && !dead) {
         blips.push({
           x, z, size: enemyId === target ? 3.4 : 2.4,
           colour: hunting ? "#ff5a44" : "#b0564a",
@@ -1212,7 +1242,7 @@ export function createSession(
         if (!dead) effects.showTarget(now, x, y, z, view.archetype.radius + 0.35, locked.state === EnemyState.Chase);
         else effects.hideTarget();
         hud.setTarget({
-          name: view.archetype.name,
+          name: locked.name || view.archetype.name,
           level: locked.level,
           health: locked.health,
           maxHealth: locked.maxHealth,
@@ -1326,6 +1356,7 @@ export function createSession(
     offGroundRemove();
     offCast();
     offSwing();
+    offCry();
     offDamage();
     offEvade();
     offRespawned();

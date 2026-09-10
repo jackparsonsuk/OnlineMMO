@@ -86,6 +86,11 @@ export const Enemy = schema({
   maxHealth: t.uint16().default(1),
   /** See `levelHealthScale`. Shown on the label as a warning. */
   level: t.uint8().default(1),
+  /** A rare elite's own name (see `elites.ts`); empty for anything ordinary. */
+  name: t.string().default(""),
+  /** Drawn and collided this many times its kind's size — see
+   *  `scaledArchetype`. 1 for anything ordinary. */
+  scale: t.float32().default(1),
   /** An `EnemyState`. The client lights a creature that is hunting, so you can
    *  tell at a glance whether it has seen you. */
   state: t.uint8().default(0),

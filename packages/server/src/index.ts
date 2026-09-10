@@ -6,7 +6,7 @@ import cors from "cors";
 import express from "express";
 import { matchMaker, Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
-import { OSTRA_IDS, ROOM_NAME, unsafeSpawns } from "@mmo/shared";
+import { OSTRA_IDS, ROOM_NAME, unsafeElites, unsafeSpawns } from "@mmo/shared";
 import { setServerContext } from "./context.js";
 import {
   AuthError,
@@ -249,7 +249,7 @@ gameServer.define(ROOM_NAME, OstraRoom).filterBy(["ostraId"]);
 
 // Loud, not fatal: a badly placed camp makes the game miserable rather than
 // broken, and refusing to boot over level design would be worse.
-for (const problem of unsafeSpawns()) {
+for (const problem of [...unsafeSpawns(), ...unsafeElites()]) {
   console.warn(`[spawn] ${problem}`);
 }
 

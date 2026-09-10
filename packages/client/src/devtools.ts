@@ -28,6 +28,17 @@ export interface DevHooks {
   ostra(): OstraDefinition | undefined;
 }
 
+/** One elite, as the server reports it for the dev menu. */
+export interface EliteStatus {
+  id: string;
+  name: string;
+  level: number;
+  alive: boolean;
+  x: number;
+  z: number;
+  wakesInMs: number;
+}
+
 interface Place {
   label: string;
   x: number;
@@ -91,6 +102,14 @@ export class DevMenu {
           <button type="button" data-act="scatter">Scatter one of each</button>
           <button type="button" data-act="clear">Empty bag</button>
         </div>
+      </section>
+      <section>
+        <h4>Elites</h4>
+        <div class="row">
+          <button type="button" data-act="elites">Refresh</button>
+          <button type="button" data-act="respawnElites" title="Fallen elites wake on the next check">Respawn fallen</button>
+        </div>
+        <div class="dev-elites"></div>
       </section>
       <section>
         <h4>World</h4>
@@ -219,6 +238,20 @@ export class DevMenu {
       case "kill":
         this.hooks.send({ cmd: "killNear", radius: 25 });
         break;
+      case "elites":
+        this.hooks.send({ cmd: "elites" });
+        break;
+      case "respawnElites":
+        this.hooks.send({ cmd: "respawnElites" });
+        window.setTimeout(() => this.hooks.send({ cmd: "elites" }), 700);
+        break;
+      case "goElite": {
+        const x = Number(target.dataset["x"]);
+        const z = Number(target.dataset["z"]);
+        // Beside it, not on top of it.
+        if (Number.isFinite(x) && Number.isFinite(z)) this.hooks.send({ cmd: "teleport", x: x + 8, z: z + 8 });
+        break;
+      }
       case "far": {
         const far = (target as HTMLInputElement).checked;
         const camera = this.world.camera;
@@ -233,6 +266,23 @@ export class DevMenu {
         document.body.classList.toggle("no-hud", (target as HTMLInputElement).checked);
         break;
     }
+  }
+
+  /** The server's answer to "elites": each one, alive or how long until it wakes. */
+  showElites(list: EliteStatus[]): void {
+    const host = this.root.querySelector(".dev-elites") as HTMLElement;
+    if (list.length === 0) {
+      host.textContent = "None in this Ostra.";
+      return;
+    }
+    host.innerHTML = list.map((elite) => {
+      const seconds = Math.ceil(elite.wakesInMs / 1000);
+      const status = elite.alive
+        ? `<span class="alive">alive</span>`
+        : `wakes in ${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+      return `<div class="dev-elite"><span>${escapeHtml(elite.name)} · ${elite.level}<small>${status}</small></span>` +
+        `<button type="button" data-act="goElite" data-x="${elite.x}" data-z="${elite.z}">Go</button></div>`;
+    }).join("");
   }
 
   /** Every named place in the current Ostra, rebuilt when the Ostra changes. */

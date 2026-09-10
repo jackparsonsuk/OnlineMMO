@@ -345,6 +345,39 @@ export function getArchetype(kind: EnemyKind): EnemyArchetype {
   return ENEMY_ARCHETYPES[kind];
 }
 
+const scaledCache = new Map<string, EnemyArchetype>();
+
+/**
+ * A creature drawn `scale` times its usual size — an elite — with everything
+ * spatial scaled to match: collision radius, height, reach, and how far it
+ * roams. Shared, and read on both sides from the replicated `Enemy.scale`, so
+ * the wedge the client paints is still exactly the wedge the server tests, and
+ * a bigger body is never a smaller hitbox. Health and damage are not here;
+ * they belong to the elite's own table (see `elites.ts`).
+ */
+export function scaledArchetype(kind: EnemyKind, scale: number): EnemyArchetype {
+  const base = ENEMY_ARCHETYPES[kind];
+  if (!(scale > 0) || scale === 1) return base;
+  const key = `${kind}:${scale}`;
+  let scaled = scaledCache.get(key);
+  if (!scaled) {
+    scaled = {
+      ...base,
+      radius: base.radius * scale,
+      height: base.height * scale,
+      attackRange: base.attackRange * scale,
+      attackReach: base.attackReach * scale,
+      leashRadius: base.leashRadius * scale,
+      // Heavier things are shoved less.
+      knockbackScale: (base.knockbackScale ?? 1) / scale,
+    };
+    if (base.preferredRange !== undefined) scaled.preferredRange = base.preferredRange * scale;
+    if (base.hover !== undefined) scaled.hover = base.hover * scale;
+    scaledCache.set(key, scaled);
+  }
+  return scaled;
+}
+
 /** A hand-placed cluster of creatures. Terra's wilds add generated camps of
  *  the same shape — see `worldgen.ts`. */
 export interface SpawnGroup {

@@ -1565,3 +1565,41 @@ body.no-hud :is(#hud, #hint, #compass, #minimap, #abilities, #power, #target-fra
 }
 
 body.portrait #xp-tracker, body.no-hud #xp-tracker { display: none; }
+
+/* --- rare elites ------------------------------------------------------------ */
+
+/* Gold and a little larger, whatever state it is in — you should know one when
+   you see it from across a field. */
+.nametag[data-elite] {
+  border-color: rgb(232 194 63 / 80%);
+  color: #f0d98a;
+  font-weight: 600;
+  font-size: 13px;
+  box-shadow: 0 0 10px rgb(232 194 63 / 35%);
+}
+
+.nametag[data-elite] .label::before { content: "★ "; color: #e8c23f; }
+
+/* "Old Greymuzzle stirs in Greywood" — shares the level-up column. */
+.announce {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 18px 10px;
+  border-radius: 10px;
+  border: 1px solid rgb(232 194 63 / 45%);
+  background: rgb(13 17 23 / 78%);
+  text-shadow: 0 2px 8px rgb(0 0 0 / 90%);
+  animation: level-up 6s ease-out forwards;
+}
+
+.announce small { font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; color: #e8c23f; }
+.announce b { font-size: 22px; color: #fff; }
+.announce span { font-size: 13px; font-style: italic; color: #c6d2de; }
+.announce.fell b { color: #f0d98a; }
+
+#dev .dev-elites { margin-top: 6px; }
+#dev .dev-elite { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 0; }
+#dev .dev-elite span { display: flex; flex-direction: column; color: #f0d98a; }
+#dev .dev-elite small { font-size: 10.5px; color: #8b98a5; }
+#dev .dev-elite small .alive { color: #6dcf7e; }

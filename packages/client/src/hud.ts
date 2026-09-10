@@ -301,6 +301,18 @@ export class Hud {
   }
   private readonly xpRows = new Map<string, { el: HTMLElement; timer: number }>();
 
+  /**
+   * News for the whole Ostra — an elite waking or falling. Shares the level-up
+   * column, so it stacks with them rather than covering them.
+   */
+  announce(heading: string, name: string, line: string, fell: boolean): void {
+    const banner = document.createElement("div");
+    banner.className = `announce${fell ? " fell" : ""}`;
+    banner.innerHTML = `<small>${escapeHtml(heading)}</small><b>${escapeHtml(name)}</b><span>${escapeHtml(line)}</span>`;
+    document.getElementById("level-ups")?.appendChild(banner);
+    window.setTimeout(() => banner.remove(), 6000);
+  }
+
   /** A level gained: centre of the screen, big, and gone in a few seconds. */
   levelUp(skill: string, level: number): void {
     const banner = document.createElement("div");

@@ -1,5 +1,6 @@
 export * from "./combat.js";
 export * from "./constants.js";
+export * from "./elites.js";
 export * from "./enemies.js";
 export * from "./items.js";
 export * from "./movement.js";

@@ -580,7 +580,7 @@ export function buildingColliders(ostra: OstraDefinition): readonly BoxCollider[
 const campCache = new Map<OstraId, readonly CampDefinition[]>();
 
 /** Places where nothing hostile may be close enough to notice you. */
-function safePoints(ostra: OstraDefinition): Array<{ x: number; z: number; label: string }> {
+export function safePoints(ostra: OstraDefinition): Array<{ x: number; z: number; label: string }> {
   const points = [{ ...ostra.spawn, label: "the spawn point" }];
   for (const stone of ostra.waystones) {
     points.push({ ...waystoneArrival(stone), label: stone.name });
