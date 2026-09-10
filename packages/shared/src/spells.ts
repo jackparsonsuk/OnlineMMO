@@ -13,8 +13,13 @@
  *
  * So: Aequum is a mana bracket, not a power ranking — Strike is Aequum 0 not
  * because it is feeble but because it costs nothing. And you improve at what
- * you actually cast, each spell separately, up to a ceiling that is yours.
+ * you actually cast, each spell separately (see skills.ts). The "set ceiling"
+ * is no longer one you are born with: it is what the creatures you fight can
+ * teach you.
  */
+
+import { proficiencyMultiplier } from "./skills.js";
+import type { StatTotals } from "./stats.js";
 
 export type SpellId = "strike" | "voidbolt" | "sunder";
 
@@ -32,8 +37,15 @@ export interface Spell {
   aequum: number;
   manaCost: number;
   cooldownMs: number;
-  /** Damage before proficiency scaling. */
+  /** Damage before gear and proficiency. */
   damage: number;
+  /** Which attribute adds to it: Might for blows, Focus for spells that cost
+   *  mana. This is what makes a heavy-armoured brawler and a cloth-robed
+   *  caster different builds rather than different colours. */
+  scaling: "might" | "focus";
+  /** Damage per point of that attribute. Sunder's is lower because it lands on
+   *  everything around you at once. */
+  coefficient: number;
   /** Reach, measured to the target's surface. */
   range: number;
   /** Total width of the effect, centred on your facing. Math.PI * 2 is a ring
@@ -62,6 +74,8 @@ export const SPELLS: Record<SpellId, Spell> = {
     manaCost: 0,
     cooldownMs: 600,
     damage: 18,
+    scaling: "might",
+    coefficient: 1,
     range: 2.4,
     arc: Math.PI * 0.62,
     targeting: "nearest",
@@ -80,6 +94,8 @@ export const SPELLS: Record<SpellId, Spell> = {
     manaCost: 12,
     cooldownMs: 900,
     damage: 14,
+    scaling: "focus",
+    coefficient: 1,
     range: 13,
     // Narrow: reach is the reward, and it should cost you accuracy.
     arc: Math.PI * 0.16,
@@ -100,6 +116,8 @@ export const SPELLS: Record<SpellId, Spell> = {
     manaCost: 32,
     cooldownMs: 4000,
     damage: 22,
+    scaling: "focus",
+    coefficient: 0.7,
     range: 4.6,
     arc: Math.PI * 2,
     targeting: "all",
@@ -127,46 +145,17 @@ export function spellToWire(id: SpellId): number {
   return SPELL_IDS.indexOf(id) + 1;
 }
 
-// --- proficiency ------------------------------------------------------------
-
-/** The highest ceiling anyone can be born with. */
-export const MAX_AFFINITY = 100;
-
-/** Nobody is born with none — the lore is explicit that everyone has some. */
-export const MIN_AFFINITY = 55;
-
-/** Proficiency added by one landed cast, before the slowdown near the cap. */
-const PROFICIENCY_PER_CAST = 1.6;
-
-/** Damage bonus at a proficiency of 100. */
-const PROFICIENCY_DAMAGE_BONUS = 0.6;
-
-export type SpellProficiency = Partial<Record<SpellId, number>>;
+// --- damage -----------------------------------------------------------------
 
 /**
- * How much better a landed cast makes you.
+ * What one cast is worth, before crits and finishers.
  *
- * Growth slows as you approach your ceiling, so the last few points cost far
- * more casts than the first — a muscle, not a progress bar. Returns the NEW
- * proficiency, never above `affinity`.
+ * Gear adds to the spell's base, and training multiplies the lot. Two axes,
+ * kept separate so neither makes the other pointless: an untrained caster in
+ * good gear hits hard but plainly, a trained one in rags hits a little harder
+ * than rags should allow, and both together are what the top of the game is.
  */
-export function grownProficiency(current: number, affinity: number): number {
-  const headroom = Math.max(0, 1 - current / affinity);
-  return Math.min(affinity, current + PROFICIENCY_PER_CAST * headroom);
-}
-
-/**
- * Damage multiplier for a given proficiency. 1.0 untrained, up to 1.6 at 100.
- *
- * Deliberately scaled against MAX_AFFINITY rather than the caster's own
- * ceiling: someone born with an affinity of 55 who maxes it should be weaker
- * than someone born with 100 who maxes theirs. The ceiling has to mean
- * something or it is just a slower bar.
- */
-export function proficiencyMultiplier(proficiency: number): number {
-  return 1 + PROFICIENCY_DAMAGE_BONUS * (proficiency / MAX_AFFINITY);
-}
-
-export function spellDamage(spell: Spell, proficiency: number): number {
-  return Math.round(spell.damage * proficiencyMultiplier(proficiency));
+export function spellDamage(spell: Spell, proficiency: number, totals: StatTotals): number {
+  const added = totals[spell.scaling] * spell.coefficient;
+  return Math.round((spell.damage + added) * proficiencyMultiplier(proficiency));
 }

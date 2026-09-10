@@ -588,8 +588,9 @@ function safePoints(ostra: OstraDefinition): Array<{ x: number; z: number; label
   return points;
 }
 
-/** Level from distance to the spawn: the map's difficulty rises in rings. */
-function levelAt(ostra: OstraDefinition, x: number, z: number): number {
+/** Level from distance to the spawn: the map's difficulty rises in rings.
+ *  Exported for the dev menu's "where am I" readout. */
+export function levelAt(ostra: OstraDefinition, x: number, z: number): number {
   const wilds = ostra.wilds;
   if (!wilds) return 1;
   const fromSpawn = dist(x, z, ostra.spawn.x, ostra.spawn.z);

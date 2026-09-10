@@ -1,6 +1,7 @@
 import {
   getOstra,
   heightAt,
+  levelAt,
   regionOf,
   roadPaths,
   settlementsIn,
@@ -149,6 +150,12 @@ export class Cartographer {
   private readonly worldTitle = document.getElementById("worldmap-title") as HTMLElement;
   private lastInfo = "";
   private compassMarks: HTMLElement[] = [];
+  private readonly worldHint = document.querySelector("#worldmap .worldmap-hint") as HTMLElement;
+  private readonly defaultHint: string;
+  /** Development: while set, a click on the world map is a place, not nothing. */
+  private picker: ((x: number, z: number) => void) | undefined;
+  private readonly onPickMove = (event: MouseEvent) => this.describePick(event);
+  private readonly onPickClick = (event: MouseEvent) => this.pick(event);
 
   constructor(ostra: OstraDefinition) {
     this.ostra = ostra;
@@ -187,6 +194,9 @@ export class Cartographer {
 
     this.buildCompass();
     this.worldTitle.textContent = `${ostra.name} — ${ostra.subtitle}`;
+    this.defaultHint = this.worldHint.innerHTML;
+    this.worldCanvas.addEventListener("mousemove", this.onPickMove);
+    this.worldCanvas.addEventListener("click", this.onPickClick);
   }
 
   get worldOpen(): boolean {
@@ -195,6 +205,63 @@ export class Cartographer {
 
   toggleWorld(): void {
     this.worldPanel.hidden = !this.worldPanel.hidden;
+    // Closing the map by any route ends a pick.
+    if (this.worldPanel.hidden && this.picker) this.setPicker(undefined);
+  }
+
+  /**
+   * Development: open the world map and hand the next click on it to
+   * `picker`, as a point in the world. Undefined cancels.
+   */
+  setPicker(picker: ((x: number, z: number) => void) | undefined): void {
+    this.picker = picker;
+    this.worldPanel.classList.toggle("picking", picker !== undefined);
+    if (picker) {
+      if (!this.worldOpen) this.worldPanel.hidden = false;
+      this.worldHint.textContent = "Click anywhere to go there · Esc to cancel";
+    } else {
+      this.worldHint.innerHTML = this.defaultHint;
+    }
+  }
+
+  get picking(): boolean {
+    return this.picker !== undefined;
+  }
+
+  /** A pointer position on the world map, as a place in the world. The map is
+   *  the whole Ostra fitted to a square canvas, north up. */
+  private worldPointAt(event: MouseEvent): { x: number; z: number } {
+    const rect = this.worldCanvas.getBoundingClientRect();
+    const half = this.ostra.size / 2;
+    const metresPerPixel = this.ostra.size / Math.max(1, rect.width);
+    return {
+      x: -half + (event.clientX - rect.left) * metresPerPixel,
+      z: half - (event.clientY - rect.top) * metresPerPixel,
+    };
+  }
+
+  private describePick(event: MouseEvent): void {
+    if (!this.picker) return;
+    const { x, z } = this.worldPointAt(event);
+    const region = regionOf(this.ostra, x, z)?.name ?? "the wilds";
+    this.worldHint.textContent =
+      `${Math.round(x)}, ${Math.round(z)} · ${region} · level ${levelAt(this.ostra, x, z)} — click to go there`;
+  }
+
+  private pick(event: MouseEvent): void {
+    const picker = this.picker;
+    if (!picker) return;
+    const { x, z } = this.worldPointAt(event);
+    this.setPicker(undefined);
+    this.worldPanel.hidden = true;
+    picker(x, z);
+  }
+
+  /** The canvases outlive the session; their listeners must not. */
+  dispose(): void {
+    this.worldCanvas.removeEventListener("mousemove", this.onPickMove);
+    this.worldCanvas.removeEventListener("click", this.onPickClick);
+    this.setPicker(undefined);
   }
 
   private buildCompass(): void {

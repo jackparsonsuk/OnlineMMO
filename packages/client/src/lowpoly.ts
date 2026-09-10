@@ -4,7 +4,7 @@ import type { Mesh } from "@babylonjs/core/Meshes/mesh.js";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import type { Scene } from "@babylonjs/core/scene.js";
-import type { Rarity, Spell } from "@mmo/shared";
+import { RARITY, type Rarity, type Spell } from "@mmo/shared";
 
 /**
  * The game's art style, in one place.
@@ -135,25 +135,25 @@ export function buildCastArc(scene: Scene, spell: Spell, colour: number): Transf
   return pivot;
 }
 
-/** Loot colours by rarity. Deliberately loud — a drop should catch the eye
- *  across an Ostra, and rarity should be readable before you reach it. */
-export const RARITY_COLOURS: Record<Rarity, number> = {
-  common: 0xb8c4d0,
-  fine: 0x5ec2e8,
-  rare: 0xe8b13f,
-};
+/** Rarities that throw a beam of light into the sky where they fall. */
+const BEAM_RARITIES: ReadonlySet<Rarity> = new Set(["mythic", "legendary", "world", "ostra"]);
 
 /**
  * A dropped item: a small faceted crystal that hovers and turns.
  *
  * An octahedron rather than a box, because nothing else in the world is one —
  * loot has to be distinguishable from scenery at a glance, and silhouette does
- * that faster than colour.
+ * that faster than colour. Colours are the shared rarity colours, deliberately
+ * loud: rarity should be readable before you reach it.
+ *
+ * Mythic and above also stand a pillar of light over themselves. Those are
+ * drops people will talk about, and one falling in a crowded fight should be
+ * visible from across the field — to you, and to everyone else.
  */
 export function buildGroundItem(scene: Scene, rarity: Rarity): TransformNode {
   const pivot = new TransformNode("groundItem", scene);
 
-  const colour = hexColour(RARITY_COLOURS[rarity]);
+  const colour = hexColour(RARITY[rarity].colour);
   const material = new StandardMaterial(`itemMaterial:${rarity}`, scene);
   material.diffuseColor = colour.scale(0.4);
   material.emissiveColor = colour;
@@ -179,6 +179,25 @@ export function buildGroundItem(scene: Scene, rarity: Rarity): TransformNode {
   haloMaterial.alpha = 0.22;
   haloMaterial.backFaceCulling = false;
   halo.material = haloMaterial;
+
+  if (BEAM_RARITIES.has(rarity)) {
+    const beam = MeshBuilder.CreateCylinder(
+      "itemBeam",
+      { height: 14, diameterTop: 0.05, diameterBottom: 0.34, tessellation: 8 },
+      scene,
+    );
+    beam.position.y = 6.6;
+    beam.isPickable = false;
+    beam.parent = pivot;
+    const beamMaterial = new StandardMaterial(`itemBeam:${rarity}`, scene);
+    beamMaterial.diffuseColor = Color3.Black();
+    beamMaterial.specularColor = Color3.Black();
+    beamMaterial.emissiveColor = colour;
+    beamMaterial.alpha = 0.3;
+    beamMaterial.backFaceCulling = false;
+    beamMaterial.disableLighting = true;
+    beam.material = beamMaterial;
+  }
 
   return pivot;
 }

@@ -7,6 +7,8 @@ export * from "./noise.js";
 export * from "./ostras.js";
 export * from "./schema.js";
 export * from "./settlements.js";
+export * from "./skills.js";
 export * from "./spells.js";
+export * from "./stats.js";
 export * from "./terrain.js";
 export * from "./worldgen.js";

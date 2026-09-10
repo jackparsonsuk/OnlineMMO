@@ -31,13 +31,22 @@ packages/shared/   one copy of everything both sides must agree on
                      SceneryIndex, buildingColliders, unsafeSpawns
   ostras.ts          the Ostra table: Terra = 8000 m, regions, lakes, ruins,
                      roads, waystones; generated wilds
-  combat.ts spells.ts enemies.ts items.ts settlements.ts schema.ts constants.ts
+  items.ts           slots, rarities, item bases; an item is a key
+                     {base,level,rarity,seed} and describeItem() derives the rest
+  itemNames.ts       names and lore from the item's seed
+  skills.ts          proficiency 0-1000 for everything, training, effectiveness
+  stats.ts           Might/Focus/Vigour/Spirit + secondaries, and what they do
+  combat.ts spells.ts enemies.ts settlements.ts schema.ts constants.ts
 packages/server/
   rooms/OstraRoom.ts one room per Ostra: sim loop, camps, casts, loot, gates
+  loot.ts            the only place items are rolled; old-save item migration
   ai/enemyAI.ts      creature state machine, windups, threat, knockback
   auth.ts, store/    accounts (JWT + scrypt), SQLite persistence
 packages/client/src/
-  session.ts         per-room glue: prediction, input, rigs, combat events
+  session.ts         per-room glue: prediction, input, rigs, combat events,
+                     the character screen's camera (setPortrait)
+  character.ts       the character screen: slots, lines to the body, pack, skills
+  devtools.ts        the ` dev menu (dev builds only; server gates `dev` too)
   terrain.ts         chunk streamer + horizon mesh + groundTone
   scenery.ts         thin-instanced trees/rocks/grass per chunk
   rigs.ts            procedural animated bodies (Animator)
@@ -84,7 +93,15 @@ packages/client/src/
   changes terrain height, lakes or road `points` changes every road.
 - `requestAnimationFrame` stops when the page isn't visible. `window.mmo.frame(now)`
   drives one frame by hand; `window.mmo` exposes `world`, `room`, `session`
-  (`session.debug`), `keyboard`, `audio`. `GET /debug/rooms` lists live rooms.
+  (`session.debug`), `keyboard`, `audio`, `characterScreen`, `devMenu`, and
+  `loot()`. `room.send("dev", { cmd: "teleport", x, z })` and the other dev
+  commands in `OstraRoom.onDev` work from the console. `GET /debug/rooms` lists
+  live rooms.
+- Browser automation's key presses arrive with an empty `event.code`, and every
+  binding reads `code`. Drive keys with
+  `window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyW" }))`.
+- Items are keys, not ids: never compare or look up an item by anything but
+  `describeItem(key)`. Anything that rolls an item belongs in the server.
 
 ## Style
 

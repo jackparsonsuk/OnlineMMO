@@ -1,17 +1,24 @@
 import type { Room, SeatReservation } from "@colyseus/sdk";
 import { Client } from "@colyseus/sdk";
 import {
+  describeItem,
   type Equipment,
-  getItem,
+  GEAR_SKILLS,
   getOstra,
   isOstraId,
+  type ItemKey,
+  type Proficiency,
+  rarityHex,
   ROOM_NAME,
   type OstraDefinition,
-  type SpellProficiency,
+  type SkillId,
+  SPELLS,
   WorldState,
 } from "@mmo/shared";
 import { AccountClient } from "./account.js";
 import { SoundBoard } from "./audio.js";
+import { CharacterScreen } from "./character.js";
+import { DevMenu } from "./devtools.js";
 import { showTitleScreen } from "./titleScreen.js";
 import { Hud } from "./hud.js";
 import { KeyboardInput } from "./input.js";
@@ -47,6 +54,26 @@ const audio = new SoundBoard();
 hud.setMuted(audio.isMuted);
 hud.onToggleSound = () => audio.toggleMute();
 
+/** Set per room in `enter`, so the screen always talks to the room you are in. */
+let sendToRoom: ((type: string, payload?: unknown) => void) | undefined;
+
+const characterScreen = new CharacterScreen(document.getElementById("character") as HTMLElement, {
+  equip: (item, slot) => sendToRoom?.("equip", { item, slot }),
+  unequip: (slot) => sendToRoom?.("unequip", { slot }),
+  destroy: (item) => sendToRoom?.("destroy", { item }),
+  openChanged: (open, shift) => session?.setPortrait(open, shift),
+});
+
+// Cheats, on the backtick key. Not even constructed in a production build;
+// the server refuses the commands there regardless.
+const devMenu = import.meta.env.DEV
+  ? new DevMenu(world, {
+    send: (command) => sendToRoom?.("dev", command),
+    session: () => session,
+    ostra: () => currentOstra,
+  })
+  : undefined;
+
 // UI keys are deliberately NOT part of KeyboardInput: that class feeds the
 // fixed-step simulation, and opening a bag or picking a target is a UI action
 // with no place on the wire.
@@ -56,7 +83,11 @@ window.addEventListener("keydown", (event) => {
   if (event.repeat) return;
   switch (event.code) {
     case "KeyI":
-      hud.toggleBag();
+    case "KeyC":
+      if (session) characterScreen.toggle();
+      break;
+    case "Backquote":
+      devMenu?.toggle();
       break;
     case "KeyM":
       session?.toggleMap();
@@ -69,7 +100,7 @@ window.addEventListener("keydown", (event) => {
     case "Escape":
       // Close whatever is open first; only then drop the target.
       if (session?.mapOpen) session.toggleMap();
-      else if (hud.bagOpen) hud.toggleBag();
+      else if (characterScreen.isOpen) characterScreen.setOpen(false);
       else session?.clearTarget();
       break;
   }
@@ -88,13 +119,32 @@ function cameraYaw(): number {
   return Math.atan2(-Math.cos(alpha), -Math.sin(alpha));
 }
 
-/** The caster's own training. Nobody else's business, so it is not in state. */
+/** Your own training, bag and gear. Nobody else's business, so not in state. */
 interface ProfileMessage {
-  affinity: number;
-  spells: SpellProficiency;
-  inventory: string[];
+  skills: Proficiency;
+  inventory: ItemKey[];
   equipment: Equipment;
   manaNow: number;
+}
+
+/** The last skills we heard, to spot whole-point rises worth a note. */
+let knownSkills: Proficiency | undefined;
+
+function skillLabel(skill: SkillId): string {
+  return (GEAR_SKILLS as Record<string, { name: string }>)[skill]?.name
+    ?? SPELLS[skill as keyof typeof SPELLS]?.name
+    ?? skill;
+}
+
+function applySkills(skills: Proficiency): void {
+  if (knownSkills) {
+    for (const [skill, value] of Object.entries(skills) as [SkillId, number][]) {
+      const before = Math.floor(knownSkills[skill] ?? 0);
+      if (Math.floor(value) > before) hud.note(`${skillLabel(skill)} ${Math.floor(value)}`);
+    }
+  }
+  knownSkills = { ...skills };
+  hud.setSkills(skills);
 }
 
 /** What the server sends when a player steps into a Gate. */
@@ -119,6 +169,7 @@ async function main(): Promise<void> {
 
   const account = new AccountClient(HTTP_ENDPOINT, health.realmId);
   const character = await showTitleScreen(account);
+  characterScreen.setName(character.name);
 
   const client = new Client(WS_ENDPOINT);
   // What actually authorises the join. The room's static onAuth verifies this
@@ -134,12 +185,7 @@ async function main(): Promise<void> {
 
   enter(client, joined, getOstra(character.ostraId));
 
-  world.engine.runRenderLoop(() => {
-    // Mid-transfer there is no session; keep drawing so the canvas doesn't
-    // freeze on the last frame while the new room connects.
-    if (session) session.frame(performance.now());
-    else world.scene.render();
-  });
+  world.engine.runRenderLoop(() => frame(performance.now()));
 
   if (import.meta.env.DEV) {
     // Poking at live netcode state from the console beats adding a print
@@ -152,10 +198,26 @@ async function main(): Promise<void> {
         audio,
         get room() { return room; },
         get session() { return session; },
-        frame: (now: number) => session?.frame(now),
+        characterScreen,
+        frame,
+        devMenu,
+        /** Scatter one item of every rarity around you (dev server only).
+         *  A `spread` under 1.4 m drops them straight into the bag. */
+        loot: (level?: number, spread?: number) => room?.send("dev", { cmd: "scatter", level, spread }),
       },
     });
   }
+}
+
+/** One frame of everything: the world, then the character screen, which
+ *  projects through the view the world was just drawn with. */
+function frame(now: number): void {
+  // Mid-transfer there is no session; keep drawing so the canvas doesn't
+  // freeze on the last frame while the new room connects.
+  if (session) session.frame(now);
+  else world.scene.render();
+  characterScreen.update(now, world.scene, canvas, session?.selfRig());
+  devMenu?.update(now);
 }
 
 /** Wire the client up to an Ostra it has just joined. */
@@ -169,22 +231,33 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   hud.setStatus("connected");
   hud.buildAbilityBar();
 
-  // Affinity and per-spell proficiency are private to this player, so they
-  // arrive as a message rather than in replicated state. Asked for rather than
-  // pushed: a send from the room's onJoin would race this handler being
-  // registered, which is the same trap the character id fell into.
+  // Training, bag and gear are private to this player, so they arrive as a
+  // message rather than in replicated state. Asked for rather than pushed: a
+  // send from the room's onJoin would race this handler being registered,
+  // which is the same trap the character id fell into.
   next.onMessage("profile", (payload: ProfileMessage) => {
-    hud.setProfile(payload.affinity, payload.spells);
-    hud.setInventory(payload.inventory ?? [], payload.equipment ?? {});
+    applySkills(payload.skills ?? {});
+    characterScreen.setProfile({
+      skills: payload.skills ?? {},
+      inventory: payload.inventory ?? [],
+      equipment: payload.equipment ?? {},
+    });
+    hud.setPower(characterScreen.power);
   });
-  next.onMessage("picked", (payload: { itemId: string }) => {
-    hud.flash(`Picked up ${getItem(payload.itemId)?.name ?? "something"}`);
+  next.onMessage("skills", (payload: { skills: Proficiency }) => {
+    applySkills(payload.skills ?? {});
+    characterScreen.setSkills(payload.skills ?? {});
+    hud.setPower(characterScreen.power);
+  });
+  next.onMessage("picked", (payload: { item: ItemKey }) => {
+    const item = describeItem(payload.item);
+    hud.flash(`Picked up ${item?.name ?? "something"}`, item ? rarityHex(item.rarity) : undefined);
     audio.play("pickup");
   });
   next.onMessage("pickupFailed", () => hud.flash("Your pack is full."));
+  next.onMessage("bagFull", () => hud.flash("No room in your pack for that."));
 
-  hud.onEquip = (itemId) => next.send("equip", { itemId });
-  hud.onUnequip = (slot) => next.send("unequip", { slot });
+  sendToRoom = (type, payload) => next.send(type, payload);
   next.send("requestProfile");
 
   next.onMessage("gate", (payload: GateMessage) => {
@@ -220,6 +293,9 @@ async function travel(client: Client, payload: GateMessage): Promise<void> {
 
   const previous = room;
   try {
+    // Stepping through a Gate with your pack open closes it; the session's
+    // dispose puts the camera back.
+    characterScreen.setOpen(false);
     session?.dispose();
     session = undefined;
 

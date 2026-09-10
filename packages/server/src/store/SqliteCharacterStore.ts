@@ -2,16 +2,22 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
-  EQUIP_SLOTS,
-  isItemId,
-  ITEMS,
+  describeItem,
+  INVENTORY_SIZE,
+  isEquipSlot,
+  isGearSkill,
   isOstraId,
-  MIN_AFFINITY,
+  isSpellId,
   PLAYER_MAX_HEALTH,
+  sanitiseProficiency,
+  slotsFor,
   STARTING_OSTRA,
+  wear,
   type Equipment,
-  type SpellProficiency,
+  type ItemKey,
+  type Proficiency,
 } from "@mmo/shared";
+import { LEGACY_SLOTS, migrateItem } from "../loot.js";
 import type { CharacterPosition, CharacterRecord, CharacterStore } from "./CharacterStore.js";
 import type { AccountRecord, AccountStore } from "./AccountStore.js";
 
@@ -85,18 +91,29 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
       );
     }
 
-    if (!columns.has("affinity")) {
-      this.db.exec(
-        `ALTER TABLE characters ADD COLUMN affinity INTEGER NOT NULL DEFAULT ${MIN_AFFINITY}`,
-      );
-    }
+    // Databases from before accounts may still carry an `affinity` column: the
+    // innate ceiling that went when proficiency moved to one 0-1000 scale. It
+    // has a default, so inserts that no longer mention it still succeed, and
+    // nothing reads it. Left in place rather than dropped — a column nobody
+    // reads costs nothing, and a migration that deletes data should have a
+    // better reason than tidiness.
 
     if (!columns.has("spells")) {
-      // A JSON blob rather than a spell_proficiency table. It is small, always
-      // read and written whole, and never queried across characters — the
-      // three things that make a relational table worth its joins. Revisit if
-      // anything ever needs "who is best at Sunder".
       this.db.exec("ALTER TABLE characters ADD COLUMN spells TEXT NOT NULL DEFAULT '{}'");
+    }
+
+    if (!columns.has("skills")) {
+      // A JSON blob rather than a proficiency table. It is small, always read
+      // and written whole, and never queried across characters — the three
+      // things that make a relational table worth its joins. Revisit if
+      // anything ever needs "who is best at Sunder".
+      //
+      // It replaces `spells`, which held spell proficiency alone; spell ids are
+      // skill ids, so the old blob carries straight across. The old values
+      // were on a 0-100 scale and are kept as they are rather than multiplied
+      // up: under the new rules they are what a few hours of training earns.
+      this.db.exec("ALTER TABLE characters ADD COLUMN skills TEXT NOT NULL DEFAULT '{}'");
+      this.db.exec("UPDATE characters SET skills = spells");
     }
 
     if (!columns.has("inventory")) {
@@ -177,8 +194,8 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
     this.db.prepare(`
       INSERT INTO characters
         (id, realm_id, account_id, name, colour, ostra_id, x, y, z, yaw, health,
-         affinity, spells, inventory, equipment, created_at, last_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         skills, inventory, equipment, created_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       character.id,
       character.realmId,
@@ -191,8 +208,7 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
       character.z,
       character.yaw,
       character.health,
-      character.affinity,
-      JSON.stringify(character.spells),
+      JSON.stringify(character.skills),
       JSON.stringify(character.inventory),
       JSON.stringify(character.equipment),
       character.createdAt,
@@ -203,7 +219,7 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
   savePosition(realmId: string, characterId: string, position: CharacterPosition): void {
     this.db.prepare(`
       UPDATE characters
-         SET ostra_id = ?, x = ?, y = ?, z = ?, yaw = ?, health = ?, spells = ?,
+         SET ostra_id = ?, x = ?, y = ?, z = ?, yaw = ?, health = ?, skills = ?,
              inventory = ?, equipment = ?, last_seen_at = ?
        WHERE realm_id = ? AND id = ?
     `).run(
@@ -213,7 +229,7 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
       position.z,
       position.yaw,
       position.health,
-      JSON.stringify(position.spells),
+      JSON.stringify(position.skills),
       JSON.stringify(position.inventory),
       JSON.stringify(position.equipment),
       Date.now(),
@@ -235,43 +251,49 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
 }
 
 /** Hand-editing the database, or a half-written row, should cost a character
- *  their training — not their whole session. */
-function parseSpells(raw: unknown): SpellProficiency {
-  if (typeof raw !== "string" || raw.length === 0) return {};
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return {};
-    const result: Record<string, number> = {};
-    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof value === "number" && Number.isFinite(value)) result[key] = value;
-    }
-    return result as SpellProficiency;
-  } catch {
-    return {};
-  }
+ *  a skill — not their whole session. */
+function parseSkills(raw: unknown): Proficiency {
+  return sanitiseProficiency(parseJson(raw), (id) => isSpellId(id) || isGearSkill(id));
 }
 
-/** Only ids this build still knows survive a load — an item removed from the
- *  table should vanish from a bag, not crash the room that opens it. */
-function parseInventory(raw: unknown): string[] {
+/**
+ * Only keys this build can describe survive a load — a base removed from the
+ * table should vanish from a bag, not crash the room that opens it. Old fixed
+ * item ids are converted to their generated form here, on the way in.
+ */
+function parseInventory(raw: unknown): ItemKey[] {
   const parsed = parseJson(raw);
   if (!Array.isArray(parsed)) return [];
-  return parsed.filter((id): id is string => typeof id === "string" && isItemId(id));
+  return parsed
+    .map((value) => migrateItem(value))
+    .filter((key): key is ItemKey => key !== undefined)
+    .slice(0, INVENTORY_SIZE);
 }
 
-function parseEquipment(raw: unknown): Equipment {
+/**
+ * Worn gear, re-worn one piece at a time through the same `wear` the room uses,
+ * so a save can never describe a body the rules would not allow — a two-handed
+ * maul beside a shield, or a ring in the head slot. Whatever does not fit is
+ * returned as `spill` for the bag.
+ */
+function parseEquipment(raw: unknown): { equipment: Equipment; spill: ItemKey[] } {
   const parsed = parseJson(raw);
-  if (typeof parsed !== "object" || parsed === null) return {};
-  const result: Equipment = {};
-  for (const slot of EQUIP_SLOTS) {
-    const id = (parsed as Record<string, unknown>)[slot];
-    // The slot on the item must still match the slot it is stored under, or a
-    // renamed item could end up worn somewhere it was never meant to go.
-    if (typeof id === "string" && isItemId(id) && ITEMS[id]?.slot === slot) {
-      result[slot] = id;
-    }
+  let equipment: Equipment = {};
+  const spill: ItemKey[] = [];
+  if (typeof parsed !== "object" || parsed === null) return { equipment, spill };
+
+  for (const [storedSlot, value] of Object.entries(parsed as Record<string, unknown>)) {
+    const slot = isEquipSlot(storedSlot) ? storedSlot : LEGACY_SLOTS[storedSlot];
+    const key = migrateItem(value);
+    const item = key !== undefined ? describeItem(key) : undefined;
+    if (!slot || !item) continue;
+    const target = slotsFor(item).includes(slot) ? slot : slotsFor(item)[0]!;
+    const result = wear(equipment, item, target);
+    if (!result) continue;
+    equipment = result.next;
+    spill.push(...result.removed);
   }
-  return result;
+  return { equipment, spill };
 }
 
 function parseJson(raw: unknown): unknown {
@@ -301,6 +323,7 @@ function toAccount(row: Record<string, unknown>): AccountRecord {
 
 function toRecord(row: Record<string, unknown>): CharacterRecord {
   const ostraId = row["ostra_id"];
+  const { equipment, spill } = parseEquipment(row["equipment"]);
   return {
     id: String(row["id"]),
     realmId: String(row["realm_id"]),
@@ -316,10 +339,12 @@ function toRecord(row: Record<string, unknown>): CharacterRecord {
     yaw: Number(row["yaw"]),
     // A row written before these columns existed reads as null.
     health: Number(row["health"] ?? PLAYER_MAX_HEALTH),
-    affinity: Number(row["affinity"] ?? MIN_AFFINITY),
-    spells: parseSpells(row["spells"]),
-    inventory: parseInventory(row["inventory"]),
-    equipment: parseEquipment(row["equipment"]),
+    skills: parseSkills(row["skills"]),
+    // Anything the body could not hold goes back in the bag — even past its
+    // size, once: losing a worn item to a rules change would be worse than a
+    // briefly overfull pack.
+    inventory: [...parseInventory(row["inventory"]), ...spill],
+    equipment,
     createdAt: Number(row["created_at"]),
     lastSeenAt: Number(row["last_seen_at"]),
   };

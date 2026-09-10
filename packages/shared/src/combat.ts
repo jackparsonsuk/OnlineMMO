@@ -4,6 +4,15 @@
  * paints is the same arc the server tests against.
  */
 
+import {
+  critBonus,
+  HEALTH_PER_VIGOUR,
+  MANA_PER_SPIRIT,
+  MANA_REGEN_PER_SPIRIT,
+  recoveryMultiplier,
+  type StatTotals,
+} from "./stats.js";
+
 export const PLAYER_MAX_HEALTH = 100;
 export const PLAYER_MAX_MANA = 100;
 
@@ -61,6 +70,38 @@ export const ENEMY_RESPAWN_MS = 12_000;
 
 /** How long you lie dead before waking at the Ostra's spawn point. */
 export const PLAYER_RESPAWN_MS = 4_000;
+
+// --- what gear does to a body ---------------------------------------------------
+
+/**
+ * Each piece of heavy armour slows mana by this much.
+ *
+ * Heavy armour has to cost something, or everyone wears it: it rolls the most
+ * armour and the most Vigour. This is the price — a full suit of plate returns
+ * mana 30% slower — and it is why a caster wears cloth rather than just
+ * wearing cloth-coloured plate.
+ */
+export const HEAVY_MANA_REGEN_PENALTY = 0.05;
+
+export function maxHealthFor(totals: StatTotals): number {
+  return PLAYER_MAX_HEALTH + totals.vigour * HEALTH_PER_VIGOUR;
+}
+
+export function maxManaFor(totals: StatTotals): number {
+  return PLAYER_MAX_MANA + totals.spirit * MANA_PER_SPIRIT;
+}
+
+/** Mana per second, for this set of stats. */
+export function manaRegenFor(totals: StatTotals, heavyPieces: number, inCombat: boolean): number {
+  const base = (inCombat ? MANA_REGEN_PER_SECOND : MANA_REGEN_OUT_OF_COMBAT) + totals.spirit * MANA_REGEN_PER_SPIRIT;
+  const penalty = Math.max(0, 1 - HEAVY_MANA_REGEN_PENALTY * heavyPieces);
+  return base * penalty * recoveryMultiplier(totals.recovery);
+}
+
+/** Crit chance with this Critical rating. */
+export function critChanceFor(totals: StatTotals): number {
+  return CRIT_CHANCE + critBonus(totals.crit);
+}
 
 /**
  * Is `target` inside a wedge of reach `range` and width `arc`, centred on `yaw`?

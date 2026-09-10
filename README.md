@@ -30,8 +30,22 @@ one.
 | `npm run typecheck` | Type-checks all three packages |
 
 Controls: **WASD** move, **Shift** sprint (out of combat), **Space / 1 / 2 / 3**
-cast, **Tab** or click to target, **Esc** to let go, **M** map, **I** pack, drag
-to orbit, scroll to zoom, walk into a Gate ring to travel.
+cast, **Tab** or click to target, **Esc** to let go, **M** map, **I** (or **C**)
+character and pack, drag to orbit, scroll to zoom, walk into a Gate ring to
+travel.
+
+In development, **`` ` ``** (backtick) opens the dev menu: teleport by clicking
+the world map (the hint shows the coordinates, region and creature level under
+the cursor), to any named place, or through any Gate; heal, god mode (blows
+still land and train armour, but take nothing), set every skill at once; put an
+item of any rarity and level in the bag, scatter one of each, empty the bag;
+kill everything within 25 m (drops roll as normal); a far camera; hide the HUD
+for screenshots. `mmo.loot(level, spread)` in the console does the scatter.
+
+It is safe to leave in the code: the client only builds the menu in a
+development build, and the server only registers the `dev` message when
+`NODE_ENV` is not `production` — so no crafted message reaches it on a real
+server. Every cheat still goes through the server like any other intent.
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
@@ -298,20 +312,39 @@ Progression is use-based, from the vault:
 > Everyone has some amount of innate magical ability within them. **Like a
 > muscle the more you use magic the better you become, up to a set ceiling.**
 
-So there is no XP bar. Each spell has its own proficiency that rises **only on
-a landed cast** — casting at a wall would otherwise be training in the least
-interesting sense — and growth slows as it approaches your ceiling, so the last
-points cost far more casts than the first.
+So there is no XP bar. **Everything you can train has its own proficiency, on
+one scale from 0 to 1000** (`skills.ts`): each spell, each weight of armour,
+each family of weapon, shields, foci, and attunement for trinkets. Each rises
+only through use:
 
-`affinity` is that ceiling, rolled once at creation between 55 and 100 and never
-changed. The damage bonus scales against 100 rather than against your own
-ceiling, deliberately: someone born with 55 who maxes out should be weaker than
-someone born with 100 who maxes out, or the ceiling is just a slower bar.
+| Skill | Rises when |
+| --- | --- |
+| A spell | it lands |
+| Swords, axes, maces, daggers, staves, wands, foci | you land a blow with it in either hand |
+| Cloth, light, heavy armour | you are hit — each weight by the share of the six armour slots it covers |
+| Shields | you are hit with one raised |
+| Attunement | a spell that costs mana lands while you wear a neck, ring or sigil |
 
-Affinity and proficiency are private, so they travel as a message rather than in
-replicated state — and the client **asks** for them once its handlers are up
-rather than being pushed them from `onJoin`, which is the same race the
-character id fell into.
+Growth slows as it approaches **what the creature in front of you can teach**:
+`trainingCeiling` is its level × 10 + 25. A thousand points of Swords would
+otherwise be a thousand-odd blows against whatever lives by the Gate Circle;
+tying the ceiling to the creature means training climbs with the world, and 1000
+is only reachable against the highest levels. The last points against any one
+creature cost far more blows than the first — a muscle, not a progress bar.
+
+There used to be an innate `affinity`, rolled at creation between 55 and 100,
+that capped every spell. It went when the scale grew to 1000: a birth roll that
+caps every skill you will ever train reads as "this character is worse", not as
+flavour, and the creature ceiling already does the job of making the last
+points hard. Old spell proficiency (0–100) carries over as it was; under the new
+rules that is a few hours of training. Spell damage scales ×1 untrained to ×2.5
+at 1000.
+
+Proficiency is private, so it travels as a message rather than in replicated
+state — and the client **asks** for it once its handlers are up rather than
+being pushed it from `onJoin`, which is the same race the character id fell
+into. A small `skills` message follows every whole-point rise, and the HUD notes
+it in the corner.
 
 ### Difficulty by Ostra
 
@@ -319,7 +352,8 @@ Creatures scale per Ostra, so travel is a difficulty choice rather than a change
 of palette. Creature **level** stacks on top (`levelHealthScale`,
 `levelDamageScale`): there is no XP in this game, so a level is a warning, not a
 gate. On Terra it rises by one every 380 m from the Gate Circle, to 12 at the
-edge, and loot rarity tilts with it.
+edge. Item level, loot rarity, and how far a creature can train you all follow
+it.
 
 | Ostra | Creature damage | Creature health |
 | --- | --- | --- |
@@ -331,22 +365,127 @@ edge, and loot rarity tilts with it.
 
 Creatures drop gear. It lands where they fell, hovers as a faceted crystal
 coloured by rarity, and is picked up by walking over it — no key, because one
-less thing between killing something and being rewarded for it. Press **I** for
-the pack; click a carried item to wear it.
+less thing between killing something and being rewarded for it. Mythic and
+above also stand a pillar of light over themselves, visible across a fight.
 
-Three slots — weapon, armour, trinket — and three stats: flat `damage` added
-after proficiency scaling, plus `health` and `mana` added to your caps. Flat
-rather than percentages, so the numbers stay legible next to the ones already
-on screen ("+5 damage" against Strike's 18) instead of compounding into nonsense
-once there are more slots.
+### Items are generated, not listed
 
-**Gear is the fast axis, proficiency the slow one.** A lucky drop changes your
-numbers today; training a spell changes them over an evening. Keeping them
-separate means neither makes the other pointless — you cannot loot your way to a
-trained spell, and practice is no substitute for a better blade.
+An item is four numbers — `{ base, level, rarity, seed }`, stored and sent as a
+short key like `heavyHead.120.2.1k3j9a` — and **everything else is derived from
+them** by `describeItem` in `items.ts`, identically on both sides: its name, its
+stats, its line of history. That keeps an item small enough for a JSON column
+and a replicated string on the ground, gives effectively endless variety, and
+lets the client draw a full tooltip for something it was only ever sent the key
+of. Only the server rolls items (`packages/server/src/loot.ts` — the one place
+`Math.random` touches an item); the client only describes them. Derivation uses
+the integer hashes in `noise.ts`, so every engine agrees on every stat.
 
-Rarity odds are tilted by the Ostra's danger, so Barals pays better than Terra.
-Without that, a harder place is pure downside and nobody would go.
+A **base** is a kind of item: 18 armour pieces (three weights × head, body,
+legs, feet, hands, cloak), nine weapons (sword, greatsword, axe, greataxe, mace,
+maul, dagger, staff, wand), two off-hands (shield, focus), and neck, ring and
+sigil. Each says which skill it trains, which stats it tends to roll, and the
+nouns and materials its names are built from. A handful are **named** — the
+pre-generation items, kept by name because "Gatecutter" is worth finding in a
+way a generated sword never quite is — and five are **signatures**, one per
+creature, found nowhere else.
+
+**Names and lore** come from `itemNames.ts`, picked by the seed from fragments of
+the setting: the places on the Ostra table, the people of Daso and Fanshona, the
+creatures that actually roam. Rarer items get longer stories — a common gets one
+plain line, a rare an origin and a detail, mythic and above a coined name, an
+epithet and a history. The lore points at things a player can go and find.
+
+### Slots, rarity, stats
+
+Thirteen slots: head, neck, cloak, body, hands, two rings, legs, feet, weapon,
+off hand, sigil (the old "trinket"), and soul. Two-handed weapons and anything
+in the off hand exclude each other; daggers go in either hand. `wear()` is
+shared, so the client previews exactly what the server will do.
+
+| Rarity | Stats | Where from |
+| --- | --- | --- |
+| Common | 1 primary | anything |
+| Uncommon | 2 primaries, 1 secondary | anything |
+| Rare | 2 primaries, 2 secondaries | anything |
+| Mythic | 2 + 3, bigger budget | elites, dungeons, raids |
+| Legendary | 2 + 3, bigger still | elites (very rarely), dungeons, raids |
+| World | 2 + 4 | raids — and meant to be one in the realm |
+| Ostra | 2 + 4 | raids — and meant to belong to one Ostra |
+
+**Ordinary creatures stop at rare** (`SOURCE_ODDS` in `loot.ts`). A top tier any
+wolf might drop is not a top tier; mythic and up have to come from something
+that is itself rare. None of those sources exist yet, so for now the top of the
+table is only seen through the dev loot command.
+
+Four **primary** stats — **Might** (adds to Strike), **Focus** (adds to spells
+that cost mana), **Vigour** (health, 3 per point), **Spirit** (mana, and its
+return) — and four **secondaries**: **Critical**, **Recovery**, **Leech**, and
+**Armour**, which is mostly inherent to armour and shields. Items show flat
+numbers, deliberately — "+12 Might" stays legible next to Strike's 18 — and the
+character sheet shows what they are worth as percentages, with diminishing
+returns (`stats.ts`). Armour is measured against the **attacker's** level: the
+same breastplate turns a Risen's swing at the Gate Circle into a bruise and does
+much less at the edge of the world, or armour would be worth the same
+everywhere.
+
+The three armour weights are different builds, not different colours. Cloth
+rolls Focus and Spirit with a bigger budget and little armour; light rolls
+Might, Critical and Leech; heavy rolls the most armour and Might, and **each
+heavy piece slows mana by 5%** — heavy armour has to cost something or everyone
+wears it.
+
+**Power** is one number for "is this better": an item's stat budget, and the sum
+of what you wear (after effectiveness) for the character.
+
+### Item level and effectiveness
+
+Item level is on the proficiency scale: **creature level × 10**, a nudge for a
+dangerous Ostra, ±4 of spread, and a long upward tail — one drop in twelve is
+10–30 levels better, one in a hundred 40–120. That tail is what makes a drop
+worth looking at.
+
+An item wants **its level in its skill**. At or above it you get every point; below
+it the stats fall away linearly to 25% (`effectiveness` in `skills.ts`) — never
+nothing, or a lucky drop would be useless until you had trained for it. Nothing
+extra for being over-trained: a level-10 helm is simply weak next to level-300
+gear. So a lucky drop is better today, and training is what lets you have all
+of it.
+
+**Gear is the fast axis, proficiency the slow one**, and they now meet rather
+than merely coexisting: you cannot loot your way to a trained skill, practice is
+no substitute for a better blade, and the better blade asks you to practise.
+
+Rarity odds are tilted by the Ostra's danger and the creature's level, so
+Barals pays better than Terra. Without that, a harder place is pure downside and
+nobody would go.
+
+### The character screen
+
+**I** (or **C**) swings the camera round to face you and closes in, framed left
+of centre; the slots fly out of your body along lines tied to where each is
+worn — the helm to the head, a ring to each hand, the weapon to the blade — and
+the pack slides in from the right. It is the body you walk around in, not a
+portrait of it: the lines are re-projected from the rig's joints every frame, so
+they stay attached through the camera's swing, your idle sway, and any orbiting
+you do by dragging the empty space. Your facing is held still while the camera
+has moved, or looking at yourself would turn you round. While it is up, the
+near clip plane is pushed out and the grass at your feet is cut, because a low
+camera otherwise looks at your legs through a hedge.
+
+The tooltip shows what an item gives **you**, after your training, what it
+asks of you, and what wearing it would change — computed through the same
+`wear` and `characterStats` the server uses. Click to wear, drag onto a slot,
+right-click to choose a hand or destroy; click a worn item to take it off. The
+Skills tab lists every proficiency.
+
+### Old saves
+
+Characters from before gear was generated load with their fixed items converted
+(`migrateItem` in `loot.ts`): each old id becomes a generated item of a matching
+base and rarity at level 10–30, and the old weapon/armour/trinket slots become
+weapon/body/sigil. Worn gear is re-worn through `wear()` on load, so a save can
+never describe a body the rules would not allow; anything that does not fit
+goes back in the bag.
 
 A drop belongs to whoever earned it for 25 seconds — drawn small until the claim
 lapses, so you can see something fell and that it is not yet yours. Without it,
@@ -594,8 +733,16 @@ build next live in [TODO.md](TODO.md).
   needs a reverse proxy or a host that terminates it.
 - **SQLite means one process per realm.** The `CharacterStore` interface exists
   so Postgres can replace it; nothing else needs to change.
-- **No economy.** Items drop and are worn; nothing buys, sells, repairs or
-  trades them, and there is nowhere to store them beyond twelve carried slots.
+- **No economy.** Items drop, are worn, or are destroyed; nothing buys, sells,
+  repairs or trades them, and there is nowhere to store them beyond thirty
+  carried slots.
+- **The top of the loot table is unreachable.** Mythic and above need an elite,
+  a dungeon or a raid, and none exist yet. World items do not yet enforce
+  "one in the realm", Ostra items are not yet bound to an Ostra, and there are
+  no Souls to find.
+- **Gear does not change your body or your swing.** Weapon types train
+  separately but Strike is the same blade whatever you hold, and armour is not
+  drawn on the rig.
 - **No interest management.** Camps only exist near players, which keeps state
   small, but every active creature is still replicated to everyone in the
   room. With players spread across Terra that grows with the player count;

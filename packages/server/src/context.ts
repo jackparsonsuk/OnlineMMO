@@ -11,6 +11,12 @@ export interface ServerContext {
   /** Identifies this server ("realm" in MMO terms). Characters are scoped to it. */
   realmId: string;
   store: CharacterStore;
+  /**
+   * Development-only conveniences, like asking for a spread of loot to test
+   * the bag against. Never on in production: anything that conjures items is
+   * a cheat the moment a real player can reach it.
+   */
+  devTools: boolean;
 }
 
 let context: ServerContext | undefined;

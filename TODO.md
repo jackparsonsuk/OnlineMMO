@@ -55,12 +55,35 @@ design decision in README.md.
   creatures.
 - **Creature persistence.** Camps are never saved; a sleeping camp wakes fresh.
 
+## Loot and gear
+
+- **Weapons that change how you fight.** Each weapon family should reshape
+  Strike (a dagger fast and short, a maul slow and wide) and, with classes,
+  bring its own abilities — Guild Wars-style, class × weapon. Weapon skills
+  already train separately; only the swing is missing. Needs the worn weapon
+  replicated so everyone draws the right swing.
+- **Somewhere for mythic and up to come from.** Rare named elites in the wilds
+  first (`source: "elite"` in `loot.ts` is ready), then dungeons and raids.
+- **World items that are really one in the realm.** Needs a realm-wide registry
+  of which World bases exist and who holds them, checked at drop time.
+- **Ostra items bound to their Ostra.** Name them after it (the name already
+  says "Shard of…") and make them stronger there.
+- **Souls.** Very rare; one slot that affects everything else; grows with the
+  player; replacing one costs what it had become. The slot is on the screen,
+  empty.
+- **Classes** gating which weights and weapons you can wear well.
+- **Gear drawn on the body.** Helms, plate, the actual weapon in hand.
+- **Sort and filter the pack**, and compare a ring against the weaker of the two
+  you wear rather than whichever slot is first.
+- **Balance pass.** Budgets, Vigour's health, armour's curve and the training
+  ceiling are first-pass numbers in `items.ts`, `stats.ts` and `skills.ts`.
+
 ## Progression and economy
 
 - **Spells from scrolls and books.** The lore says the Library Ostracon holds
   them all; here everyone starts with three.
 - **An economy.** Vendors in Daso and Fanshona, a currency, trading between
-  players, and somewhere to store more than twelve items.
+  players, and somewhere to store more than thirty items.
 - **Quests from villagers.** They stand still and say one line.
 - **Grouping and chat.** No way to form a party or talk.
 

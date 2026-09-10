@@ -20,7 +20,7 @@ import {
   type SceneryItem,
 } from "@mmo/shared";
 import { flatMaterial } from "./lowpoly.js";
-import { CHUNK, chunkKey, type ChunkListener } from "./terrain.js";
+import { CHUNK, chunkKey, type ChunkListener, unkey } from "./terrain.js";
 
 /**
  * Trees, boulders and grass for the streamed ground.
@@ -248,6 +248,8 @@ export class SceneryStreamer implements ChunkListener {
   private readonly pools: Record<PoolKind, InstancePool>;
   private readonly grassChunks = new Set<number>();
   private readonly loaded = new Set<number>();
+  /** A circle no grass grows in — see `setClearing`. */
+  private clearing: { x: number; z: number; radius: number } | undefined;
   private readonly composed = new Matrix();
   private readonly scale = new Vector3();
   private readonly position = new Vector3();
@@ -298,6 +300,29 @@ export class SceneryStreamer implements ChunkListener {
     this.loaded.delete(key);
     for (const pool of Object.values(this.pools)) pool.delete(key);
     this.grassChunks.delete(key);
+  }
+
+  /**
+   * Keep grass out of a circle, or stop keeping it out.
+   *
+   * The character screen puts the camera low and close, where a tuft at your
+   * feet stands in front of your legs like a hedge. Cutting the tufts nearest
+   * you — and only those — keeps the meadow and clears the view. The chunks it
+   * touches are regrown on the next `update`, which is the same path a chunk
+   * coming into range takes.
+   */
+  setClearing(clearing: { x: number; z: number; radius: number } | undefined): void {
+    const affected = [this.clearing, clearing];
+    this.clearing = clearing;
+    for (const circle of affected) {
+      if (!circle) continue;
+      for (const key of [...this.grassChunks]) {
+        const { cx, cz } = unkey(key);
+        const nearX = Math.max(cx * CHUNK, Math.min(circle.x, (cx + 1) * CHUNK));
+        const nearZ = Math.max(cz * CHUNK, Math.min(circle.z, (cz + 1) * CHUNK));
+        if (Math.hypot(nearX - circle.x, nearZ - circle.z) <= circle.radius) this.grassChunks.delete(key);
+      }
+    }
   }
 
   /** Grow and cut grass around (x, z), and push any changes to the GPU. */
@@ -380,6 +405,8 @@ export class SceneryStreamer implements ChunkListener {
       if (settlements.some((s) => Math.hypot(x - s.x, z - s.z) < s.radius * 0.72)) continue;
       if (ostra.obstacles.some((o) => Math.hypot(x - o.x, z - o.z) < o.radius + 0.6)) continue;
       if (ostra.gates.some((g) => Math.hypot(x - g.x, z - g.z) < GATE_RADIUS + 1.2)) continue;
+      const clearing = this.clearing;
+      if (clearing && Math.hypot(x - clearing.x, z - clearing.z) < clearing.radius) continue;
       if (slopeAt(x, z, ostra.terrain) > 0.55) continue;
       const y = heightAt(x, z, ostra.terrain);
       if (y > snowLine) continue;

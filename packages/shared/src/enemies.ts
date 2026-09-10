@@ -105,9 +105,9 @@ export interface EnemyArchetype {
   idleSeconds: number;
   /** Chance a kill drops something at all. */
   dropChance: number;
-  /** A rare item only this creature drops, and the odds, on top of the
-   *  ordinary pool. Gives each one a reason to be hunted. */
-  signature?: { itemId: string; chance: number };
+  /** A rare item only this creature drops (an `ItemBase` id), and the odds,
+   *  on top of the ordinary pool. Gives each one a reason to be hunted. */
+  signature?: { base: string; chance: number };
 }
 
 export const ENEMY_ARCHETYPES: Record<EnemyKind, EnemyArchetype> = {
@@ -202,7 +202,7 @@ export const ENEMY_ARCHETYPES: Record<EnemyKind, EnemyArchetype> = {
     colour: 0x7d7f86,
     idleSeconds: 1.8,
     dropChance: 0.3,
-    signature: { itemId: "greywolfMantle", chance: 0.05 },
+    signature: { base: "greywolfMantle", chance: 0.05 },
   },
 
   /**
@@ -235,7 +235,7 @@ export const ENEMY_ARCHETYPES: Record<EnemyKind, EnemyArchetype> = {
     colour: 0x6e4a33,
     idleSeconds: 2.2,
     dropChance: 0.4,
-    signature: { itemId: "tuskCharm", chance: 0.06 },
+    signature: { base: "tuskCharm", chance: 0.06 },
   },
 
   /**
@@ -266,7 +266,7 @@ export const ENEMY_ARCHETYPES: Record<EnemyKind, EnemyArchetype> = {
     colour: 0x56703f,
     idleSeconds: 2.8,
     dropChance: 0.35,
-    signature: { itemId: "fenwaterPhial", chance: 0.06 },
+    signature: { base: "fenwaterPhial", chance: 0.06 },
   },
 
   /**
@@ -298,7 +298,7 @@ export const ENEMY_ARCHETYPES: Record<EnemyKind, EnemyArchetype> = {
     colour: 0xff7a2e,
     idleSeconds: 0.9,
     dropChance: 0.35,
-    signature: { itemId: "emberheart", chance: 0.05 },
+    signature: { base: "emberheart", chance: 0.05 },
   },
 
   /**
@@ -331,7 +331,7 @@ export const ENEMY_ARCHETYPES: Record<EnemyKind, EnemyArchetype> = {
     colour: 0x8a8577,
     idleSeconds: 4,
     dropChance: 0.85,
-    signature: { itemId: "cairnstoneMaul", chance: 0.15 },
+    signature: { base: "cairnstoneMaul", chance: 0.15 },
   },
 };
 

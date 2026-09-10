@@ -99,8 +99,9 @@ export type Enemy = SchemaType<typeof Enemy>;
  * can see it — that is the point of loot dropping where a thing died.
  */
 export const GroundItem = schema({
-  /** An `ItemDefinition` id. */
-  itemId: t.string().default(""),
+  /** An `ItemKey`. The whole item: every client derives its name, rarity and
+   *  stats from this alone. */
+  item: t.string().default(""),
   /** Session id of whoever earned it, while the claim lasts; empty once it is
    *  free for anyone. Replicated so the client can dim what isn't yours. */
   claimedBy: t.string().default(""),

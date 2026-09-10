@@ -63,7 +63,7 @@ const allowedOrigins = (process.env["ALLOWED_ORIGINS"] ?? (isProduction ? "" : "
   .filter((origin) => origin.length > 0);
 
 const store = new SqliteCharacterStore(databaseFile);
-setServerContext({ realmId, store });
+setServerContext({ realmId, store, devTools: !isProduction });
 
 configureAuth(process.env["JWT_SECRET"], isProduction);
 
@@ -173,7 +173,6 @@ app.get("/characters", handle(async (req, res) => {
       name: character.name,
       ostraId: character.ostraId,
       colour: character.colour,
-      affinity: character.affinity,
     }));
   res.json({ characters });
 }));

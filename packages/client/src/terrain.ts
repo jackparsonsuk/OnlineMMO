@@ -514,6 +514,6 @@ export function chunkKey(cx: number, cz: number): number {
   return (cx + 32768) * 65536 + (cz + 32768);
 }
 
-function unkey(key: number): { cx: number; cz: number } {
+export function unkey(key: number): { cx: number; cz: number } {
   return { cx: Math.floor(key / 65536) - 32768, cz: (key % 65536) - 32768 };
 }

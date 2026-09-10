@@ -18,7 +18,7 @@ import {
   EnemyState,
   getArchetype,
   INTERP_DELAY_MS,
-  getItem,
+  describeItem,
   type GroundItem,
   heightAt,
   isEnemyKind,
@@ -82,6 +82,20 @@ export interface OstraSession {
   clearTarget(): boolean;
   toggleMap(): void;
   readonly mapOpen: boolean;
+  /**
+   * The character screen's camera: swing round to face your own body and
+   * close in, framed `shift` (a fraction of the screen's width) to the left
+   * so the pack has room on the right. Closing swings back to exactly where
+   * the camera was.
+   */
+  setPortrait(open: boolean, shift: number): void;
+  /** Your own body, for the character screen to draw its lines to. */
+  selfRig(): Rig | undefined;
+  /** Where your body is drawn this frame. */
+  selfPosition(): { x: number; y: number; z: number };
+  /** Development: open the world map and hand the next click to `picker`. */
+  pickOnMap(picker: ((x: number, z: number) => void) | undefined): void;
+  readonly picking: boolean;
   dispose(): void;
   /** Render internals, for the console and for tests. Reading a pose two ways
    *  (predicted vs drawn) is how the yaw seam bug was pinned down. */
@@ -121,6 +135,48 @@ const AIM_ASSIST_SLACK = 2.5;
  *  where you are looking; a Voidbolt, much less. */
 const SOFT_AIM_MELEE = 1.3;
 const SOFT_AIM_RANGED = 0.3;
+
+/** The character screen looks at you from this far off your facing, in
+ *  radians — a three-quarter view reads a blocky body far better than face-on. */
+const PORTRAIT_ANGLE = 0.42;
+/** A little above eye level: low enough to read as looking AT you, high
+ *  enough that the grass at your feet does not stand in front of your legs. */
+const PORTRAIT_BETA = 1.2;
+const PORTRAIT_RADIUS = 3.6;
+/** Aim a little above the waist, so the head is not cut off at the top. */
+const PORTRAIT_LIFT = 0.22;
+const PORTRAIT_OPEN_MS = 560;
+const PORTRAIT_CLOSE_MS = 440;
+/**
+ * While the screen is up, nothing nearer the camera than this far short of
+ * your body is drawn. Low and close, the camera otherwise looks through a
+ * curtain of grass blades a metre tall on screen; clipping them is cheaper
+ * and more honest than hiding scenery. The blade held out in front reaches
+ * about 0.7 m, so this leaves it whole.
+ */
+const PORTRAIT_CLEARANCE = 0.85;
+/** ...and no grass grows this close to your feet. */
+const PORTRAIT_CLEARING = 1.5;
+
+interface CameraPose {
+  alpha: number;
+  beta: number;
+  radius: number;
+  /** Metres the camera's target is raised above the body's usual follow point. */
+  lift: number;
+  /** Fraction of the screen width the body is framed left of centre. */
+  shift: number;
+}
+
+/** Shortest signed difference between two angles. */
+function angleDelta(from: number, to: number): number {
+  const d = (to - from) % (Math.PI * 2);
+  return d > Math.PI ? d - Math.PI * 2 : d < -Math.PI ? d + Math.PI * 2 : d;
+}
+
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
 
 /** Kinds of blood, by creature. */
 const IMPACT_COLOUR: Record<EnemyKind, ShardColour> = {
@@ -243,6 +299,113 @@ export function createSession(
   let shakeUntil = 0;
   let shakeStrength = 0;
 
+  // --- the character screen's camera ---------------------------------------------
+  let portraitOpen = false;
+  /**
+   * Your facing while the character screen has the camera. Facing normally
+   * reads the camera, so swinging it round to look at you would turn you to
+   * face away from it — and orbiting to admire your gear would spin you like
+   * a turntable. Held until the camera is all the way back.
+   */
+  let portraitYaw: number | undefined;
+  let returnPose: CameraPose | undefined;
+  let cameraTween: { from: CameraPose; to: CameraPose; start: number; duration: number; done?: () => void } | undefined;
+  let cameraLift = 0;
+  let cameraShift = 0;
+  const baseNear = world.camera.minZ;
+  const facingYaw = (): number => portraitYaw ?? cameraYaw();
+
+  function currentPose(): CameraPose {
+    const camera = world.camera;
+    return { alpha: camera.alpha, beta: camera.beta, radius: camera.radius, lift: cameraLift, shift: cameraShift };
+  }
+
+  function setPortrait(open: boolean, shift: number): void {
+    if (open === portraitOpen) return;
+    portraitOpen = open;
+    const now = performance.now();
+
+    if (open) {
+      // Reopened mid-close: keep the pose we were already returning to.
+      if (portraitYaw === undefined || !returnPose) {
+        portraitYaw = cameraYaw();
+        returnPose = { ...currentPose(), lift: 0, shift: 0 };
+      }
+      // The near clip handles grass between the lens and you; this handles
+      // the tufts you are standing in. Where you stood when it opened: walking
+      // with the screen up is rare, and chasing you with it would regrow a
+      // chunk every step.
+      const self = selfPosition();
+      world.scenery?.setClearing({ x: self.x, z: self.z, radius: PORTRAIT_CLEARING });
+      // An ArcRotateCamera sits at target + r(cos α, ·, sin α) in x/z, and a
+      // body faces (sin yaw, cos yaw); matching the two puts it in front.
+      const front = Math.atan2(Math.cos(portraitYaw), Math.sin(portraitYaw));
+      cameraTween = {
+        from: currentPose(),
+        to: { alpha: front + PORTRAIT_ANGLE, beta: PORTRAIT_BETA, radius: PORTRAIT_RADIUS, lift: PORTRAIT_LIFT, shift },
+        start: now,
+        duration: PORTRAIT_OPEN_MS,
+      };
+      return;
+    }
+
+    if (!returnPose) return;
+    cameraTween = {
+      from: currentPose(),
+      to: returnPose,
+      start: now,
+      duration: PORTRAIT_CLOSE_MS,
+      done: () => {
+        portraitYaw = undefined;
+        returnPose = undefined;
+        world.scenery?.setClearing(undefined);
+      },
+    };
+  }
+
+  /** Advance the camera tween. Called once the follow target is set. */
+  function stepPortrait(now: number): void {
+    if (!cameraTween) return;
+    const camera = world.camera;
+    const { from, to } = cameraTween;
+    const t = Math.min(1, (now - cameraTween.start) / cameraTween.duration);
+    const e = easeInOutCubic(t);
+    camera.alpha = from.alpha + angleDelta(from.alpha, to.alpha) * e;
+    camera.beta = from.beta + (to.beta - from.beta) * e;
+    camera.radius = from.radius + (to.radius - from.radius) * e;
+    cameraLift = from.lift + (to.lift - from.lift) * e;
+    cameraShift = from.shift + (to.shift - from.shift) * e;
+    if (t >= 1) {
+      const done = cameraTween.done;
+      cameraTween = undefined;
+      done?.();
+    }
+  }
+
+  /**
+   * Push the near clip plane out towards the body while the screen is up.
+   * Every frame rather than only during the tween, so scrolling in while
+   * admiring your gear moves it too. It follows the lift's curve, so it is
+   * fully back at the default by the time the camera is.
+   */
+  function applyPortraitNear(): void {
+    const camera = world.camera;
+    const amount = cameraLift / PORTRAIT_LIFT;
+    const near = amount <= 0
+      ? baseNear
+      : baseNear + (Math.max(baseNear, camera.radius - PORTRAIT_CLEARANCE) - baseNear) * amount;
+    if (camera.minZ !== near) camera.minZ = near;
+  }
+
+  /** The screen-space offset that frames the body left of centre, in the
+   *  view-space units `targetScreenOffset` takes. */
+  function portraitOffsetX(): number {
+    if (cameraShift === 0) return 0;
+    const camera = world.camera;
+    const aspect = world.engine.getAspectRatio(camera);
+    return -cameraShift * camera.radius * Math.tan(camera.fov / 2) * aspect;
+  }
+
   /** Dropped items currently on the floor. */
   const groundMeshes = new Map<string, TransformNode>();
   const nametags = new Nametags(document.getElementById("nametags") as HTMLElement);
@@ -343,7 +506,7 @@ export function createSession(
   /** Creatures in front of you, most-in-front first. */
   function targetCandidates(): string[] {
     const self = selfPosition();
-    const heading = cameraYaw();
+    const heading = facingYaw();
     const scored: Array<{ id: string; score: number }> = [];
     room.state.enemies.forEach((enemy: Enemy, id: string) => {
       if (enemy.state === EnemyState.Dead) return;
@@ -389,7 +552,7 @@ export function createSession(
    * aiming at the picture is aiming at the truth.
    */
   function aimFor(spell: Spell | undefined): number {
-    const camera = cameraYaw();
+    const camera = facingYaw();
     if (!spell || spell.arc >= Math.PI * 2 || !selfPlayer) return camera;
     const self = selfPosition();
 
@@ -571,7 +734,7 @@ export function createSession(
   });
 
   const offGroundAdd = $(room.state).ground.onAdd((dropped: GroundItem, groundId: string) => {
-    const item = getItem(dropped.itemId);
+    const item = describeItem(dropped.item);
     if (!item) return;
     const mesh = createGroundItemMesh(scene, item.rarity);
     mesh.position.set(dropped.x, dropped.y + 0.62, dropped.z);
@@ -770,6 +933,10 @@ export function createSession(
     // first frame, not a few dozen frames later.
     world.terrain?.prime(payload.x, payload.z, 140);
   });
+  // The dev menu's teleport lands the same way.
+  const offTeleported = room.onMessage("teleported", (payload: { x: number; z: number }) => {
+    world.terrain?.prime(payload.x, payload.z, 140);
+  });
 
   // --- fixed-step input ---------------------------------------------------
   // The server advertises its own step rate through the join handshake; using
@@ -799,7 +966,7 @@ export function createSession(
       const slot = keyboard.castSlot();
       input.data.moveX = axes.x;
       input.data.moveZ = axes.z;
-      input.data.yaw = cameraYaw();
+      input.data.yaw = facingYaw();
       input.data.cast = slot;
       input.data.aim = aimFor(slot > 0 ? SPELLS[SPELL_IDS[slot - 1]!] : undefined);
       input.data.sprint = keyboard.sprinting();
@@ -938,8 +1105,9 @@ export function createSession(
           // the correction smoothing is linear and angle-blind, so any turn
           // across the 0/2π seam gets lerped the LONG way round, whipping the
           // body through a half-turn to face the camera and back. Reading the
-          // camera also removes a frame of turn latency.
-          ? cameraYaw()
+          // camera also removes a frame of turn latency. (Held still while
+          // the character screen has the camera; see `portraitYaw`.)
+          ? facingYaw()
           : predict.value(player, "yaw");
 
       const dead = player.health === 0;
@@ -1084,7 +1252,9 @@ export function createSession(
       hud.setCooldowns(now, nextCastAt);
       // Follow the *rendered* position, not the raw schema one, or the camera
       // judders by exactly the correction the reconciler is smoothing out.
-      world.camera.target.set(x, y + PLAYER_HALF, z);
+      stepPortrait(now);
+      applyPortraitNear();
+      world.camera.target.set(x, y + PLAYER_HALF + cameraLift, z);
       // After the target moves, so the ray starts from where the player
       // actually is this frame.
       updateCameraCollision(world);
@@ -1103,17 +1273,19 @@ export function createSession(
         }
       }
       hud.setSpeech(closest?.name, closest?.line);
-      cartographer.update(x, z, cameraYaw(), blips, targetBearing);
+      cartographer.update(x, z, facingYaw(), blips, targetBearing);
     }
 
     // Camera shake: a jolt in screen space, decaying. Moves the view, never
     // the camera's target — the follow and the wall test stay exact.
+    // The character screen's framing rides in the same offset, underneath.
     const shaking = now < shakeUntil;
+    const framing = portraitOffsetX();
     if (shaking) {
       const s = shakeStrength * ((shakeUntil - now) / 200);
-      world.camera.targetScreenOffset.set((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
-    } else if (world.camera.targetScreenOffset.x !== 0 || world.camera.targetScreenOffset.y !== 0) {
-      world.camera.targetScreenOffset.set(0, 0);
+      world.camera.targetScreenOffset.set(framing + (Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
+    } else if (world.camera.targetScreenOffset.x !== framing || world.camera.targetScreenOffset.y !== 0) {
+      world.camera.targetScreenOffset.set(framing, 0);
       shakeStrength = 0;
     }
 
@@ -1157,6 +1329,8 @@ export function createSession(
     offDamage();
     offEvade();
     offRespawned();
+    offTeleported();
+    cartographer.dispose();
     scene.onPointerObservable.remove(pointer);
     reconciler?.dispose();
     predict.dispose();
@@ -1171,6 +1345,15 @@ export function createSession(
     groundMeshes.clear();
     effects.dispose();
     combatText.clear();
+    // Leaving mid-portrait (a Gate, say) puts the camera straight back where
+    // it was, rather than handing the next Ostra a camera pointed at your face.
+    if (returnPose) {
+      world.camera.alpha = returnPose.alpha;
+      world.camera.beta = returnPose.beta;
+      world.camera.radius = returnPose.radius;
+    }
+    world.camera.minZ = baseNear;
+    world.scenery?.setClearing(undefined);
     world.camera.targetScreenOffset.set(0, 0);
     hud.setDead(false);
     hud.setTarget(undefined);
@@ -1190,6 +1373,11 @@ export function createSession(
     },
     toggleMap: () => cartographer.toggleWorld(),
     get mapOpen() { return cartographer.worldOpen; },
+    setPortrait,
+    selfRig: () => players.get(room.sessionId)?.rig,
+    selfPosition,
+    pickOnMap: (picker) => cartographer.setPicker(picker),
+    get picking() { return cartographer.picking; },
     dispose,
     debug: { predict, meshes, colliders, input, target: () => target },
   };
