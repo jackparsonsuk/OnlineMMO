@@ -304,7 +304,7 @@ export const DASO: SettlementDefinition = {
       colour: 0x5a5550,
     },
     {
-      name: "Brenna, woodcutter",
+      id: "brenna", name: "Brenna, woodcutter",
       line: "Three trees a day, every day. The forest doesn't notice.",
       ...daso.at(7, -3),
       yaw: looking(daso, 7, -3, 0, 0),

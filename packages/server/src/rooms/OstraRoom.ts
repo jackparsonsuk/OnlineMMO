@@ -1406,6 +1406,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         const quest = getQuest(questId);
         quest?.objectives.forEach((objective, i) => {
           if (objective.kind !== "visit" || (progress[i] ?? 0) >= 1) return;
+          if ((objective.ostra ?? "terra") !== this.ostra.id) return;
           if (Math.hypot(player.x - objective.x, player.z - objective.z) > objective.radius) return;
           progress[i] = 1;
           changed = true;

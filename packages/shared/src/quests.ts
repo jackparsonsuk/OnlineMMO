@@ -31,13 +31,17 @@ import type { EnemyKind } from "./enemies.js";
 import { basesFor, encodeItem, type ItemKey, type Rarity } from "./items.js";
 import { LEVEL_SCALE, levelXpScale, MAX_LEVEL, xpToNext } from "./levels.js";
 import { hash2 } from "./noise.js";
+import type { OstraId } from "./ostras.js";
 import { SETTLEMENTS, type SettlementDefinition, type VillagerDefinition } from "./settlements.js";
 
 export type QuestObjective =
   | { kind: "kill"; creature: EnemyKind; count: number; label: string }
   | { kind: "slay"; elite: string; label: string }
   | { kind: "collect"; from: EnemyKind; count: number; chance: number; label: string }
-  | { kind: "visit"; x: number; z: number; radius: number; label: string };
+  /** In `ostra` — Terra when absent. Every small Ostra and dungeon is built
+   *  round its own origin, so coordinates alone would put the Gate Circle in
+   *  the middle of the barrow's pillared hall. */
+  | { kind: "visit"; x: number; z: number; radius: number; label: string; ostra?: OstraId };
 
 export interface QuestRewards {
   gold: number;
@@ -145,6 +149,44 @@ export const QUESTS: Record<string, QuestDefinition> = {
     complete: "Nothing at all? No blood, no cart-tracks off the road? ...Somehow that's worse. Thank you for looking.",
     objectives: [{ kind: "visit", x: -700, z: -62, radius: 14, label: "Reach the Westroad Stone" }],
     rewards: { gold: 10, xpShare: 0.4, choices: 2, rarity: "common" },
+  },
+  // The road east: Daso's second round of work, pitched past its first so
+  // there is something between the town's errands and the barrow. Each one
+  // walks you further out of the Westwood and into the Heartland, where the
+  // creatures are the levels the barrow wants.
+  "brenna-risen": {
+    id: "brenna-risen", title: "Dead Wood", giver: "brenna", turnIn: "brenna", level: 5,
+    requires: [],
+    summary: "Put down Risen in the woods east of Daso, towards the Westroad, for Brenna.",
+    offer: "I felled an oak on the east ridge yesterday and something climbed out of the roots after it. "
+      + "Grey, slow, and it knew I was there. There's more of them out towards the road. Eight, and I'll cut there again.",
+    progress: "Still hearing them out past the ridge. They don't sleep, you know. Neither do I, now.",
+    complete: "Eight. Right. I'll take the east ridge back tomorrow — with you in earshot, if it's the same to you.",
+    objectives: [{ kind: "kill", creature: "zombie", count: 8, label: "Risen put down" }],
+    rewards: { gold: 16, xpShare: 0.7, choices: 2, rarity: "uncommon" },
+  },
+  "ilda-crates": {
+    id: "ilda-crates", title: "Dragged into the Trees", giver: "ilda", turnIn: "ilda", level: 5,
+    requires: ["ilda-westroad"],
+    summary: "Recover Daso's crates from the Void Spiders that dragged them off the Westroad.",
+    offer: "The carts that do get through are coming in light. Spiders — they web the crates and drag them off the road "
+      + "like they were flies. Some are still whole. Bring back five and I'll know what we've lost.",
+    progress: "Look where the webs are thickest. They don't take them far.",
+    complete: "Nails, salt, and the smith's iron. Mott'll be glad. Did you see anything of the driver out there? ...No. Thank you.",
+    objectives: [{ kind: "collect", from: "spider", count: 5, chance: 0.45, label: "Webbed crates recovered" }],
+    rewards: { gold: 18, xpShare: 0.7, choices: 3, rarity: "uncommon" },
+  },
+  "herla-circle": {
+    id: "herla-circle", title: "Nobody from the Gate", giver: "herla", turnIn: "herla", level: 6,
+    requires: ["herla-wolves"],
+    summary: "Walk the Westroad east to the Gate Circle, and tell Herla why nobody comes from it.",
+    offer: "Since the Gates came back on, I've had someone through the door every week who came from the Circle. "
+      + "Not this month. Walk the Westroad east to the end — the standing stones, you can't miss them — and tell me why.",
+    progress: "All the way east on the Westroad. The stones are taller than the trees.",
+    complete: "The dead around the stones, and spiders in the grass. Well — that's why. Go carefully out there; "
+      + "and if you're going under the barrow for Basan, go carefully there too.",
+    objectives: [{ kind: "visit", x: 0, z: -9, radius: 18, label: "Reach the Gate Circle" }],
+    rewards: { gold: 20, xpShare: 0.9, choices: 3, rarity: "uncommon" },
   },
   // The first dungeon. The sound Basan hears is the vault's story, and it
   // does not end here: the King is what is in the barrow, not what is
