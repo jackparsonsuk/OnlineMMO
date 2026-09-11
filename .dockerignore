@@ -4,5 +4,8 @@ node_modules
 **/dist-types
 data
 .git
-*.tsbuildinfo
+# Every package's, not just the root's: a stale build cache from this machine
+# convinces `tsc -b` in the image that shared is already built, so it skips
+# writing dist into the empty image and the server build finds no types.
+**/*.tsbuildinfo
 .env

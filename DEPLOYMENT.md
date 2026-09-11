@@ -70,6 +70,12 @@ fly deploy
 `fly.toml` already sets `auto_stop_machines = false`. Leave it that way — a
 suspended machine is a stopped world, and the simulation must keep ticking.
 
+Use the CLI rather than the dashboard's "Launch from GitHub": that path runs
+`flyctl launch plan propose`, which proposes its own settings over yours. App
+names are global on Fly — if `ostracon` is taken, change `app` in `fly.toml`.
+Fly mounts volumes owned by root; the image's entrypoint hands `/app/data` to
+the `node` user before starting, so the server can write its database.
+
 ## Option 3: A plain VPS with Docker
 
 Most control, most work: TLS, updates and restarts are yours.

@@ -41,11 +41,17 @@ RUN mkdir -p /app/data
 ENV DATABASE_FILE=/app/data/ostracon.db
 VOLUME ["/app/data"]
 
-# Don't run as root.
-USER node
+# Don't run the server as root — but start as root, because a mounted volume
+# arrives owned by root (Fly's always does), and a server that cannot write
+# its own database crash-loops at boot. The entrypoint hands the data
+# directory to `node` and then drops to it with su-exec before starting.
+RUN apk add --no-cache su-exec \
+ && printf '#!/bin/sh\nset -e\nchown -R node:node /app/data\nexec su-exec node "$@"\n' > /usr/local/bin/entrypoint \
+ && chmod +x /usr/local/bin/entrypoint
 
 EXPOSE 2567
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
   CMD node -e "fetch('http://127.0.0.1:2567/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
+ENTRYPOINT ["/usr/local/bin/entrypoint"]
 CMD ["node", "packages/server/dist/index.js"]
