@@ -259,15 +259,31 @@ const ruin = (id: string): { x: number; z: number } => {
  */
 const TERRA_ROADS: RoadDefinition[] = [
   // The only road that goes anywhere a person lives, so the widest.
-  { id: "westroad", width: 5, points: [{ x: -32, z: -4 }, stone("westroad"), { x: DASO.x + 30, z: DASO.z + 2 }] },
+  // Daso's three roads run into its yard rather than stopping at the edge of
+  // town: they are its streets, and the town is laid out along them. Each is
+  // pinned by a point at the edge of town — east, north, south — because left
+  // to itself the router takes the cheapest line over the hills, and those
+  // lines went through the timber shed and ran two roads side by side.
+  {
+    id: "westroad", width: 5,
+    // It reaches Daso from the north-east, down the valley the router
+    // prefers; the pin is where it turns in, so it does not double back.
+    points: [{ x: -32, z: -4 }, stone("westroad"), { x: DASO.x + 31, z: DASO.z + 17 }, { x: DASO.x + 12, z: DASO.z + 1 }],
+  },
   { id: "northroad", width: 4, points: [{ x: 0, z: 34 }, stone("north"), stone("far-north")] },
   { id: "eastroad", width: 4, points: [{ x: 34, z: 0 }, stone("east"), stone("far-east")] },
   { id: "southroad", width: 4, points: [{ x: 0, z: -36 }, stone("south"), stone("far-south")] },
   { id: "lakeroad", width: 4, points: [stone("far-east"), stone("fanshona"), stone("northeast")] },
   { id: "highroad", width: 3, points: [stone("far-north"), stone("fanshona")] },
-  { id: "greywood-track", width: 3, points: [{ x: DASO.x - 5, z: DASO.z + 30 }, ruin("greywood-watch"), stone("northwest")] },
+  {
+    id: "greywood-track", width: 3,
+    points: [{ x: DASO.x - 2, z: DASO.z + 9 }, { x: DASO.x - 5, z: DASO.z + 46 }, ruin("greywood-watch"), stone("northwest")],
+  },
   { id: "moor-track", width: 3, points: [stone("northwest"), ruin("broken-crown"), stone("far-north")] },
-  { id: "ash-road", width: 3, points: [{ x: DASO.x + 5, z: DASO.z - 30 }, stone("southwest")] },
+  {
+    id: "ash-road", width: 3,
+    points: [{ x: DASO.x + 3, z: DASO.z - 9 }, { x: DASO.x + 2, z: DASO.z - 44 }, stone("southwest")],
+  },
   { id: "fen-track", width: 3, points: [stone("southwest"), ruin("old-barrow"), stone("far-south")] },
   { id: "red-road", width: 3, points: [stone("far-south"), stone("southeast")] },
   { id: "anvil-road", width: 3, points: [stone("far-east"), ruin("the-anvil"), stone("southeast")] },

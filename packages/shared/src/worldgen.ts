@@ -5,6 +5,7 @@ import {
   type EnemyKind,
 } from "./enemies.js";
 import type { BoxCollider, Collider, SceneryIndex } from "./movement.js";
+import type { BuildingDefinition } from "./settlements.js";
 import { fbm, gradientNoise, hash2, hashUnit, rehash, smoothstep } from "./noise.js";
 import {
   OSTRAS,
@@ -903,6 +904,78 @@ export function sceneryIndex(ostra: OstraDefinition): SceneryIndex {
  *
  * Returns a human-readable line per problem, empty when all is well.
  */
+/**
+ * Everything wrong with a town's layout, as warnings.
+ *
+ * Towns are hand-placed data, and hand-placed data drifts: a villager a metre
+ * inside the inn, a house straddling the road, a lamp in a wall. None of that
+ * breaks anything, which is exactly why it goes unnoticed. Run at boot beside
+ * `unsafeSpawns`, and checked every time a town is edited.
+ */
+export function settlementProblems(): string[] {
+  const problems: string[] = [];
+  /** Inside the building's footprint grown by `margin`, in its own frame. */
+  const inside = (b: BuildingDefinition, x: number, z: number, margin: number): boolean => {
+    const dx = x - b.x;
+    const dz = z - b.z;
+    const c = Math.cos(b.yaw);
+    const s = Math.sin(b.yaw);
+    // World to building-local: undo the yaw.
+    const lx = dx * c - dz * s;
+    const lz = dx * s + dz * c;
+    return Math.abs(lx) <= b.width / 2 + margin && Math.abs(lz) <= b.depth / 2 + margin;
+  };
+  /** Points over a building's footprint, for sampling what lies under it. */
+  const footprint = (b: BuildingDefinition, step: number): Array<{ x: number; z: number }> => {
+    const points: Array<{ x: number; z: number }> = [];
+    const c = Math.cos(b.yaw);
+    const s = Math.sin(b.yaw);
+    for (let lx = -b.width / 2; lx <= b.width / 2 + 1e-6; lx += step) {
+      for (let lz = -b.depth / 2; lz <= b.depth / 2 + 1e-6; lz += step) {
+        points.push({ x: b.x + lx * c + lz * s, z: b.z - lx * s + lz * c });
+      }
+    }
+    return points;
+  };
+
+  for (const ostra of Object.values(OSTRAS)) {
+    for (const town of settlementsIn(ostra)) {
+      const where = `${town.name}`;
+      for (const [i, a] of town.buildings.entries()) {
+        for (const b of town.buildings.slice(i + 1)) {
+          if (footprint(a, 0.8).some((p) => inside(b, p.x, p.z, 0.4))) {
+            problems.push(`${where}: ${a.name} (${a.id}) overlaps ${b.name} (${b.id})`);
+          }
+        }
+        if (footprint(a, 1).some((p) => roadDistance(ostra, p.x, p.z) < 0.3)) {
+          problems.push(`${where}: a road runs through ${a.name} (${a.id})`);
+        }
+        // Dry land reads as zero or less.
+        if (footprint(a, 1.5).some((p) => waterDepthAt(p.x, p.z, ostra.terrain) > 0.05)) {
+          problems.push(`${where}: ${a.name} (${a.id}) stands in the water`);
+        }
+      }
+      for (const villager of town.villagers) {
+        const blocker = town.buildings.find((b) => inside(b, villager.x, villager.z, 0.9));
+        if (blocker) problems.push(`${where}: ${villager.name} is inside or against ${blocker.name} (${blocker.id})`);
+        const tree = town.trees.find((t) => Math.hypot(t.x - villager.x, t.z - villager.z) < t.radius + 0.8);
+        if (tree) problems.push(`${where}: ${villager.name} is standing in a tree`);
+      }
+      for (const prop of town.props) {
+        if (prop.kind === "dock" || prop.kind === "boat") continue;
+        const blocker = town.buildings.find((b) => inside(b, prop.x, prop.z, 0.3));
+        if (blocker) problems.push(`${where}: a ${prop.kind} is inside ${blocker.name} (${blocker.id})`);
+      }
+      for (const tree of town.trees) {
+        const blocker = town.buildings.find((b) => inside(b, tree.x, tree.z, tree.radius + 0.6));
+        if (blocker) problems.push(`${where}: a tree grows through ${blocker.name} (${blocker.id})`);
+        if (roadDistance(ostra, tree.x, tree.z) < tree.radius + 0.4) problems.push(`${where}: a tree stands on the road`);
+      }
+    }
+  }
+  return problems;
+}
+
 export function unsafeSpawns(): string[] {
   const problems: string[] = [];
 

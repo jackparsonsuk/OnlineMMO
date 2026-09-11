@@ -85,8 +85,14 @@ smaller entries below; those are the first step towards them.
 
 - **Fast travel between waystones you have visited.** Needs discovery persisted
   per character. Waystones are already landmarks and respawn points.
-- **Check Fanshona against the vault.** Its lake, dock, Weighhouse and everyone
-  in it were invented for the game.
+- **Check the towns against the vault.** Fanshona — its lake, dock, Weighhouse,
+  Lantern House and everyone in it — was invented for the game. So were Daso's
+  smithy, storehouse and cart shed and the people added with them (Mott,
+  Brenna); the vault only gives Daso "a few small houses and an inn".
+- **Towns that feel lived in.** Villagers stand still facing out of their doors.
+  Idle animations, turning to face you when you talk, and a few walking a
+  route (a hauler to the cart shed, a fisher to the dock) would do more for
+  the towns now than more buildings.
 - **More settlements.** Vareto (Daso is "in the west of Vareto"), and something
   for the empty south and east — Terra is mostly wilds.
 - **Rivers and bridges.** Roads already route round lakes; rivers would give

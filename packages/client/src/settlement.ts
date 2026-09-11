@@ -1,5 +1,7 @@
 import { Color3 } from "@babylonjs/core/Maths/math.js";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js";
+import { Mesh } from "@babylonjs/core/Meshes/mesh.js";
+import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData.js";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import type { Scene } from "@babylonjs/core/scene.js";
@@ -33,6 +35,14 @@ const PLASTER = 0xc2b394;
 const LAMPLIGHT = 0xffc46b;
 const STONE = 0x9a958a;
 const SLATE = 0x4a525c;
+/** Footings and chimneys: darker than wall stone, so a stone house still has
+ *  a base. */
+const FOOTING = 0x6e6a62;
+const DOOR = 0x5a3a22;
+/** An unlit window: dark, a little blue, so it reads as glass not a hole. */
+const GLASS = 0x2a3440;
+/** The inside of an open shed. Emissive black, so no light makes it grey. */
+const SHADOW = 0x0e0c0a;
 
 /** Everything for one settlement, under a single node so arrival can replace
  *  it wholesale. */
@@ -43,7 +53,14 @@ export function buildSettlement(
 ): TransformNode {
   const root = new TransformNode(`settlement:${settlement.id}`, scene);
 
-  const materials = {
+  const glow = (name: string, colour: number): StandardMaterial => {
+    const material = new StandardMaterial(name, scene);
+    material.diffuseColor = Color3.Black();
+    material.specularColor = Color3.Black();
+    material.emissiveColor = hexColour(colour);
+    return material;
+  };
+  const materials: Materials = {
     timber: flatMaterial(scene, "timber", TIMBER),
     timberDark: flatMaterial(scene, "timberDark", TIMBER_DARK),
     thatch: flatMaterial(scene, "thatch", THATCH),
@@ -51,10 +68,16 @@ export function buildSettlement(
     plaster: flatMaterial(scene, "plaster", PLASTER),
     stone: flatMaterial(scene, "stone", STONE),
     slate: flatMaterial(scene, "slate", SLATE),
+    footing: flatMaterial(scene, "footing", FOOTING),
+    door: flatMaterial(scene, "door", DOOR),
+    glass: flatMaterial(scene, "glass", GLASS),
+    lamplight: glow("lamplight", LAMPLIGHT),
+    shadow: glow("shadow", SHADOW),
   };
 
+  const stoneTown = !settlement.woodland;
   for (const building of settlement.buildings) {
-    buildBuilding(scene, ostra, building, materials).parent = root;
+    buildBuilding(scene, ostra, building, materials, stoneTown).parent = root;
   }
   for (const prop of settlement.props) {
     buildProp(scene, ostra, settlement, prop, materials).parent = root;
@@ -66,13 +89,85 @@ export function buildSettlement(
   return root;
 }
 
-type Materials = Record<"timber" | "timberDark" | "thatch" | "shingle" | "plaster" | "stone" | "slate", StandardMaterial>;
+type Materials = Record<
+  | "timber" | "timberDark" | "thatch" | "shingle" | "plaster" | "stone" | "slate"
+  | "footing" | "door" | "glass" | "lamplight" | "shadow",
+  StandardMaterial
+>;
+
+/**
+ * A closed triangular prism: the roof's body, whose two ends are the gables.
+ *
+ * Built by hand rather than from a three-sided cylinder, whose length axis and
+ * cross-section swap places under rotation — which is how every house once
+ * got a roof the wrong size. Each face's winding is checked against the way it
+ * should face and flipped if wrong, so the mesh cannot come out inside-out
+ * whichever order the corners are listed in.
+ *
+ * The triangle is in the building's y-z plane: base from z = -halfDepth to
+ * +halfDepth at y = 0, apex at (z = 0, y = rise); it runs x = -halfWidth to
+ * +halfWidth.
+ */
+function roofPrism(scene: Scene, halfWidth: number, halfDepth: number, rise: number): Mesh {
+  type P = [number, number, number];
+  const corner = (x: number): P[] => [[x, 0, -halfDepth], [x, 0, halfDepth], [x, rise, 0]];
+  const [a0, b0, c0] = corner(-halfWidth) as [P, P, P];
+  const [a1, b1, c1] = corner(halfWidth) as [P, P, P];
+  const middle: P = [0, rise / 3, 0];
+
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const tri = (a: P, b: P, c: P): void => {
+    // Babylon's front face is the one whose normal is (c - a) x (b - a).
+    const n = (p: P, q: P, r: P): P => {
+      const u: P = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+      const w: P = [r[0] - p[0], r[1] - p[1], r[2] - p[2]];
+      return [w[1] * u[2] - w[2] * u[1], w[2] * u[0] - w[0] * u[2], w[0] * u[1] - w[1] * u[0]];
+    };
+    let normal = n(a, b, c);
+    const centre: P = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3];
+    const outward = (centre[0] - middle[0]) * normal[0] + (centre[1] - middle[1]) * normal[1]
+      + (centre[2] - middle[2]) * normal[2];
+    if (outward < 0) {
+      [b, c] = [c, b];
+      normal = n(a, b, c);
+    }
+    const length = Math.hypot(normal[0], normal[1], normal[2]) || 1;
+    for (const p of [a, b, c]) {
+      positions.push(p[0], p[1], p[2]);
+      normals.push(normal[0] / length, normal[1] / length, normal[2] / length);
+    }
+  };
+
+  tri(a0, b0, c0); // gable end
+  tri(a1, b1, c1); // the other gable end
+  tri(a0, a1, c1); tri(a0, c1, c0); // back slope
+  tri(b0, c0, c1); tri(b0, c1, b1); // front slope
+  tri(a0, b0, b1); tri(a0, b1, a1); // underside
+
+  const mesh = new Mesh("roofBody", scene);
+  const data = new VertexData();
+  data.positions = positions;
+  data.normals = normals;
+  data.indices = Array.from({ length: positions.length / 3 }, (_, i) => i);
+  data.applyToMesh(mesh, false);
+  return mesh;
+}
+
+/** Stable per-building variety from its id: which houses have a lamp lit. */
+function idHash(id: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
 
 function buildBuilding(
   scene: Scene,
   ostra: OstraDefinition,
   building: BuildingDefinition,
   materials: Materials,
+  /** Fanshona builds in stone; Daso in timber. */
+  stoneTown: boolean,
 ): TransformNode {
   const pivot = new TransformNode(`building:${building.id}`, scene);
   pivot.position.set(
@@ -84,103 +179,129 @@ function buildBuilding(
   );
   pivot.rotation.y = building.yaw;
 
-  const wallMaterial = building.style === "shed" ? materials.timberDark
-    : building.style === "stone" ? materials.stone
-    : materials.timber;
-  const walls = MeshBuilder.CreateBox("walls", {
-    width: building.width,
-    depth: building.depth,
-    height: building.height,
-  }, scene);
-  walls.position.y = building.height / 2;
-  walls.material = wallMaterial;
-  walls.metadata = { blocksCamera: true };
-  walls.parent = pivot;
+  const { width, depth, height, style } = building;
+  const box = (
+    name: string,
+    size: { width: number; height: number; depth: number },
+    x: number, y: number, z: number,
+    material: StandardMaterial,
+    blocksCamera = false,
+  ): Mesh => {
+    const mesh = MeshBuilder.CreateBox(name, size, scene);
+    mesh.position.set(x, y, z);
+    mesh.material = material;
+    if (blocksCamera) mesh.metadata = { blocksCamera: true };
+    mesh.parent = pivot;
+    return mesh;
+  };
 
-  // A band of plaster between the timbers, on the houses only. It is the one
-  // thing that stops five brown boxes reading as five brown boxes.
-  if (building.style === "cottage") {
-    const band = MeshBuilder.CreateBox("band", {
-      width: building.width + 0.06,
-      depth: building.depth + 0.06,
-      height: building.height * 0.42,
-    }, scene);
-    band.position.y = building.height * 0.44;
-    band.material = materials.plaster;
-    band.parent = pivot;
+  // A stone footing, a little wider than the walls, so a building sits on the
+  // ground rather than in it — and hides any seam where the flattened ground
+  // is not quite flat.
+  box("plinth", { width: width + 0.3, height: 0.5, depth: depth + 0.3 }, 0, 0.13, 0, materials.footing);
+
+  // A hall is built in whatever its town builds in: timber in Daso, stone in
+  // Fanshona.
+  const wallMaterial = style === "shed" ? materials.timberDark
+    : style === "stone" || (style === "hall" && stoneTown) ? materials.stone
+    : materials.timber;
+  box("walls", { width, depth, height }, 0, height / 2, 0, wallMaterial, true);
+
+  // Half-timbering on the houses: a plaster band between dark corner posts.
+  // It is the one thing that stops a row of brown boxes reading as a row of
+  // brown boxes.
+  if (style === "cottage") {
+    box("band", { width: width + 0.06, height: height * 0.42, depth: depth + 0.06 }, 0, height * 0.44, 0, materials.plaster);
+  }
+  if (style === "cottage" || (style === "hall" && !stoneTown)) {
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+      box("post", { width: 0.24, height, depth: 0.24 }, (x * width) / 2, height / 2, (z * depth) / 2, materials.timberDark);
+    }
   }
 
-  // Roof: two slabs leaning together into a gable.
-  //
-  // A three-sided cylinder is the obvious prism, but its length axis and its
-  // cross-section swap places under rotation and it is easy to size one and
-  // rotate the other — which is exactly the bug that put oversized roofs on
-  // every house here. Two boxes have no such ambiguity.
-  const roofMaterial = building.style === "shed" ? materials.shingle
-    : building.style === "stone" ? materials.slate
+  // --- the roof ---
+  // Two slabs over a solid triangular body. The slabs' undersides lie exactly
+  // on the body's slopes and run out past the walls, dipping below the wall
+  // top at the eaves the way a real overhang does; the body's two ends are
+  // the gables.
+  const roofMaterial = style === "shed" ? materials.shingle
+    : style === "stone" || (style === "hall" && stoneTown) ? materials.slate
     : materials.thatch;
-  const overhang = building.style === "shed" ? 0.5 : 0.75;
-  const pitch = building.style === "shed" ? 0.38 : 0.62;
+  const overhang = style === "shed" ? 0.45 : 0.7;
+  const pitch = style === "shed" ? 0.42 : style === "stone" ? 0.62 : 0.7;
+  const thickness = style === "cottage" ? 0.22 : 0.14;
+  const tan = Math.tan(pitch);
+  const rise = (depth / 2) * tan;
+  const eave = depth / 2 + overhang;
+  const slope = eave / Math.cos(pitch);
 
-  const halfDepth = (building.depth + overhang) / 2;
-  const slope = halfDepth / Math.cos(pitch);
-  const rise = halfDepth * Math.tan(pitch);
+  const body = roofPrism(scene, width / 2, depth / 2, rise);
+  body.position.y = height;
+  body.material = style === "cottage" ? materials.plaster
+    : style === "stone" ? materials.stone
+    : wallMaterial;
+  body.metadata = { blocksCamera: true };
+  body.parent = pivot;
 
   for (const side of [-1, 1]) {
-    const slab = MeshBuilder.CreateBox("roof", {
-      width: building.width + overhang,
-      height: 0.16,
-      depth: slope,
-    }, scene);
-    // Each half spans from the eaves to the ridge, tilted to meet its twin.
-    slab.rotation.x = -side * pitch;
-    slab.position.set(0, building.height + rise / 2, (side * halfDepth) / 2);
-    slab.material = roofMaterial;
-    slab.metadata = { blocksCamera: true };
-    slab.parent = pivot;
+    // Along the slope from the ridge (z = 0) to the eave (z = side * eave),
+    // centred halfway, lifted by half its thickness so its underside is the
+    // slope. Rotating about x by +pitch tips a slab's +z end down (Babylon is
+    // left-handed); the far side mirrors it.
+    const along = eave / 2;
+    const slab = box(
+      "roof",
+      { width: width + overhang * 2, height: thickness, depth: slope },
+      0,
+      height + rise - along * tan + (thickness / 2) / Math.cos(pitch),
+      side * along,
+      roofMaterial,
+      true,
+    );
+    slab.rotation.x = side * pitch;
+  }
+  // A ridge beam over the seam where the slabs meet.
+  box("ridge", { width: width + overhang * 2 + 0.1, height: 0.2, depth: 0.26 }, 0, height + rise + thickness * 0.7, 0,
+    style === "cottage" ? materials.timberDark : roofMaterial);
+
+  // A chimney through the back slope of anything people live in.
+  if (style !== "shed") {
+    const x = width * 0.28 * (idHash(building.id) % 2 === 0 ? 1 : -1);
+    const z = -depth * 0.18;
+    const top = height + rise + 0.9;
+    box("chimney", { width: 0.7, height: top - height + 0.2, depth: 0.7 }, x, (top + height) / 2, z, materials.footing);
   }
 
-  // The gable ends, so the triangle of wall under the roof isn't open sky.
-  for (const end of [-1, 1]) {
-    const gable = MeshBuilder.CreateBox("gable", {
-      width: 0.14,
-      height: rise,
-      depth: building.depth,
-    }, scene);
-    gable.position.set((end * (building.width + overhang)) / 2 - end * 0.1,
-      building.height + rise / 2, 0);
-    gable.scaling.z = 0.5;
-    gable.material = building.style === "cottage" ? materials.plaster
-      : building.style === "stone" ? materials.stone
-      : roofMaterial;
-    gable.parent = pivot;
+  // --- the front ---
+  const front = depth / 2 + 0.03;
+  if (style === "shed") {
+    // Sheds are open: a wide dark doorway you can see the dark inside of.
+    box("opening", { width: Math.min(width * 0.55, 3.2), height: Math.min(2.6, height * 0.72), depth: 0.1 },
+      0, Math.min(2.6, height * 0.72) / 2 + 0.2, front, materials.shadow);
+  } else {
+    // A door, so the front is obvious and the building has a scale you can
+    // read yourself against, in a frame so it reads as a door and not a stain.
+    const doorHeight = Math.min(2.15, height * 0.62);
+    box("doorFrame", { width: 1.25, height: doorHeight + 0.18, depth: 0.1 }, 0, (doorHeight + 0.18) / 2 + 0.2, front, materials.timberDark);
+    box("door", { width: 0.95, height: doorHeight, depth: 0.12 }, 0, doorHeight / 2 + 0.2, front + 0.03, materials.door);
   }
 
-  // A door, so the front is obvious and the building has a scale you can read
-  // yourself against.
-  const door = MeshBuilder.CreateBox("door", {
-    width: 0.95,
-    height: Math.min(2.1, building.height * 0.62),
-    depth: 0.12,
-  }, scene);
-  door.position.set(0, Math.min(2.1, building.height * 0.62) / 2, building.depth / 2 + 0.02);
-  door.material = materials.timberDark;
-  door.parent = pivot;
-
-  // The inn's windows are lit. Nothing else in the world glows warm.
-  if (building.style === "hall") {
-    const glow = new StandardMaterial("window", scene);
-    glow.diffuseColor = Color3.Black();
-    glow.specularColor = Color3.Black();
-    glow.emissiveColor = hexColour(LAMPLIGHT);
-
-    for (const offset of [-2.6, 2.6]) {
-      const window = MeshBuilder.CreateBox("window", {
-        width: 1.1, height: 0.9, depth: 0.1,
-      }, scene);
-      window.position.set(offset, building.height * 0.58, building.depth / 2 + 0.02);
-      window.material = glow;
-      window.parent = pivot;
+  // Windows either side of the door and down the long sides. The halls are
+  // lit; so, by a fixed pattern, are some of the houses — a town at dusk
+  // should have a few warm windows, not all of them or none.
+  if (style !== "shed") {
+    const lit = style === "hall" || idHash(building.id) % 3 === 0;
+    const pane = lit ? materials.lamplight : materials.glass;
+    const sill = height * (style === "hall" ? 0.5 : 0.55);
+    const size = style === "hall" ? 1.1 : 0.8;
+    const frontOffsets = width >= 7 ? [-width * 0.3, width * 0.3] : width >= 4.5 ? [-width * 0.3, width * 0.3] : [];
+    for (const x of frontOffsets) {
+      box("windowFrame", { width: size + 0.2, height: size + 0.2, depth: 0.08 }, x, sill, front, materials.timberDark);
+      box("window", { width: size, height: size, depth: 0.1 }, x, sill, front + 0.02, pane);
+    }
+    for (const side of [-1, 1]) {
+      box("windowFrame", { width: 0.08, height: size + 0.2, depth: size + 0.2 }, side * (width / 2 + 0.03), sill, 0, materials.timberDark);
+      box("window", { width: 0.1, height: size, depth: size }, side * (width / 2 + 0.05), sill, 0, pane);
     }
   }
 

@@ -674,25 +674,51 @@ from the Gate Circle, deep in woodland: a logging town of fifty, a few houses an
 and nobody passing through except for work or by accident. That last detail
 shapes the layout — it is built around the timber yard, not a square.
 
-Six buildings including **The Felled Oak** (the only lit windows in the world),
-a ring of woodland that actually blocks you, woodpiles and stumps and lamps,
-and five villagers who say something when you come near. Basan Log is there,
-before the events of *The Daso Voice*:
+Fourteen buildings round the yard — **The Felled Oak**, the timber shed, the saw
+pit, a smithy, a storehouse, a cart shed and the loggers' houses — with a ring
+of woodland that actually blocks you, opened where the roads come in. All three
+roads (the Westroad from the north-east, the Greywood track north, the Ash road
+south) run into the yard as its streets, pinned by a point at the edge of town
+so the router cannot send one through the timber shed. Seven villagers say
+something when you come near. Basan Log is there, before the events of *The
+Daso Voice*:
 
 > There's a sound in the west woods. Like someone saying my name.
 
 `settlements.ts` is plain data. Buildings become colliders on both sides;
 props and villagers are drawn client-side and cost no bandwidth.
 
-`unsafeSpawns()` now checks camps against **settlements** as well as spawn
+**Towns are laid out relative to their doors.** Each building turns its door to
+the square (`building`), and the people who work there and the barrels by the
+door are placed *from the door* (`atDoor`) — so they cannot end up inside the
+wall. The first layout used typed-in coordinates and put five of Daso's
+villagers inside or against buildings, barrels inside the inn and a road
+through the Weighhouse; nobody noticed, because none of it breaks anything.
+`settlementProblems()` now checks every town at boot and logs `[town]`
+warnings: villagers in walls, buildings overlapping, roads or water under a
+building, props and trees inside one.
+
+`unsafeSpawns()` checks camps against **settlements** as well as spawn
 points — and caught a Risen camp reaching within 10.6 m of Daso on its first
 run, which would have put zombies in the streets of the one calm place.
+
+Buildings are drawn in `settlement.ts`: a stone footing, walls, and a gabled
+roof of two slabs over a solid triangular body whose ends are the gables. The
+body is a hand-built prism whose faces check their own winding — the roofs
+were once built from rotated boxes with the tilt the wrong way round, and every
+house in the game wore a V. Houses get framed doors and windows, chimneys, and
+half-timbering; the halls and a fixed third of the houses have lamps lit.
 
 ## Fanshona
 
 The second settlement, in Brightwater, Terra's lake country: a stone market
-town facing its lake, with a Weighhouse, market stalls, a well, a boathouse, a
-dock running out over the water and boats moored beside it. Built as Daso's
+town of thirteen buildings facing its lake — a harbour square with the
+Weighhouse and the trading house across it from one another, market stalls, a
+well, fishers' houses up the spine of the town, a boathouse, the Lantern House
+at the south end, a dock running out over the water and boats moored beside
+it. Its two roads decide the layout: one comes up the town's spine to the
+square and on along the shore, the other in from the west to the waystone, and
+nothing is built across either. Built as Daso's
 opposite — Daso is timber and nobody visits; Fanshona is stone and slate and
 everything passes through it: fish off the lake, timber from Daso, stone from
 the moor.

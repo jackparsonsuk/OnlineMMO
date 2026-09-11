@@ -6,7 +6,7 @@ import cors from "cors";
 import express from "express";
 import { matchMaker, Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
-import { OSTRA_IDS, ROOM_NAME, unsafeElites, unsafeSpawns } from "@mmo/shared";
+import { OSTRA_IDS, ROOM_NAME, settlementProblems, unsafeElites, unsafeSpawns } from "@mmo/shared";
 import { setServerContext } from "./context.js";
 import {
   AuthError,
@@ -251,6 +251,9 @@ gameServer.define(ROOM_NAME, OstraRoom).filterBy(["ostraId"]);
 // broken, and refusing to boot over level design would be worse.
 for (const problem of [...unsafeSpawns(), ...unsafeElites()]) {
   console.warn(`[spawn] ${problem}`);
+}
+for (const problem of settlementProblems()) {
+  console.warn(`[town] ${problem}`);
 }
 
 const orphans = store.countOrphanedCharacters();
