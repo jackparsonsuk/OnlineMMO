@@ -25,8 +25,6 @@ export class Hud {
   private ostraSubtitle = document.getElementById("ostra-subtitle") as HTMLElement;
   private status = document.getElementById("status") as HTMLElement;
   private stats = document.getElementById("stats") as HTMLElement;
-  private playerName = document.getElementById("pf-name") as HTMLElement;
-  private playerLevel = document.getElementById("pf-level") as HTMLElement;
   private help = document.getElementById("help") as HTMLElement;
   private gatePrompt = document.getElementById("gate-prompt") as HTMLElement;
   private speech = document.getElementById("speech") as HTMLElement;
@@ -109,11 +107,6 @@ export class Hud {
       // Storage refused: showing it every time is the safe way round.
     }
     this.toggleHelp(true);
-  }
-
-  /** Your own name, on your frame. */
-  setIdentity(name: string): void {
-    this.playerName.textContent = name;
   }
 
   /**
@@ -318,7 +311,6 @@ export class Hud {
   setXp(level: number, xp: number): void {
     const next = xpToNext(level);
     this.xpLevel.textContent = `Level ${level}`;
-    this.playerLevel.textContent = String(level);
     this.xpNumbers.textContent = level >= MAX_LEVEL ? "Max level" : `${xp.toLocaleString()} / ${next.toLocaleString()} XP`;
     this.xpFill.style.width = `${level >= MAX_LEVEL ? 100 : Math.min(100, (xp / Math.max(1, next)) * 100)}%`;
     if (level !== this.level) {

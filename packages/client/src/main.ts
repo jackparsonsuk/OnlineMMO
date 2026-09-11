@@ -267,7 +267,6 @@ async function main(): Promise<void> {
   const account = new AccountClient(HTTP_ENDPOINT, health.realmId);
   const character = await showTitleScreen(account);
   characterScreen.setName(character.name);
-  hud.setIdentity(character.name);
   // Known before the room is, so the ability bar is right on the first frame.
   classId = isClassId(character.classId) ? character.classId : DEFAULT_CLASS;
   level = character.level ?? 1;

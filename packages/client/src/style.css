@@ -108,7 +108,7 @@ html, body {
 /* Where the eye already is when walking: just above the ability bar. */
 #gate-prompt {
   position: fixed;
-  bottom: 150px;
+  bottom: 208px;
   left: 50%;
   transform: translateX(-50%);
   padding: 7px 14px;
@@ -321,62 +321,32 @@ kbd {
 
 .nametag.dead .bar { display: none; }
 
-/* Your frame, top left: name and level, then health and the class's
-   resource with their numbers inside the bars. Party frames stack below. */
+/* Health and the class's resource, directly over the abilities and under
+   your character: in a fight your eyes are here, and a glance at a corner is
+   a glance away from the telegraph you should be stepping out of. As wide as
+   the bar, and the numbers inside them. */
 #vitals {
-  position: fixed;
-  top: 12px;
-  left: 12px;
-  width: 236px;
-  padding: 8px 10px 10px;
-  border-radius: var(--radius);
-  border: 1px solid var(--hair);
-  background: var(--glass);
-  backdrop-filter: blur(8px);
-  box-shadow: var(--shade);
-  pointer-events: none;
-  transition: border-color 200ms, box-shadow 200ms;
-}
-/* In a fight, the frame says so with its edge rather than a word. */
-#vitals:has(#combat-flag:not([hidden])) {
-  border-color: rgb(232 96 72 / 60%);
-  box-shadow: var(--shade), 0 0 14px rgb(232 96 72 / 18%);
-}
-
-.pf-head {
+  position: relative;
   display: flex;
-  align-items: baseline;
-  gap: 7px;
-  margin-bottom: 6px;
-}
-#pf-name {
-  overflow: hidden;
-  font: 600 15px var(--display);
-  letter-spacing: 0.03em;
-  color: var(--ink);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-#pf-level {
-  margin-left: auto;
-  min-width: 24px;
-  padding: 0 6px;
-  border-radius: 5px;
-  border: 1px solid var(--hair-strong);
-  font: 600 12px var(--display);
-  text-align: center;
-  color: var(--gold-soft);
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 5px;
 }
 
 #health-bar, #resource-bar {
   position: relative;
-  border-radius: 4px;
-  border: 1px solid rgb(0 0 0 / 55%);
-  background: rgb(0 0 0 / 45%);
-  box-shadow: inset 0 1px 2px rgb(0 0 0 / 60%), 0 0 0 1px rgb(255 255 255 / 5%);
+  border-radius: 5px;
+  border: 1px solid rgb(0 0 0 / 60%);
+  background: rgb(0 0 0 / 55%);
+  box-shadow: inset 0 1px 3px rgb(0 0 0 / 70%), 0 0 0 1px var(--hair), 0 4px 14px rgb(0 0 0 / 35%);
   overflow: hidden;
+  transition: box-shadow 200ms;
 }
-#health-bar { height: 16px; }
+#health-bar { height: 22px; }
+/* In a fight, the health bar's edge says so, rather than a word. */
+#vitals:has(#combat-flag:not([hidden])) #health-bar {
+  box-shadow: inset 0 1px 3px rgb(0 0 0 / 70%), 0 0 0 1px rgb(232 96 72 / 70%), 0 0 16px rgb(232 96 72 / 28%);
+}
 
 #health-bar i, #resource-bar i {
   display: block;
@@ -399,11 +369,12 @@ kbd {
   inset: 0;
   display: grid;
   place-items: center;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   color: #fff;
+  letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 2px rgb(0 0 0 / 95%);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 95%), 0 0 6px rgb(0 0 0 / 60%);
 }
 
 #death {
@@ -436,7 +407,7 @@ kbd {
    Centred just above the ability bar, where your eyes are when you cast. */
 #castbar {
   position: fixed;
-  bottom: 124px;
+  bottom: 178px;
   left: 50%;
   transform: translateX(-50%);
   width: 240px;
@@ -474,8 +445,8 @@ kbd {
 
 /* --- the class's resource, and the ability bar ----------------------------- */
 
-#resource-bar { height: 12px; margin-top: 4px; }
-#resource-text { font-size: 10px; font-weight: 500; }
+#resource-bar { height: 14px; }
+#resource-text { font-size: 11px; font-weight: 600; }
 #resource-bar i { background: linear-gradient(180deg, #6aa9e0, #33609a); }
 
 /* Fervour burns: embers at the bottom, white-hot at the top. */
@@ -570,7 +541,7 @@ kbd {
 
 #toast {
   position: fixed;
-  bottom: 150px;
+  bottom: 208px;
   left: 50%;
   transform: translateX(-50%);
   padding: 6px 12px;
@@ -1245,7 +1216,7 @@ body.portrait :is(#compass, #minimap, #actionbar, #corner, #target-frame, #castb
    middle, where the gate prompt also lives — you are never near both. */
 #speech {
   position: fixed;
-  bottom: 150px;
+  bottom: 208px;
   left: 50%;
   transform: translateX(-50%);
   max-width: 32rem;
@@ -1333,11 +1304,16 @@ body.portrait :is(#compass, #minimap, #actionbar, #corner, #target-frame, #castb
 .floater.note { color: #9fd8ff; font-size: 14px; font-weight: 700; letter-spacing: 0.04em; }
 .floater.level { color: #f0d060; font-size: 20px; font-weight: 800; letter-spacing: 0.04em; }
 
+/* Crossed swords at the left end of the health bar while you are fighting. */
 #combat-flag {
-  font-size: 13px;
-  line-height: 1;
-  color: #ff8a72;
-  text-shadow: 0 0 8px rgb(255 120 90 / 60%);
+  position: absolute;
+  top: 3px;
+  left: 13px;
+  z-index: 1;
+  font-size: 14px;
+  line-height: 16px;
+  color: #ffb4a4;
+  text-shadow: 0 0 6px rgb(255 90 60 / 90%), 0 1px 2px #000;
 }
 
 #combat-flag[hidden] { display: none; }
@@ -1924,7 +1900,7 @@ body.portrait #quest-tracker, body.no-hud #quest-tracker { display: none; }
    above and the hint line below. */
 #party {
   position: fixed;
-  top: 100px;
+  top: 12px;
   left: 12px;
   width: 236px;
   display: flex;
@@ -2163,15 +2139,15 @@ body.portrait #chat { opacity: 0; pointer-events: none; }
 /* XP: a thin gilded rule over the abilities. */
 #xp { padding: 0 6px; }
 #xp-bar { height: 5px; border-color: rgb(214 188 132 / 30%); background: rgb(0 0 0 / 55%); }
-#xp-text { margin-bottom: 3px; }
+#xp-text { margin: 3px 0 0; }
 #xp-text b { font-family: var(--display); font-weight: 600; letter-spacing: 0.04em; color: var(--gold-soft); }
 #xp-text span { color: var(--muted); }
 
 /* Where the ability bar would crowd the corners, the chat and the corner go
    above it; narrower still, the compass shrinks clear of your frame. */
 @media (max-width: 1100px) {
-  #chat { bottom: 118px; }
-  #corner { bottom: 118px; }
+  #chat { bottom: 176px; }
+  #corner { bottom: 176px; }
 }
 @media (max-width: 960px) {
   #compass { width: min(260px, calc(100vw - 520px)); min-width: 160px; }

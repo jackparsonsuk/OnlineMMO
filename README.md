@@ -117,12 +117,16 @@ the client has no way to reproduce.
 
 ## The HUD
 
-Kept to what you use while playing, in the places an MMO player looks for it:
-your frame top left (name, level, health, the class's resource, with the
-numbers inside the bars; its edge goes red in a fight), party frames under it,
-the target under the compass, minimap and quest tracker top right, the ability
-bar centred at the bottom with the cast bar over it, chat bottom left, and a
-small corner for gold, ping, help and sound.
+Kept to what you use while playing, in the places an MMO player looks for it.
+Everything you watch in a fight is in one block at the bottom centre, under
+your character: health (big, numbers inside, a red edge and crossed swords in
+a fight) and Fervour directly over the abilities, the XP line under them, and
+the cast bar just above. It sat in a frame in the top-left corner for a while,
+and a glance at a corner is a glance away from the telegraph you should be
+stepping out of. Party frames are top left, the target under the compass,
+minimap and quest tracker top right, chat bottom left, and a small corner for
+gold, ping, help and sound. Your name and level are over your head and on the
+XP line, so nothing else repeats them.
 
 What used to sit on screen permanently and is now shown only when it means
 something: the Ostra's name is a title card that fades in on arrival (the

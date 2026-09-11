@@ -45,16 +45,6 @@
     <!-- Only there when something is wrong, or still happening. -->
     <div id="status">connecting&hellip;</div>
 
-    <!-- You: name, level, health and the class's resource. -->
-    <div id="vitals">
-      <div class="pf-head">
-        <span id="pf-name"></span>
-        <span id="combat-flag" hidden title="In combat">&#9876;</span>
-        <span id="pf-level"></span>
-      </div>
-      <div id="health-bar"><i></i><span id="health-text"></span></div>
-      <div id="resource-bar"><i></i><span id="resource-text"></span></div>
-    </div>
     <div id="party" hidden></div>
 
     <div id="gate-prompt" hidden></div>
@@ -65,12 +55,19 @@
     </div>
 
     <div id="castbar" hidden><i></i><span></span></div>
+    <!-- Everything you watch in a fight, in one place under your character:
+         health and the class's resource, the abilities, and the XP line. -->
     <div id="actionbar">
-      <div id="xp">
-        <div id="xp-text"><b></b><span></span></div>
-        <div id="xp-bar"><i></i></div>
+      <div id="vitals">
+        <span id="combat-flag" hidden title="In combat">&#9876;</span>
+        <div id="health-bar"><i></i><span id="health-text"></span></div>
+        <div id="resource-bar"><i></i><span id="resource-text"></span></div>
       </div>
       <div id="abilities"></div>
+      <div id="xp">
+        <div id="xp-bar"><i></i></div>
+        <div id="xp-text"><b></b><span></span></div>
+      </div>
     </div>
     <div id="level-ups"></div>
 
