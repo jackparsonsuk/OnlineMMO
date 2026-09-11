@@ -199,7 +199,12 @@ smaller entries below; those are the first step towards them.
 
 - **Draw calls.** Every creature rig is ~10 meshes; a busy fight is several
   hundred draw calls. Merging each rig's static parts would cut it sharply.
-- **Settings.** Key rebinding, volume, view distance.
+- **Settings.** Key rebinding, volume, view distance, mouse sensitivity and
+  invert (`MouseLook.TURN`/`PITCH` are fixed for now).
+- **A class that dodges on right-click.** `ClassDefinition.guard` is there
+  for it; only the Warrior (block) exists.
+- **Block, shields and weapons.** Block works bare-handed; a shield could
+  block more, and a two-hander less. Needs gear drawn on the body first.
 - **Postgres store.** SQLite means one process per realm; `CharacterStore` exists
   so this is a swap, not a rewrite.
 - **Minimap zoom** and waypoints you can place on the world map. (The world

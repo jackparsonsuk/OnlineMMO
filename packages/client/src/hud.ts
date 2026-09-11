@@ -285,10 +285,11 @@ export class Hud {
     CLASSES[classId].abilities.forEach(({ spell: id, level }, index) => {
       const spell = SPELLS[id];
       const root = document.createElement("div");
-      root.className = "ability";
+      root.className = index === 0 ? "ability mouse-key" : "ability";
       root.title = spell.description;
       root.innerHTML =
-        `<span class="key">${index + 1}</span>` +
+        // The first ability is the left mouse button; the rest keep their numbers.
+        `<span class="key">${index === 0 ? "LMB" : index + 1}</span>` +
         `<span class="name">${spell.name}</span>` +
         `<span class="meta" data-cost="${spell.cost > 0 ? `${spell.cost} ${resource}` : "free"}"></span>` +
         (id === "strike" ? `<span class="pips"><i></i><i></i><i></i></span>` : "") +
@@ -306,14 +307,19 @@ export class Hud {
     // Every class's two, on their own keys, set apart from the class's bar.
     const utility = (key: string, name: string, meta: string, title: string): HTMLElement => {
       const root = document.createElement("div");
-      root.className = "ability utility";
+      root.className = key.length > 1 ? "ability utility mouse-key" : "ability utility";
       root.title = title;
       root.innerHTML = `<span class="key">${key}</span><span class="name">${name}</span>` +
         `<span class="meta">${meta}</span><span class="cool"></span>`;
       this.abilities.appendChild(root);
       return root.querySelector(".cool") as HTMLElement;
     };
-    this.dodgeCool = utility("Q", "Dodge", "dash", "Dodge: a quick dash where you are steering (or back). Blows miss you while it lasts.");
+    // Right-click is the class's guard: a block, or a second key for Dodge.
+    const guard = CLASSES[classId].guard;
+    if (guard === "block") {
+      utility("RMB", "Block", "hold", "Block: hold the right mouse button. Blows from the front do a fifth of their damage; you move slowly, cannot swing, and Fervour drains.");
+    }
+    this.dodgeCool = utility(guard === "dodge" ? "RMB" : "Q", "Dodge", "dash", "Dodge: a quick dash where you are steering (or back). Blows miss you while it lasts.");
     this.healCool = utility("R", "Second Wind", "heal", "Second Wind: a third of your health back at once. Usable in a fight; a long cooldown.");
     this.drawLocks();
     // The resource line re-greys against the new slots on its next update.

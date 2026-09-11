@@ -488,6 +488,9 @@ export class Animator {
   private frozenUntil = -Infinity;
   private clock = 0;
   private lastNow = NaN;
+  /** A player with their guard raised: arms up across the body, set each
+   *  frame by whoever knows (the input for our own, the server for others). */
+  guarding = false;
 
   constructor(readonly rig: Rig) {}
 
@@ -636,6 +639,17 @@ export class Animator {
     chest.rotation.x = stride * (sprinting ? 0.28 : 0.1) + Math.sin(this.clock / 500) * 0.02;
 
     const action = this.action;
+    if (this.guarding && action?.type !== "cast") {
+      // Both forearms up across the chest, the blade held crosswise in front,
+      // leaning into it: a shield wall of one. The legs keep walking.
+      armL.rotation.x = -1.5;
+      armL.rotation.z = 0.55;
+      armR.rotation.x = -1.35;
+      armR.rotation.z = -0.45;
+      chest.rotation.x = 0.16;
+      head.rotation.x = 0.12;
+      return;
+    }
     if (action?.type !== "cast") return;
     const t = now - action.start;
     if (t > castDuration(action.spell, action.combo)) {

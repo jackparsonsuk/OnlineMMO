@@ -85,6 +85,8 @@ import {
   castSteps,
   isMoving,
   isDodging,
+  BLOCK_ARC,
+  BLOCK_REDUCTION,
   SPRINT_GRACE_MS,
   HEAL_COOLDOWN_MS,
   HEAL_FRACTION,
@@ -518,6 +520,9 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         // so its rollback replays exactly the frames we haven't applied yet.
         for (const input of this.inputs.get(sessionId)) {
           applyInput(player, input, ctx.dt, playerWorld, this.canSprint(session, player, now));
+          // A raised guard, for a class whose guard is a block. Set before the
+          // cast step, which will not start a swing behind a shield.
+          player.blocking = input.block === true && getClass(session.classId).guard === "block";
           this.stepCast(sessionId, session, player, input, now);
           if (input.heal) this.tryHeal(sessionId, session, player, now);
         }
@@ -1011,7 +1016,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       }
       return;
     }
-    if (input.cast) this.tryCast(sessionId, session, player, input.cast, input.aim, moving, now);
+    // No swinging from behind a raised shield: the guard is the choice.
+    if (input.cast && !player.blocking) this.tryCast(sessionId, session, player, input.cast, input.aim, moving, now);
   }
 
   /**
@@ -1902,6 +1908,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     }
     // Fervour: rises while you fight, holds after a Battle Cry, drains once
     // the fight is over.
+    // Holding a guard is not fighting back: Fervour drains while you do.
+    if (player.blocking) return -FERVOUR_PER_SECOND;
     if (player.inCombat) return FERVOUR_PER_SECOND;
     return now < session.fervourHoldUntil ? 0 : -FERVOUR_DRAIN_PER_SECOND;
   }
@@ -1965,16 +1973,27 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       return;
     }
     const reduction = armourReduction(session.stats.totals.armour, attackerLevel);
-    const amount = Math.max(1, Math.round(raw * (1 - reduction)));
+    // A raised guard takes most of a blow from the front. The front is judged
+    // from where the blow came from — the creature, or a slam's centre — and
+    // where you face, which is where your camera looks.
+    const source = this.state.enemies.get(byEnemyId);
+    let blocked = false;
+    if (player.blocking && source) {
+      const bearing = Math.atan2(source.x - player.x, source.z - player.z);
+      const off = Math.abs(Math.atan2(Math.sin(bearing - player.yaw), Math.cos(bearing - player.yaw)));
+      blocked = off <= BLOCK_ARC;
+    }
+    const amount = Math.max(1, Math.round(raw * (1 - reduction) * (blocked ? 1 - BLOCK_REDUCTION : 1)));
     player.health = Math.max(0, player.health - amount);
     // Holding an elite's attention is a share of the fight (see eliteFell).
     const fight = this.eliteOf.get(byEnemyId);
     if (fight) fight.taken.set(sessionId, (fight.taken.get(sessionId) ?? 0) + amount);
     session.combatUntil = now + COMBAT_LINGER_MS;
-    this.broadcastNear(player.x, player.z, "damage", { id: sessionId, amount, by: byEnemyId });
+    this.broadcastNear(player.x, player.z, "damage", { id: sessionId, amount, by: byEnemyId, blocked });
 
     if (player.health === 0) {
       session.respawnAt = now + PLAYER_RESPAWN_MS;
+      player.blocking = false;
       session.pendingCast = undefined;
       session.diedAtX = player.x;
       session.diedAtZ = player.z;

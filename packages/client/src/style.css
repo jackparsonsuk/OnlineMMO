@@ -2158,7 +2158,7 @@ body.portrait #chat { opacity: 0; pointer-events: none; }
 .ability.utility { width: 64px; border-color: rgb(127 191 154 / 26%); }
 .ability.utility .key { color: #a8e6b4; }
 .ability.utility:first-of-type { margin-left: 0; }
-.ability.utility:nth-last-child(2) { margin-left: 8px; }
+.ability:not(.utility) + .ability.utility { margin-left: 8px; }
 
 /* --- the game menu (Esc) ------------------------------------------------------ */
 
@@ -2230,4 +2230,60 @@ body.portrait #chat { opacity: 0; pointer-events: none; }
   .ability.utility { width: 54px; }
   .ability .name { font-size: 10.5px; }
   .ability .meta { font-size: 9px; left: 5px; }
+}
+
+/* --- action combat --------------------------------------------------------- */
+
+/* Where your swings go: a point ahead of you at chest height, projected each
+   frame, so it sits on the thing you would hit. */
+#reticle {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  border: 1.5px solid rgb(255 244 220 / 70%);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 45%), inset 0 0 0 1px rgb(0 0 0 / 35%);
+  pointer-events: none;
+  will-change: transform;
+  z-index: 2;
+}
+#reticle::after {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: rgb(255 244 220 / 85%);
+}
+#reticle[hidden] { display: none; }
+#reticle.hot { border-color: rgb(255 150 120 / 95%); }
+#reticle.hot::after { background: #ff9678; }
+
+#mouse-prompt {
+  position: fixed;
+  top: 38%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--hair-strong);
+  background: var(--glass-solid);
+  font: 600 13px var(--display);
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  pointer-events: none;
+  z-index: 6;
+}
+#mouse-prompt[hidden] { display: none; }
+body.portrait :is(#reticle, #mouse-prompt) { display: none; }
+
+/* A mouse button's label is three letters: set it small, under the corner,
+   and keep the name clear of it. */
+.ability.mouse-key .key { font-size: 9px; letter-spacing: 0.04em; top: 5px; }
+.ability.mouse-key .name { padding-right: 20px; }
+@media (max-width: 860px) {
+  .ability.mouse-key .key { top: auto; bottom: 5px; right: 5px; }
+  .ability.mouse-key .name { padding-right: 0; }
 }

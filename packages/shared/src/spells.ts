@@ -74,20 +74,21 @@ export const SPELLS: Record<SpellId, Spell> = {
    * blow stokes Fervour — so it is both what you do between the big moves
    * and what pays for them.
    *
-   * A slow, heavy swing, like a WoW weapon's: one blow every 1.8 seconds, each
-   * worth three of the old 0.6-second ones, so the damage over time is the
-   * same. It takes most of a second to land, standing still, so it has to be
-   * timed around a creature's windup rather than thrown while walking away.
+   * Left click: a quick swing you can throw on the move (slowed while you
+   * swing — `ATTACK_MOVE_FACTOR`), three to a chain. It was a 0.9-second
+   * standing cast every 1.8 s, which suited tab-targeting; for action combat
+   * it swings every 0.7 s, each worth the old one in proportion, so a fight
+   * lasts as long as it did.
    */
   strike: {
     id: "strike",
     name: "Strike",
     cost: 0,
-    cooldownMs: 1800,
-    castMs: 900,
-    damage: 54,
+    cooldownMs: 700,
+    castMs: 0,
+    damage: 21,
     scaling: "might",
-    coefficient: 3,
+    coefficient: 1.17,
     range: 2.4,
     arc: Math.PI * 0.62,
     targeting: "nearest",
@@ -95,7 +96,7 @@ export const SPELLS: Record<SpellId, Spell> = {
     // The finisher staggers; see STRIKE_COMBO_LENGTH.
     stagger: false,
     builds: true,
-    description: "Stand still to swing. Every third blow staggers. Builds Fervour.",
+    description: "Left click. Swing on the move — every third blow staggers. Builds Fervour.",
   },
 
   /** Reach. You can open on something before it has closed — which against a
@@ -237,8 +238,8 @@ export function castSteps(spell: Spell): number {
 
 /** A step with any movement in it — walking, a jump or a dodge: what cancels
  *  a cast, as it does in WoW. */
-export function isMoving(input: { moveX: number; moveZ: number; jump?: boolean; dodge?: boolean }): boolean {
-  return input.moveX !== 0 || input.moveZ !== 0 || input.jump === true || input.dodge === true;
+export function isMoving(input: { moveX: number; moveZ: number; jump?: boolean; dodge?: boolean; block?: boolean }): boolean {
+  return input.moveX !== 0 || input.moveZ !== 0 || input.jump === true || input.dodge === true || input.block === true;
 }
 
 /**

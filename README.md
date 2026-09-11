@@ -29,13 +29,14 @@ one.
 | `npm run dev:server` / `npm run dev:client` | One side only |
 | `npm run typecheck` | Type-checks all three packages |
 
-Controls: **WASD** move, **Shift** sprint (out of combat), **Space** jump,
-**1–6** abilities, **Q** dodge, **R** Second Wind (a heal), **Tab** or click to
-target, **Esc** to let go (and, with nothing left to close, the game menu:
-log out, sign out, sound), **M** map (scroll to zoom, drag to pan), **I** (or **C**)
-character and pack, **E** talk to a villager, **J** quest log, **P** party (or
-click another player to invite them), **Enter** chat, **H** this list, drag to
-orbit, scroll to zoom, walk into a Gate ring to travel.
+Controls: the **mouse** looks and aims, **left click** Strikes (on the move),
+**right click** blocks (hold), **2–6** abilities, **WASD** move, **Shift**
+sprint (out of combat), **Space** jump, **Q** dodge, **R** Second Wind (a heal),
+**Alt** held for a cursor, **Tab** to lock a target, **Esc** to let go (and,
+with nothing left to close, the game menu: log out, sign out, sound), **M** map
+(scroll to zoom, drag to pan), **I** (or **C**) character and pack, **E** talk
+to a villager, **J** quest log, **P** party, **Enter** chat, **H** this list,
+scroll to zoom, walk into a Gate ring to travel.
 
 In development, **`` ` ``** (backtick) opens the dev menu: teleport by clicking
 the world map (the hint shows the coordinates, region and creature level under
@@ -246,8 +247,48 @@ Ostra repopulates the moment somebody walks back into it.
 
 ## Combat
 
-Space swings. The server resolves everything; the client only draws — but it
-draws *immediately*, which is most of what makes a hit feel like a hit.
+Left click swings. The server resolves everything; the client only draws —
+but it draws *immediately*, which is most of what makes a hit feel like a hit.
+
+### Action controls
+
+The mouse is the camera all the time, with no button held, and the buttons are
+the fight: **left click Strikes, right click is the class's guard** — a
+**block** for the Warrior (`ClassDefinition.guard`; a lighter class would dodge
+on it instead), and the rest of the kit stays on **2–6**. It is the browser's
+pointer lock (`mouselook.ts`): the game holds the mouse whenever you are in
+the world and nothing is open, lets go while **Alt** is held or any window is
+(the pack, the map, a dialogue, the menu), and takes it back when the window
+closes. Locks are only granted on a gesture, so it asks on a click or on the
+key that closed a window; when it wants the mouse and has not got it, a line
+in the middle of the screen says to click. Esc is the browser's way out of a
+lock, so losing it for no other reason is treated as Esc and opens the menu —
+unless the window lost focus (Alt-Tab), which is not asking for anything.
+
+The turning is done here, one browser mouse event to one turn, rather than by
+Babylon's orbit camera: its device layer reports each movement twice, and its
+inertia would carry every flick ten times as far as the hand went. Its drag
+input is switched off while the mouse is held and back on with a cursor, so
+the character screen still orbits on a drag.
+
+**Strike swings on the move** — every 0.7 s, three to a chain — where it used
+to be a 0.9 s standing cast every 1.8 s; its damage scaled with the time between
+swings, so a fight lasts as long. You move at 72% while an ability key is held
+and 45% behind a guard (`ATTACK_MOVE_FACTOR`, `BLOCK_MOVE_FACTOR`), read from
+the input itself so the prediction agrees. Sunder and Cleave keep their short
+plant-your-feet windups.
+
+**Block** (hold right click) takes 80% off a blow from the front — within about
+70° of where you face, judged from the creature or a slam's centre — and says
+"Blocked". Behind a guard you cannot swing, and Fervour drains rather than
+builds. `Player.blocking` is replicated, so everyone sees the guard go up.
+
+**Aim is the camera.** A reticle marks a point ahead of you at chest height,
+projected each frame, so it sits on what a swing would land on, and goes red
+when Strike would connect. Without a locked target, a blow leans toward
+something within ~40° of where you look (it was ~75° for tab-targeting). Tab
+still locks a target, which turns your swings toward it; clicking things in
+the world (a creature to target, a player to invite) is for a free cursor.
 
 **Hits are lag-compensated.** A client renders creatures 150 ms in the past, so
 a Void Spider closing at 7.2 m/s is nearly a metre from where it appears by the
@@ -271,10 +312,10 @@ creature.
 
 `MoveInput` carries an `aim` separate from `yaw`. Yaw follows the camera and
 steers movement; aim follows your target, so hitting something off to one side
-doesn't bend the direction you are walking. With a target selected (Tab, or
-click it) every cast turns to face it while in reach. Without one, a blow leans
-toward whatever is within ~75° of where you are looking, and Heroic Throw toward
-anything within ~17° — reach is its reward, accuracy its price. Aim is computed
+doesn't bend the direction you are walking. With a target locked (Tab) every
+cast turns to face it while in reach. Without one, a blow leans toward whatever
+is within ~40° of where you are looking, and Heroic Throw toward anything within
+~17° — reach is its reward, accuracy its price. Aim is computed
 from the *drawn* positions, which are exactly what lag compensation rewinds to,
 so aiming at the picture is aiming at the truth.
 
@@ -343,11 +384,12 @@ because sprint is denied in combat and the client has to predict that.
 
 **Some attacks need you standing still.** Swinging while strafing made every
 telegraph trivial: you could keep hitting while walking out of each blow. Now,
-as in WoW, an ability has a **cast time** (`castMs`) or is instant. Strike
-(0.9 s), Sunder (0.5 s) and Cleave (0.7 s) take time and must be performed
-standing: they will not start on the move, and moving before one lands cancels
-it — nothing paid, cooldown given back, "Interrupted" on the cast bar. Heroic
-Throw, Shield Bash and Battle Cry are instant and work on the run. You are
+as in WoW, an ability has a **cast time** (`castMs`) or is instant. Sunder
+(0.5 s) and Cleave (0.7 s) take time and must be performed standing: they will
+not start on the move, and moving (or jumping, dodging or raising a guard)
+before one lands cancels it — nothing paid, cooldown given back, "Interrupted"
+on the cast bar. Strike, Heroic Throw, Shield Bash and Battle Cry are instant
+and work on the run. You are
 never rooted; getting out of the red just costs you the swing.
 
 A cast is counted in **input steps, not milliseconds** (`castSteps`). The
@@ -355,12 +397,10 @@ server advances it once per input it applies (`stepCast`) and the client once
 per input it sends (`stepLocalCast`), so both land it — or cancel it, on the
 first input with movement — at the same input; wall-clock time would let
 latency decide. Cost is paid when it lands; aim follows the target throughout.
-A cancel is also sent as `castCancelled` in case the two ever disagree. Strike
-is a slow, heavy swing to match — one every 1.8 s, each worth three of the old
-0.6 s ones.
+A cancel is also sent as `castCancelled` in case the two ever disagree.
 
-Cooldowns are enforced server-side, so holding 1 auto-attacks and spamming
-it gains nothing.
+Cooldowns are enforced server-side, so holding the button auto-attacks and
+spamming it gains nothing.
 
 ### Jump, dodge and Second Wind
 
@@ -469,7 +509,7 @@ creatures grow too (`levelHealthScale`, +30% of base health a level).
 
 | Key | Ability | Learned | Fervour | Shape | Role |
 | --- | --- | --- | --- | --- | --- |
-| Space / 1 | **Strike** | 1 | builds | 2.4 m cone | Best sustained damage; every third blow staggers |
+| Left click | **Strike** | 1 | builds | 2.4 m cone | Best sustained damage, on the move; every third blow staggers |
 | 2 | **Heroic Throw** | 3 | builds | 13 m narrow cone | Open before it closes |
 | 3 | **Sunder** | 6 | 35 | 4.6 m ring | The answer to being surrounded |
 | 4 | **Cleave** | 10 | 20 | 3.2 m half-circle | Everything in front of you |

@@ -61,6 +61,7 @@ packages/client/src/
   questUI.ts         quest dialogue (E), tracker, quest log (J)
   questMarks.ts      where each quest wants you, for the maps and compass
   chat.ts            chat (Enter): say and party channels, the log
+  mouselook.ts       pointer lock: the mouse is the camera; Alt/windows free it
   party.ts           party frames, the party window (P), invites
   terrain.ts         chunk streamer + horizon mesh + groundTone
   scenery.ts         thin-instanced trees/rocks/grass per chunk
@@ -120,6 +121,12 @@ packages/client/src/
 - Browser automation's key presses arrive with an empty `event.code`, and every
   binding reads `code`. Drive keys with
   `window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyW" }))`.
+- The mouse is pointer-locked in play (`mouselook.ts`). The preview pane drops
+  a lock the moment it is granted, which reads as Esc and opens the menu; to
+  test combat there, fake it: `Object.defineProperty(document,
+  "pointerLockElement", { get: () => canvas })`, dispatch "pointerlockchange",
+  then `MouseEvent("mousedown", { button: 0 | 2 })` swings or blocks and
+  `MouseEvent("mousemove", { movementX })` on document turns the camera.
 - Items are keys, not ids: never compare or look up an item by anything but
   `describeItem(key)`. Anything that rolls an item belongs in the server.
 

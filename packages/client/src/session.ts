@@ -1,5 +1,6 @@
 import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents.js";
-import { Vector3 } from "@babylonjs/core/Maths/math.js";
+import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.js";
+import { Viewport } from "@babylonjs/core/Maths/math.viewport.js";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import type { Data } from "@colyseus/schema";
 import {
@@ -161,7 +162,7 @@ const AIM_ASSIST_SLACK = 2.5;
 
 /** Without a target, a blow leans toward anything within this angle of
  *  where you are looking; a Heroic Throw, much less. */
-const SOFT_AIM_MELEE = 1.3;
+const SOFT_AIM_MELEE = 0.7;
 const SOFT_AIM_RANGED = 0.3;
 
 /** Past this reach, an ability aims like a thrown one. */
@@ -266,6 +267,8 @@ export function createSession(
   /** Your bar, in order: key N casts `bar[N - 1]`. */
   const bar = CLASSES[classId].abilities.map((ability) => ability.spell);
   const resourceKind = CLASSES[classId].resource;
+  /** What right-click does for this class. */
+  const guard = CLASSES[classId].guard;
 
   // One Predict per room drives everything visual: remote players are
   // interpolated ~INTERP_DELAY_MS in the past (so we always have two real
@@ -565,6 +568,9 @@ export function createSession(
   // never changes your target.
   const pointer = scene.onPointerObservable.add((info) => {
     if (info.type !== PointerEventTypes.POINTERTAP) return;
+    // With the mouse captured a click is a swing, and there is no cursor to
+    // say what it was pointing at; picking is for a free cursor (Alt).
+    if (document.pointerLockElement) return;
     const pick = scene.pick(
       scene.pointerX, scene.pointerY,
       (mesh) => mesh.metadata?.enemyId !== undefined || mesh.metadata?.playerId !== undefined,
@@ -1006,7 +1012,7 @@ export function createSession(
     }
   }
 
-  const offDamage = room.onMessage("damage", (payload: { id: string; amount: number; by?: string }) => {
+  const offDamage = room.onMessage("damage", (payload: { id: string; amount: number; by?: string; blocked?: boolean }) => {
     const now = performance.now();
     const victim = room.state.players.get(payload.id);
     const view = players.get(payload.id);
@@ -1021,6 +1027,10 @@ export function createSession(
     const length = Math.hypot(x - fromX, z - fromZ) || 1;
     effects.impact(x, y + 0.8, z, (x - fromX) / length, (z - fromZ) / length, "blood", false);
 
+    if (payload.blocked) {
+      combatText.spawn(now, x, y + 1.9, z, "Blocked", "note");
+      play("hitHeavy", x, z, 0.5);
+    }
     if (payload.id === room.sessionId) {
       combatText.spawn(now, x, y + 1.5, z, `-${payload.amount}`, "taken");
       hud.hurt(payload.amount / Math.max(1, victim.maxHealth));
@@ -1109,7 +1119,11 @@ export function createSession(
     while (accumulator >= stepMs) {
       accumulator -= stepMs;
       const axes = keyboard.axes();
-      const wanted = bar[keyboard.castSlot() - 1];
+      // Right mouse: a raised guard for a class that blocks (no swinging
+      // behind it), a dodge for one that rolls.
+      const guardPressed = keyboard.takeGuard();
+      const blocking = guard === "block" && keyboard.guardHeld() && (selfPlayer?.health ?? 0) > 0;
+      const wanted = blocking ? undefined : bar[keyboard.castSlot() - 1];
       input.data.moveX = axes.x;
       input.data.moveZ = axes.z;
       input.data.yaw = facingYaw();
@@ -1124,7 +1138,8 @@ export function createSession(
       // sprint we predicted and it refused.
       input.data.sprint = keyboard.sprinting() && !(selfPlayer?.inCombat ?? false);
       input.data.jump = keyboard.jumping();
-      input.data.dodge = keyboard.takeDodge();
+      input.data.dodge = keyboard.takeDodge() || (guard === "dodge" && guardPressed);
+      input.data.block = blocking;
       input.data.heal = keyboard.healing();
       // The same step the server will run on this input (`stepCast`).
       stepLocalCast(input.data, wanted, now);
@@ -1342,6 +1357,8 @@ export function createSession(
       if (dead && !view.dead) view.animator.die(now);
       if (!dead && view.dead) view.animator.revive(now);
       view.dead = dead;
+      // A raised guard: ours as we hold it, everyone else's as the server says.
+      view.animator.guarding = !dead && (mine ? input.data.block : player.blocking);
       view.animator.update(now, x, z, mine && keyboard.sprinting() && !player.inCombat);
       if (player.level !== view.level) {
         view.level = player.level;
@@ -1560,7 +1577,33 @@ export function createSession(
     if (canvas) {
       nametags.update(scene, world.camera, canvas, nametagTargets);
       combatText.update(now, scene, world.camera, canvas);
+      drawReticle(canvas);
     }
+  }
+
+  /**
+   * The reticle: a point a few metres ahead of you at chest height, where a
+   * swing goes, drawn over the thing it would land on — hot when Strike would
+   * connect. Only while the game holds the mouse: with a cursor out, you are
+   * pointing at the screen, not the world.
+   */
+  const reticle = document.getElementById("reticle") as HTMLElement;
+  const reticlePoint = new Vector3();
+  const reticleViewport = new Viewport(0, 0, 0, 0);
+  function drawReticle(canvas: HTMLCanvasElement): void {
+    const show = document.pointerLockElement !== null && selfPlayer !== undefined && selfPlayer.health > 0;
+    if (reticle.hidden === show) reticle.hidden = !show;
+    if (!show) return;
+    const self = selfPosition();
+    const yaw = facingYaw();
+    reticlePoint.set(self.x + Math.sin(yaw) * 6, self.y + 1.1, self.z + Math.cos(yaw) * 6);
+    reticleViewport.width = canvas.clientWidth;
+    reticleViewport.height = canvas.clientHeight;
+    const at = Vector3.Project(reticlePoint, Matrix.IdentityReadOnly, scene.getTransformMatrix(), reticleViewport);
+    reticle.style.transform = `translate(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px)`;
+    const strike = SPELLS.strike;
+    const hot = predictHits(strike, self.x, self.z, aimFor(strike)).length > 0;
+    if (reticle.classList.contains("hot") !== hot) reticle.classList.toggle("hot", hot);
   }
 
   function dispose(): void {
@@ -1612,6 +1655,7 @@ export function createSession(
     nametags.clear();
     hud.setGatePrompt(undefined);
     hud.setSpeech(undefined);
+    reticle.hidden = true;
   }
 
   const api: OstraSession = {

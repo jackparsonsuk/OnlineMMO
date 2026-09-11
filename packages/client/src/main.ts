@@ -34,6 +34,7 @@ import { VendorUI } from "./vendorUI.js";
 import { showTitleScreen } from "./titleScreen.js";
 import { Hud } from "./hud.js";
 import { KeyboardInput } from "./input.js";
+import { MouseLook } from "./mouselook.js";
 import { applyOstra, createWorld } from "./scene.js";
 import { createSession, type OstraSession } from "./session.js";
 
@@ -105,6 +106,24 @@ const partyUI = new PartyUI({
 });
 
 const chat = new Chat((text, channel) => sendToRoom?.("chat", { text, channel }));
+
+/**
+ * The mouse is the camera while you are in the world and nothing is open;
+ * anything with things to click takes it back (see MouseLook). Losing it to
+ * Esc with nothing else explaining it opens the game menu, as Esc would.
+ */
+const mouseLook = new MouseLook(
+  canvas,
+  world.camera,
+  () => session !== undefined && !travelling && !anyWindowOpen(),
+  () => { if (session && !anyWindowOpen()) setMenu(true); },
+);
+
+function anyWindowOpen(): boolean {
+  return characterScreen.isOpen || (session?.mapOpen ?? false) || questUI.isOpen || vendorUI.isOpen
+    || partyUI.isOpen || hud.helpOpen || !gameMenu.hidden || chat.isOpen
+    || !(document.getElementById("title") as HTMLElement).hidden;
+}
 
 /** Tell the session which bodies in this room are your party. */
 function markParty(): void {
@@ -375,6 +394,7 @@ function frame(now: number): void {
   devMenu?.update(now);
   partyUI.update(room?.state);
   chat.update(Date.now());
+  mouseLook.sync();
   if (session) {
     const self = session.selfPosition();
     questUI.update(self.x, self.z);

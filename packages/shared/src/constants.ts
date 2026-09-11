@@ -46,6 +46,20 @@ export const DODGE_SPEED = 16;
 export const DODGE_STEPS = 8;
 export const DODGE_COOLDOWN_STEPS = 150;
 
+/**
+ * Moving while attacking or blocking. You can swing on the move — that is
+ * the action in action combat — but slower than you walk, and a raised
+ * guard slower still; neither lets you sprint. Read from the input itself
+ * (`cast`, `block`), so both sides agree on every step.
+ */
+export const ATTACK_MOVE_FACTOR = 0.72;
+export const BLOCK_MOVE_FACTOR = 0.45;
+
+/** A raised guard stops this share of a blow from the front... */
+export const BLOCK_REDUCTION = 0.8;
+/** ...where the front is this far either side of where you face. */
+export const BLOCK_ARC = 1.2;
+
 /** Player cube dimensions. */
 export const PLAYER_SIZE = 1;
 export const PLAYER_HALF = PLAYER_SIZE / 2;

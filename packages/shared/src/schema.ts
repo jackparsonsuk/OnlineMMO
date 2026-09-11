@@ -40,6 +40,8 @@ export const MoveInput = schema({
   dodge: t.boolean().default(false),
   /** Asked to heal. The server gates it on its own cooldown. */
   heal: t.boolean().default(false),
+  /** Right mouse held, for a class whose guard is a block (`ClassDefinition.guard`). */
+  block: t.boolean().default(false),
 }, "MoveInput");
 export type MoveInput = SchemaType<typeof MoveInput>;
 
@@ -66,6 +68,9 @@ export const Player = schema({
   dodgeX: t.float32().default(0),
   dodgeZ: t.float32().default(0),
   dodgeCooldown: t.uint16().default(0),
+  /** Guard raised. Public, so everyone draws the pose; the server alone
+   *  decides what it stops. */
+  blocking: t.boolean().default(false),
   /** Public, like a creature's: over your head, and in the roster. */
   level: t.uint8().default(1),
   /** Zero means dead and awaiting respawn. */

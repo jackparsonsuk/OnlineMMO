@@ -64,6 +64,12 @@ export interface ClassDefinition {
    * wasted line. See `describeItem`.
    */
   stats: readonly PrimaryStat[];
+  /**
+   * What right-click does: raise a guard, or dodge. A Warrior blocks — it
+   * stands its ground behind a shield — and a lighter class would roll out
+   * of the way instead. Q dodges for everyone either way.
+   */
+  guard: "block" | "dodge";
 }
 
 export const CLASSES: Record<ClassId, ClassDefinition> = {
@@ -72,6 +78,8 @@ export const CLASSES: Record<ClassId, ClassDefinition> = {
     name: "Warrior",
     description: "Steel and nerve. Grows stronger the longer a fight lasts.",
     resource: "fervour",
+    // It stands its ground behind a shield rather than rolling away.
+    guard: "block",
     growth: { might: 2, vigour: 2 },
     abilities: [
       { spell: "strike", level: 1 },
@@ -158,7 +166,7 @@ export const FERVOUR_MAX = 100;
 export const FERVOUR_PER_SECOND = 4;
 /** Added by each landed blow of an ability that `builds`. Strike lands once
  *  every 1.8 seconds, so each blow is worth a good stoke. */
-export const FERVOUR_PER_BLOW = 10;
+export const FERVOUR_PER_BLOW = 4;
 /** Per second out of combat. Gone a few seconds after the fight ends. */
 export const FERVOUR_DRAIN_PER_SECOND = 20;
 /** Extra damage at full Fervour; scales linearly from nothing at empty. */

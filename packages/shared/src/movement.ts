@@ -6,6 +6,8 @@ import {
   GRAVITY,
   JUMP_SPEED,
   MOVE_SPEED,
+  ATTACK_MOVE_FACTOR,
+  BLOCK_MOVE_FACTOR,
   PLAYER_RADIUS,
   SPRINT_MULTIPLIER,
   STEP_DOWN,
@@ -53,6 +55,10 @@ export interface MoveCommand {
   sprint?: boolean;
   jump?: boolean;
   dodge?: boolean;
+  /** An ability key held this step (its wire index; 0 for none): slows you. */
+  cast?: number;
+  /** A guard raised this step: slows you more. */
+  block?: boolean;
 }
 
 /**
@@ -110,11 +116,10 @@ export interface MoveWorld {
    *  the same value the server does, or prediction disagrees at the boundary. */
   halfExtent: number;
   /**
-   * Obstacles and other players. The server passes exact positions; the client
-   * passes its best estimate of where everyone is, which is necessarily a
-   * little behind. Player-vs-player collision is therefore APPROXIMATE on the
-   * client by construction — the reconciler exists to absorb exactly that.
-   * Scenery is identical on both sides and so predicts perfectly.
+   * Bodies: players and creatures. Only a creature's step (server-side) is
+   * given any — a player's own step gets none on either side, since the
+   * client only knows other bodies late and colliding against them was the
+   * rubber-banding (see the README, Collision).
    */
   colliders: readonly Collider[];
   /** Rocks, trees and pillars, looked up by cell. Identical on both sides, so
@@ -137,11 +142,10 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * @param canSprint Whether a sprint request is honoured this step. The server
- *   passes "not in combat"; the client passes its latest copy of the same
- *   replicated flag. They disagree only for the round trip after combat starts
- *   or ends, which the reconciler absorbs as a small correction — the price of
- *   not letting anyone outrun a spider by holding Shift.
+ * @param canSprint Whether a sprint request is honoured this step. The client
+ *   only asks while it believes it is out of combat and predicts as asked
+ *   (true); the server honours it out of combat or within SPRINT_GRACE_MS of a
+ *   fight starting, so the two agree across the round trip.
  */
 export function applyInput(
   state: PlayerMoveState,
@@ -189,7 +193,12 @@ export function applyInput(
     deltaX = state.dodgeX * DODGE_SPEED * dt;
     deltaZ = state.dodgeZ * DODGE_SPEED * dt;
   } else if (magnitude > 0) {
-    const speed = command.sprint === true && canSprint ? MOVE_SPEED * SPRINT_MULTIPLIER : MOVE_SPEED;
+    const guarding = command.block === true;
+    const attacking = (command.cast ?? 0) !== 0;
+    const speed = guarding ? MOVE_SPEED * BLOCK_MOVE_FACTOR
+      : attacking ? MOVE_SPEED * ATTACK_MOVE_FACTOR
+        : command.sprint === true && canSprint ? MOVE_SPEED * SPRINT_MULTIPLIER
+          : MOVE_SPEED;
     deltaX = steerX * speed * dt;
     deltaZ = steerZ * speed * dt;
   }

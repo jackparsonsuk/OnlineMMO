@@ -5,7 +5,7 @@
  * step* — not how many OS key-repeat events happened to fire in between.
  */
 
-type Action = "forward" | "back" | "left" | "right" | "sprint" | "jump" | "dodge" | "heal"
+type Action = "forward" | "back" | "left" | "right" | "sprint" | "jump" | "dodge" | "heal" | "guard"
   | "spell1" | "spell2" | "spell3" | "spell4" | "spell5" | "spell6";
 
 /** How many slots the ability bar has keys for. */
@@ -16,8 +16,10 @@ const BINDINGS: Record<string, Action> = {
   KeyS: "back", ArrowDown: "back",
   KeyA: "left", ArrowLeft: "left",
   KeyD: "right", ArrowRight: "right",
-  // Space jumps, as it does in every game with a jump; the bar is 1-6, under
-  // the fingers that are not steering.
+  // Space jumps, as it does in every game with a jump. The mouse's left
+  // button is Strike and its right the guard (see the mouse handlers below);
+  // the rest of the bar is 2-6, under the fingers that are not steering, and
+  // 1 still swings for anyone who reaches for it.
   Space: "jump",
   KeyQ: "dodge",
   KeyR: "heal",
@@ -43,6 +45,8 @@ export class KeyboardInput {
   /** A dodge is one press, not a held key: set on keydown, taken by the
    *  next input step. Holding Q should not dodge again the moment it can. */
   private dodgeQueued = false;
+  /** A right-click since the last step asked, for a class that dodges on it. */
+  private guardQueued = false;
   private detach: () => void;
 
   constructor(target: Window = window) {
@@ -67,14 +71,35 @@ export class KeyboardInput {
     // cube walking into a wall forever.
     const onBlur = () => this.held.clear();
 
+    // The mouse's buttons are combat only while the game holds the mouse
+    // (`MouseLook`): with a cursor out, a click is for the thing under it.
+    // Let go whenever, though, so a button held as the lock drops is not
+    // left down.
+    const onMouseDown = (event: MouseEvent) => {
+      if (!document.pointerLockElement) return;
+      if (event.button === 0) this.held.add("spell1");
+      if (event.button === 2) {
+        this.held.add("guard");
+        this.guardQueued = true;
+      }
+    };
+    const onMouseUp = (event: MouseEvent) => {
+      if (event.button === 0) this.held.delete("spell1");
+      if (event.button === 2) this.held.delete("guard");
+    };
+
     target.addEventListener("keydown", onKeyDown as EventListener);
     target.addEventListener("keyup", onKeyUp as EventListener);
     target.addEventListener("blur", onBlur);
+    target.addEventListener("mousedown", onMouseDown as EventListener);
+    target.addEventListener("mouseup", onMouseUp as EventListener);
 
     this.detach = () => {
       target.removeEventListener("keydown", onKeyDown as EventListener);
       target.removeEventListener("keyup", onKeyUp as EventListener);
       target.removeEventListener("blur", onBlur);
+      target.removeEventListener("mousedown", onMouseDown as EventListener);
+      target.removeEventListener("mouseup", onMouseUp as EventListener);
     };
   }
 
@@ -105,6 +130,19 @@ export class KeyboardInput {
 
   healing(): boolean {
     return this.held.has("heal");
+  }
+
+  /** Right button held: a guard, for a class that blocks. */
+  guardHeld(): boolean {
+    return this.held.has("guard");
+  }
+
+  /** Whether the right button was pressed since the last step asked — a
+   *  dodge, for a class whose guard is one. */
+  takeGuard(): boolean {
+    const queued = this.guardQueued;
+    this.guardQueued = false;
+    return queued;
   }
 
   /** Whether a dodge was pressed since the last step asked. */

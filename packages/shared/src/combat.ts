@@ -51,7 +51,7 @@ export const CRIT_MULTIPLIER = 1.8;
  */
 /** Longer than Strike's cooldown, with room for latency — or no chain could
  *  ever reach its third link. */
-export const STRIKE_COMBO_WINDOW_MS = 2600;
+export const STRIKE_COMBO_WINDOW_MS = 1400;
 export const STRIKE_COMBO_LENGTH = 3;
 export const COMBO_FINISHER_MULTIPLIER = 1.5;
 export const COMBO_FINISHER_KNOCKBACK = 1.7;
