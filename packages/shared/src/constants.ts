@@ -71,7 +71,17 @@ export const COLLISION_ITERATIONS = 2;
  * How far in the past remote players are rendered. Covers one patch interval
  * plus jitter, so the interpolator always has two samples to work between.
  */
-export const INTERP_DELAY_MS = 120;
+export const INTERP_DELAY_MS = 150;
+
+/**
+ * How long after a fight starts the server still honours a sprint request.
+ * The client only asks to sprint while it believes you are out of combat,
+ * and learns a fight has started a round trip after it has — without this,
+ * every fight began with the server refusing a sprint the client had already
+ * predicted, and a snap back of most of a metre. Covers a round trip of up
+ * to 600 ms; a client that ignores it gains that long of sprint, per fight.
+ */
+export const SPRINT_GRACE_MS = 600;
 
 /** Step inside this distance of a Gate and it takes you. */
 export const GATE_RADIUS = 1.75;

@@ -89,8 +89,9 @@ so they are literally the same compiled function.
    server has actually consumed.
 4. The client predicts its own cube immediately, and on each patch rewinds to
    the server's position and replays the inputs that weren't acked yet. Other
-   players are interpolated ~120 ms in the past, so they always move between two
-   real samples rather than guessing.
+   players are interpolated 150 ms in the past, so they always move between two
+   real samples rather than guessing — enough to ride out the jitter of a home
+   connection through a tunnel.
 
 Steps 3 and 4 are the SDK's `Predict` / `Reconciler`; step 2 is the room's
 `defineInput` buffer. The tick rate is advertised by the server through the join
@@ -99,14 +100,34 @@ handshake, so both sides predict on exactly the same `dt`.
 ## Collision
 
 Circle-vs-circle push-out, resolved inside `applyInput` so client and server run
-the identical code. Two kinds of collider go in:
+the identical code. **A player collides only with what both sides know
+exactly**: scenery (each Ostra's `obstacles`, the generated trees and rocks),
+buildings and dungeon rock, and the ground. So your own movement predicts
+perfectly — you never see a correction walking into a rock or a wall.
 
-- **Scenery** comes from each Ostra's `obstacles` table. Identical on both sides,
-  so it predicts perfectly — you never see a correction walking into a rock.
-- **Other players** are approximate on the client by construction. The server
-  knows exactly where everyone is; the client only knows where it last *drew*
-  them, ~120 ms in the past. The reconciler exists to absorb precisely that
-  disagreement, so a contested shove settles rather than fighting.
+**Players pass through other players and through creatures**, as in WoW. They
+used to collide, against positions the client could only know late: where it
+last *drew* them, 150 ms in the past, plus the other player's own latency. The
+server, knowing better, disagreed at every brush, and every disagreement is a
+correction. With three friends playing together over a home connection that
+was constant rubber-banding — measured at a 210 ms round trip, walking through
+a friend gave ten corrections of up to 64 cm in ten seconds; with bodies out of
+your step, none. Creatures still keep out of players, from their side: their
+step (server-only, never predicted) collides with everyone, so a Risen still
+stops at you rather than standing in you.
+
+Sprint had the same shape of problem at the start of every fight: the server
+stops honouring it the moment something hunts you, and the client heard a
+round trip later, having predicted a sprint the server refused — one snap back
+of most of a metre. Now the client only asks to sprint while it believes you
+are out of combat, and the server honours a request for `SPRINT_GRACE_MS`
+after a fight begins, so the two agree across the round trip.
+
+What correction is left eases out over 90 ms rather than snapping, and anything
+over 5 m is a teleport (a respawn, a Gate) and pops. `GET /debug/rooms` reports
+each room's tick time (a tick over 33 ms is the simulation falling behind), and
+in dev `session.debug.reconciler()` is the live reconciler. To test netcode
+locally, start the server with `COLYSEUS_LATENCY=150` (round-trip ms).
 
 Displacements from every contact are summed and applied together rather than one
 collider at a time. Sequential resolution depends on the order colliders arrive
@@ -228,7 +249,7 @@ Ostra repopulates the moment somebody walks back into it.
 Space swings. The server resolves everything; the client only draws — but it
 draws *immediately*, which is most of what makes a hit feel like a hit.
 
-**Hits are lag-compensated.** A client renders creatures ~120 ms in the past, so
+**Hits are lag-compensated.** A client renders creatures 150 ms in the past, so
 a Void Spider closing at 7.2 m/s is nearly a metre from where it appears by the
 time a swing reaches the server — most of the 2.4 m reach. The room records
 enemy positions (`allowRewindState`) and the hit test asks `lastSeenBy()` where
@@ -1233,7 +1254,7 @@ build next live in [TODO.md](TODO.md).
   tabs. If clients and players ever *disagree*, that is a different and much
   worse bug.
 - **Gate rings are not solid**, deliberately — you walk into one to use it.
-  Scenery and other players are solid.
+  Scenery and buildings are solid; players and creatures are not, to you.
 - **The duplicate-character guard is per-room.** One character can't be in the
   same Ostra twice, but two clients racing could briefly hold it in two
   different Ostras.

@@ -125,13 +125,18 @@ export interface OstraSession {
   debug: {
     predict: Predict<WorldState>;
     meshes: ReadonlyMap<string, TransformNode>;
-    colliders: readonly Collider[];
     /** The live input handle — `sentCount` is the fastest way to tell
      *  "the server ignored me" from "nothing was ever sent". */
     input: InputHandle<Data<MoveInput>>;
     target(): string | undefined;
+    /** Our own reconciler, for its drift telemetry (`drift.ema` is
+     *  persistent divergence, `drift.peak` recent corrections). */
+    reconciler(): Reconciler<Player, Data<MoveInput>> | undefined;
   };
 }
+
+/** Your own step collides with no bodies — see `moveWorld`. */
+const NO_BODIES: readonly Collider[] = [];
 
 /** Show the Gate label from a little further out than the Gate actually fires. */
 const GATE_PROMPT_RANGE = 6;
@@ -452,46 +457,25 @@ export function createSession(
   // instance itself — `Data<MoveInput>` is that view.
   let reconciler: Reconciler<Player, Data<MoveInput>> | undefined;
 
-  // Rebuilt once per frame and read by every step of that frame, including
-  // rollback replays, so a replay sees the same world the live step did.
-  // Scenery comes from the same cell index the server uses; buildings and
-  // the ground too, which the prediction used to leave out — so it guessed
-  // wrong walking into a wall or up a hill and was corrected every patch.
-  const colliders: Collider[] = [];
+  // The world your own step moves through: exactly what the server's step for
+  // you sees. Scenery from the same cell index, buildings, and the ground —
+  // all identical on both sides, so the prediction reproduces the server.
+  //
+  // No other bodies. Players and creatures used to be colliders here too, at
+  // the positions they were *drawn* — ~150 ms plus everyone's latency behind
+  // where the server has them — so any brush with a friend or a creature was
+  // a disagreement, and a disagreement is a correction: the rubber-banding
+  // three people in a group saw constantly. Players now pass through players
+  // and creatures, as in WoW; creatures still keep out of players on the
+  // server, from their side (see `collectColliders`).
   const moveWorld: MoveWorld = {
     halfExtent: ostra.size / 2,
-    colliders,
+    colliders: NO_BODIES,
     scenery: sceneryIndex(ostra),
     boxes: buildingColliders(ostra),
     terrain: ostra.terrain,
     selfId: room.sessionId,
   };
-
-  function refreshColliders(): void {
-    colliders.length = 0;
-    room.state.players.forEach((player: Player, sessionId: string) => {
-      if (sessionId === room.sessionId) return;
-      // The rendered position, not the raw one: colliding against where a
-      // player is *drawn* is what makes the push feel like it matches the
-      // picture, even though the server knows better.
-      colliders.push({
-        id: sessionId,
-        x: predict.value(player, "x"),
-        z: predict.value(player, "z"),
-        radius: PLAYER_RADIUS,
-      });
-    });
-    room.state.enemies.forEach((enemy: Enemy, enemyId: string) => {
-      // You can walk over a corpse — on the server too.
-      if (enemy.state === EnemyState.Dead) return;
-      colliders.push({
-        id: enemyId,
-        x: predict.value(enemy, "x"),
-        z: predict.value(enemy, "z"),
-        radius: archetypeOf(enemy).radius,
-      });
-    });
-  }
 
   /** What a creature is called: an elite's own name, a variant's, or its
    *  kind's. */
@@ -797,11 +781,17 @@ export function createSession(
         // Everything the step reads from one input to the next: a jump's
         // speed and a dodge's timers replay like position does.
         fields: ["x", "y", "z", "yaw", "vy", "dodgeLeft", "dodgeX", "dodgeZ", "dodgeCooldown"],
+        // What little correction is left eases out over a couple of patches
+        // instead of one, so it reads as a drift rather than a hop; anything
+        // bigger than a sprint's worth of a patch is a teleport or a respawn,
+        // and pops there rather than gliding across the ground.
+        smoothMs: 90,
+        snap: 5,
         input,
         step: (ctx, state, command) => {
           // The server discards a dead player's input; so do we.
           if (selfPlayer && selfPlayer.health === 0) return;
-          applyInput(state, command, ctx.dt, moveWorld, !(selfPlayer?.inCombat ?? false));
+          applyInput(state, command, ctx.dt, moveWorld, true);
         },
       });
     }
@@ -1128,7 +1118,11 @@ export function createSession(
       // A cast under way keeps aiming at its target until it lands, key held
       // or not — the server takes the latest aim.
       input.data.aim = aimFor(localCast?.spell ?? (wanted ? SPELLS[wanted] : undefined));
-      input.data.sprint = keyboard.sprinting();
+      // Only asked for when we believe we are out of combat, and predicted as
+      // asked: the server honours a request for a moment after a fight starts
+      // (SPRINT_GRACE_MS), so the round trip before we hear of it is not a
+      // sprint we predicted and it refused.
+      input.data.sprint = keyboard.sprinting() && !(selfPlayer?.inCombat ?? false);
       input.data.jump = keyboard.jumping();
       input.data.dodge = keyboard.takeDodge();
       input.data.heal = keyboard.healing();
@@ -1295,7 +1289,6 @@ export function createSession(
     // Reading before the sends renders one fixed step stale, which shows up as
     // stutter whenever a frame runs late.
     predict.tick(now);
-    refreshColliders();
     pumpInput(now);
 
     for (let i = scheduled.length - 1; i >= 0; i--) {
@@ -1643,7 +1636,7 @@ export function createSession(
     say: (sessionId, text) => nametags.say(sessionId, text),
     onPlayerClick: undefined,
     dispose,
-    debug: { predict, meshes, colliders, input, target: () => target },
+    debug: { predict, meshes, input, target: () => target, reconciler: () => reconciler },
   };
   return api;
 }

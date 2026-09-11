@@ -82,6 +82,11 @@ packages/client/src/
 - **The server is the only authority.** Clients send intent (`MoveInput`:
   axes, yaw, cast slot, aim, sprint) and never positions or damage. Client-side
   combat visuals (predicted impacts, animations) decide nothing.
+- **A player's step collides only with what the client knows exactly** —
+  scenery, buildings, dungeon rock, ground. Never put players or creatures
+  back into it: the client only knows them ~150 ms late, and that was the
+  group rubber-banding (README, Collision). Test netcode with
+  `COLYSEUS_LATENCY=150` on the server.
 - **Schema changes are wire changes.** Client and server must be rebuilt
   together; `npm run dev` does this.
 - **Every spawn/waystone must be safe.** `unsafeSpawns()` runs at boot and logs

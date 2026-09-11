@@ -122,6 +122,8 @@ app.get("/debug/rooms", async (_req, res) => {
       ostraId: (room.metadata as { ostraId?: string } | undefined)?.ostraId
         ?? (local?.state as { ostraId?: string } | undefined)?.ostraId,
       clients: local ? local.clients.length : room.clients,
+      tick: (local as { tickStats?: unknown } | undefined)?.tickStats,
+      enemies: (local?.state as { enemies?: { size: number } } | undefined)?.enemies?.size,
       players: (local?.state as { players?: { size: number } } | undefined)?.players?.size,
       names: local
         ? [...((local.state as { players: Map<string, { name: string; health: number }> }).players)

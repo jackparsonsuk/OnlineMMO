@@ -85,6 +85,7 @@ import {
   castSteps,
   isMoving,
   isDodging,
+  SPRINT_GRACE_MS,
   HEAL_COOLDOWN_MS,
   HEAL_FRACTION,
   STRIKE_COMBO_LENGTH,
@@ -194,6 +195,8 @@ interface Session {
   diedAtZ: number;
   /** Wall-clock ms until which they count as fighting. */
   combatUntil: number;
+  /** When they last went into combat, for the sprint grace. */
+  combatStartedAt: number;
   /** Where they are in the Strike chain, and when the last link landed. */
   comboStep: number;
   comboAt: number;
@@ -472,6 +475,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     // or from the AI, or not at all.
     this.setFixedTimestep((ctx) => {
       const now = Date.now();
+      const started = performance.now();
       this.tick++;
 
       // One snapshot for the whole tick, taken before anyone moves. Rebuilding
@@ -487,6 +491,12 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         terrain: this.ostra.terrain,
         selfId: "",
       };
+      // A player's own step sees only what the client's prediction can see
+      // exactly: scenery, buildings, ground. Bodies are left to the creatures,
+      // which keep out of players from their side. See the client's
+      // `moveWorld` for why: colliding players against bodies the client only
+      // knows ~150 ms late was the rubber-banding.
+      const playerWorld = { ...world, colliders: [] as Collider[] };
 
       for (const [sessionId, player] of this.state.players) {
         const session = this.sessions.get(sessionId);
@@ -494,7 +504,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         // them further here would overwrite that with a stale position.
         if (!session || session.transferring) continue;
 
-        world.selfId = sessionId;
+        playerWorld.selfId = sessionId;
 
         // A fallen player is simulated no further; their inputs still drain so
         // the reconcile ack keeps advancing and their client doesn't stall.
@@ -507,7 +517,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         // keeps the server's ack aligned with the client's pending-input list,
         // so its rollback replays exactly the frames we haven't applied yet.
         for (const input of this.inputs.get(sessionId)) {
-          applyInput(player, input, ctx.dt, world, !player.inCombat);
+          applyInput(player, input, ctx.dt, playerWorld, this.canSprint(session, player, now));
           this.stepCast(sessionId, session, player, input, now);
           if (input.heal) this.tryHeal(sessionId, session, player, now);
         }
@@ -526,6 +536,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         this.updateElites(now);
         this.questVisits();
       }
+      this.recordTick(performance.now() - started);
     }, TICK_RATE);
   }
 
@@ -632,6 +643,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       diedAtX: x,
       diedAtZ: z,
       combatUntil: 0,
+      combatStartedAt: 0,
       comboStep: 0,
       comboAt: 0,
       targetId: undefined,
@@ -645,6 +657,27 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     // Wake the camps around them now rather than up to half a second later,
     // so arriving somewhere never shows an empty field filling up.
     this.updateCamps(Date.now());
+  }
+
+  /** How long the last simulation ticks took, in ms: a rolling average and
+   *  the worst in the last few seconds. A tick over 1000/TICK_RATE ms means
+   *  the simulation is falling behind real time, and every client's
+   *  prediction with it — the first thing to rule out behind rubber-banding. */
+  readonly tickStats = { avgMs: 0, worstMs: 0, over: 0 };
+  private worstAt = 0;
+
+  private recordTick(ms: number): void {
+    const stats = this.tickStats;
+    stats.avgMs += (ms - stats.avgMs) * 0.05;
+    const now = Date.now();
+    if (ms > stats.worstMs || now - this.worstAt > 5000) {
+      stats.worstMs = ms;
+      this.worstAt = now;
+    }
+    if (ms > 1000 / TICK_RATE) {
+      stats.over++;
+      if (stats.over % 30 === 1) console.warn(`[${this.ostra.id}] slow tick: ${ms.toFixed(1)} ms (${stats.over} over budget)`);
+    }
   }
 
   /** Tell the party registry this character is here, as they now are. */
@@ -1237,13 +1270,26 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     }
   }
 
+  /**
+   * Whether a sprint request is honoured: out of combat, or in the first
+   * moments of a fight, before the client can have heard of it. The client
+   * only asks while it believes it is out of combat, so this makes the two
+   * agree across the round trip (see SPRINT_GRACE_MS).
+   */
+  private canSprint(session: Session, player: Player, now: number): boolean {
+    return !player.inCombat || now - session.combatStartedAt < SPRINT_GRACE_MS;
+  }
+
   /** Being hunted or having traded blows recently both count as fighting. */
   private updateCombatFlags(now: number): void {
     for (const [sessionId, session] of this.sessions) {
       const player = this.state.players.get(sessionId);
       if (!player) continue;
       const fighting = player.health > 0 && (now < session.combatUntil || this.hunted.has(sessionId));
-      if (player.inCombat !== fighting) player.inCombat = fighting;
+      if (player.inCombat !== fighting) {
+        player.inCombat = fighting;
+        if (fighting) session.combatStartedAt = now;
+      }
     }
   }
 
