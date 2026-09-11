@@ -69,6 +69,11 @@ fly deploy
 
 `fly.toml` already sets `auto_stop_machines = false`. Leave it that way — a
 suspended machine is a stopped world, and the simulation must keep ticking.
+It also sets `auto_start_machines = true` and a restart policy of `always`,
+for the opposite case: a machine that stops anyway (a crash, or a deploy that
+updates it without starting it, which happened once) comes back on its own or
+on the next visit, instead of staying down until someone runs
+`fly machine start`.
 
 Use the CLI rather than the dashboard's "Launch from GitHub": that path runs
 `flyctl launch plan propose`, which proposes its own settings over yours. App
