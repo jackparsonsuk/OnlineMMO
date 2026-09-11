@@ -1359,17 +1359,18 @@ export function createSession(
           ? facingYaw()
           : predict.value(player, "yaw");
 
-      const moves = mine
-        ? { vy: predict.value(player, "vy"), dodgeLeft: predict.value(player, "dodgeLeft") }
-        : lateMoves(view, now, player);
+      // Ours from the predicted step itself, not `value()`: that adds a
+      // correction offset which eases toward zero and never quite gets there,
+      // and "exactly 0 is standing" is the whole test — read smoothed, the
+      // body stayed in its jump pose after landing.
+      const predicted = mine ? reconciler?.state : undefined;
+      const moves = predicted ?? (mine ? player : lateMoves(view, now, player));
       view.animator.vy = moves.vy;
       // The first frame of a dodge: a puff of dust where they pushed off.
       const dodging = moves.dodgeLeft > 0;
       if (dodging && !view.dodging) {
         // Ours from the prediction: the server has not heard of this dodge yet.
-        view.animator.dodge(now,
-          mine ? predict.value(player, "dodgeX") : player.dodgeX,
-          mine ? predict.value(player, "dodgeZ") : player.dodgeZ);
+        view.animator.dodge(now, (predicted ?? player).dodgeX, (predicted ?? player).dodgeZ);
         effects.dust(x, y, z, 10);
         play("evade", x, z, mine ? 0.8 : 0.4);
       }
