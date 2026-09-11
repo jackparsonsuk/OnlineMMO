@@ -6,10 +6,8 @@ import {
   xpToNext,
   type ClassId,
   type OstraDefinition,
-  type Player,
   type ResourceKind,
   type SpellId,
-  type WorldState,
 } from "@mmo/shared";
 
 const RESOURCE_NAMES: Record<ResourceKind, string> = { fervour: "Fervour", mana: "Mana" };
@@ -22,11 +20,14 @@ interface AbilitySlot {
 }
 
 export class Hud {
+  private zoneBanner = document.getElementById("zone-banner") as HTMLElement;
   private ostraName = document.getElementById("ostra-name") as HTMLElement;
   private ostraSubtitle = document.getElementById("ostra-subtitle") as HTMLElement;
   private status = document.getElementById("status") as HTMLElement;
   private stats = document.getElementById("stats") as HTMLElement;
-  private roster = document.getElementById("roster") as HTMLElement;
+  private playerName = document.getElementById("pf-name") as HTMLElement;
+  private playerLevel = document.getElementById("pf-level") as HTMLElement;
+  private help = document.getElementById("help") as HTMLElement;
   private gatePrompt = document.getElementById("gate-prompt") as HTMLElement;
   private speech = document.getElementById("speech") as HTMLElement;
   private speechWho = document.getElementById("speech-who") as HTMLElement;
@@ -71,30 +72,84 @@ export class Hud {
   private slots = new Map<SpellId, AbilitySlot>();
   private level = 1;
 
+  private bannerTimer: number | undefined;
+  private shownStats = "";
+
   constructor() {
     this.soundToggle.onclick = () => this.setMuted(this.onToggleSound?.() ?? false);
+    document.getElementById("help-toggle")!.onclick = () => this.toggleHelp();
+    this.help.addEventListener("click", (event) => {
+      // The button, or the dark around the card.
+      const target = event.target as HTMLElement;
+      if (target === this.help || target.closest("[data-close]")) this.toggleHelp(false);
+    });
   }
 
   setMuted(muted: boolean): void {
-    this.soundToggle.textContent = muted ? "Sound off" : "Sound on";
     this.soundToggle.classList.toggle("off", muted);
+    this.soundToggle.title = muted ? "Sound off (click to unmute)" : "Sound on (click to mute)";
   }
 
+  /** The controls card, on H and the corner's "?". */
+  toggleHelp(open = this.help.hidden): void {
+    this.help.hidden = !open;
+  }
+
+  get helpOpen(): boolean {
+    return !this.help.hidden;
+  }
+
+  /** Show the controls once per browser, the first time into the world. */
+  showHelpOnce(): void {
+    const key = "ostracon:seenControls";
+    try {
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, "1");
+    } catch {
+      // Storage refused: showing it every time is the safe way round.
+    }
+    this.toggleHelp(true);
+  }
+
+  /** Your own name, on your frame. */
+  setIdentity(name: string): void {
+    this.playerName.textContent = name;
+  }
+
+  /**
+   * Arriving in an Ostra: its name across the screen for a few seconds, the
+   * way a new zone announces itself, then gone. The minimap keeps saying
+   * where you are after that; a panel saying it permanently was clutter.
+   */
   setOstra(ostra: OstraDefinition): void {
     this.ostraName.textContent = ostra.name;
     this.ostraSubtitle.textContent = ostra.subtitle;
+    this.zoneBanner.classList.remove("show");
+    // Restart the animation even when arriving back where you were.
+    void this.zoneBanner.offsetWidth;
+    this.zoneBanner.classList.add("show");
+    window.clearTimeout(this.bannerTimer);
+    this.bannerTimer = window.setTimeout(() => this.zoneBanner.classList.remove("show"), 4600);
   }
 
+  /** Only on screen while something is happening or wrong: "connected" is
+   *  the normal state, and the normal state needs no label. */
   setStatus(text: string, isError = false): void {
     this.status.textContent = text;
     this.status.classList.toggle("error", isError);
+    this.status.hidden = !isError && text === "connected";
   }
 
-  /** Ping and tick rate are the two numbers that explain almost every
-   *  "why does it feel like that?" question during development. */
+  /** Ping in the corner. Tick rate and unacked inputs explain most "why
+   *  does it feel like that?" questions in development, and none in play. */
   setStats(ping: number, tickRate: number, pending: number): void {
-    this.stats.textContent =
-      `${Math.round(ping)} ms · ${tickRate} Hz · ${pending} pending`;
+    const text = import.meta.env.DEV
+      ? `${Math.round(ping)} ms · ${tickRate} Hz · ${pending}`
+      : `${Math.round(ping)} ms`;
+    if (text === this.shownStats) return;
+    this.shownStats = text;
+    this.stats.textContent = text;
+    this.stats.classList.toggle("slow", ping > 180);
   }
 
   /** Named when you're near enough to see it, so a Gate is never a surprise. */
@@ -263,6 +318,7 @@ export class Hud {
   setXp(level: number, xp: number): void {
     const next = xpToNext(level);
     this.xpLevel.textContent = `Level ${level}`;
+    this.playerLevel.textContent = String(level);
     this.xpNumbers.textContent = level >= MAX_LEVEL ? "Max level" : `${xp.toLocaleString()} / ${next.toLocaleString()} XP`;
     this.xpFill.style.width = `${level >= MAX_LEVEL ? 100 : Math.min(100, (xp / Math.max(1, next)) * 100)}%`;
     if (level !== this.level) {
@@ -389,20 +445,6 @@ export class Hud {
     this.deathDetail.textContent = detail;
   }
 
-  setRoster(state: WorldState, selfSessionId: string): void {
-    const rows: string[] = [];
-    state.players.forEach((player: Player, sessionId: string) => {
-      const colour = `#${player.colour.toString(16).padStart(6, "0")}`;
-      const self = sessionId === selfSessionId;
-      rows.push(
-        `<div class="${self ? "self" : ""}">` +
-        `<i style="background:${colour}"></i>` +
-        `${escapeHtml(player.name)}${self ? " (you)" : ""}` +
-        `</div>`,
-      );
-    });
-    this.roster.innerHTML = rows.join("");
-  }
 }
 
 function escapeHtml(value: string): string {

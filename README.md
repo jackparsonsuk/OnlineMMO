@@ -32,8 +32,8 @@ one.
 Controls: **WASD** move, **Shift** sprint (out of combat), **Space / 1–6**
 abilities, **Tab** or click to target, **Esc** to let go, **M** map, **I** (or **C**)
 character and pack, **E** talk to a villager, **J** quest log, **P** party (or
-click another player to invite them), **Enter** chat, drag to orbit, scroll to
-zoom, walk into a Gate ring to travel.
+click another player to invite them), **Enter** chat, **H** this list, drag to
+orbit, scroll to zoom, walk into a Gate ring to travel.
 
 In development, **`` ` ``** (backtick) opens the dev menu: teleport by clicking
 the world map (the hint shows the coordinates, region and creature level under
@@ -114,6 +114,28 @@ is what keeps them agreeing.
 The server snapshots collider positions once per tick, before anyone moves.
 Rebuilding per player would make the result depend on map iteration order, which
 the client has no way to reproduce.
+
+## The HUD
+
+Kept to what you use while playing, in the places an MMO player looks for it:
+your frame top left (name, level, health, the class's resource, with the
+numbers inside the bars; its edge goes red in a fight), party frames under it,
+the target under the compass, minimap and quest tracker top right, the ability
+bar centred at the bottom with the cast bar over it, chat bottom left, and a
+small corner for gold, ping, help and sound.
+
+What used to sit on screen permanently and is now shown only when it means
+something: the Ostra's name is a title card that fades in on arrival (the
+minimap keeps saying where you are); the connection status only appears while
+connecting or when something is wrong; tick rate and unacked inputs only in
+development; the list of players in the room moved into the party window as
+"Nearby", with invite buttons; and the bar of controls became a card on **H**,
+shown by itself the first time a browser enters the world.
+
+Every panel shares one look — dark glass, a warm gold hairline, a soft shadow
+— set by CSS variables at the top of `style.css`, and names and titles are in a
+book face from the fonts every desktop already has (Palatino, Book Antiqua,
+Georgia), since nothing is loaded from a file.
 
 ## Nametags
 

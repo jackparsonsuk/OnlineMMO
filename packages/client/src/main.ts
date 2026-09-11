@@ -94,6 +94,13 @@ const partyUI = new PartyUI({
   respond: (accept) => sendToRoom?.("partyRespond", { accept }),
   leave: () => sendToRoom?.("partyLeave"),
   kick: (id) => sendToRoom?.("partyKick", { id }),
+  nearby: () => {
+    const here: Array<{ sessionId: string; name: string; level: number }> = [];
+    room?.state.players.forEach((player, sessionId) => {
+      if (sessionId !== room?.sessionId) here.push({ sessionId, name: player.name, level: player.level });
+    });
+    return here;
+  },
 });
 
 const chat = new Chat((text, channel) => sendToRoom?.("chat", { text, channel }));
@@ -181,6 +188,9 @@ window.addEventListener("keydown", (event) => {
     case "KeyP":
       if (session) partyUI.toggle();
       break;
+    case "KeyH":
+      if (session) hud.toggleHelp();
+      break;
     case "Enter":
     case "NumpadEnter":
       if (session && !chat.isOpen) {
@@ -199,7 +209,8 @@ window.addEventListener("keydown", (event) => {
       break;
     case "Escape":
       // Close whatever is open first; only then drop the target.
-      if (session?.mapOpen) session.toggleMap();
+      if (hud.helpOpen) hud.toggleHelp(false);
+      else if (session?.mapOpen) session.toggleMap();
       else if (partyUI.isOpen) partyUI.setOpen(false);
       else if (vendorUI.close()) break;
       else if (questUI.close()) break;
@@ -256,6 +267,7 @@ async function main(): Promise<void> {
   const account = new AccountClient(HTTP_ENDPOINT, health.realmId);
   const character = await showTitleScreen(account);
   characterScreen.setName(character.name);
+  hud.setIdentity(character.name);
   // Known before the room is, so the ability bar is right on the first frame.
   classId = isClassId(character.classId) ? character.classId : DEFAULT_CLASS;
   level = character.level ?? 1;
@@ -278,6 +290,9 @@ async function main(): Promise<void> {
   enter(client, joined, getOstra(character.ostraId));
 
   world.engine.runRenderLoop(() => frame(performance.now()));
+  // The controls, once: the bar that used to list them permanently was the
+  // busiest thing on the screen, and you only need it the first time.
+  hud.showHelpOnce();
 
   if (import.meta.env.DEV) {
     // Poking at live netcode state from the console beats adding a print

@@ -1,6 +1,22 @@
 :root {
   color-scheme: dark;
   font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+
+  /* One look for every panel: dark glass, a warm gold hairline, a soft shadow
+     under it. Changing these changes the whole HUD. */
+  --glass: rgb(10 12 16 / 76%);
+  --glass-solid: rgb(12 14 19 / 96%);
+  --hair: rgb(214 188 132 / 20%);
+  --hair-strong: rgb(214 188 132 / 48%);
+  --gold: #dcbd6e;
+  --gold-soft: #efd9a0;
+  --ink: #ece7dc;
+  --muted: #9c998f;
+  --shade: 0 10px 28px rgb(0 0 0 / 38%), inset 0 1px 0 rgb(255 255 255 / 4%);
+  --radius: 10px;
+  /* Names and titles are set in a book face — the ones every desktop already
+     has, since nothing here is loaded from a file. */
+  --display: "Palatino Linotype", "Book Antiqua", Palatino, "Iowan Old Style", "URW Palladio L", Georgia, serif;
 }
 
 * { box-sizing: border-box; }
@@ -21,76 +37,186 @@ html, body {
   touch-action: none;
 }
 
-#hud, #hint, #gate-prompt {
+/* Arriving somewhere: the name across the upper screen, then gone. */
+#zone-banner {
   position: fixed;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: rgb(13 17 23 / 72%);
-  border: 1px solid rgb(230 237 243 / 12%);
-  backdrop-filter: blur(6px);
+  top: 24%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  text-shadow: 0 2px 16px rgb(0 0 0 / 90%), 0 1px 3px rgb(0 0 0 / 90%);
+}
+#zone-banner.show { animation: zone-banner 4.6s ease-out forwards; }
+#zone-banner b {
+  font-family: var(--display);
+  font-size: clamp(26px, 4.2vw, 44px);
+  white-space: nowrap;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+#zone-banner span {
+  font-family: var(--display);
+  font-size: 15px;
+  font-style: italic;
+  letter-spacing: 0.12em;
+  color: var(--gold-soft);
+}
+/* A hairline either side of the subtitle, the one ornament. */
+#zone-banner span::before, #zone-banner span::after {
+  content: "";
+  display: inline-block;
+  width: 46px;
+  height: 1px;
+  margin: 0 12px;
+  vertical-align: middle;
+  background: linear-gradient(90deg, transparent, var(--hair-strong));
+}
+#zone-banner span::after { background: linear-gradient(90deg, var(--hair-strong), transparent); }
+
+@keyframes zone-banner {
+  0% { opacity: 0; transform: translate(-50%, 8px); letter-spacing: 0.04em; }
+  18% { opacity: 1; transform: translate(-50%, 0); }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* Connection trouble, or still connecting; nothing at all when all is well. */
+#status {
+  position: fixed;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--hair);
+  background: var(--glass);
+  font-size: 12px;
+  color: var(--muted);
+  pointer-events: none;
+  z-index: 6;
+}
+#status[hidden] { display: none; }
+#status.error { color: #ff9384; border-color: rgb(255 123 114 / 45%); }
+
+/* Where the eye already is when walking: just above the ability bar. */
+#gate-prompt {
+  position: fixed;
+  bottom: 150px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--hair);
+  background: var(--glass);
+  box-shadow: var(--shade);
   font-size: 13px;
-  line-height: 1.5;
+  white-space: nowrap;
+  color: var(--ink);
   pointer-events: none;
 }
 
-#hud { top: 12px; left: 12px; min-width: 190px; }
-#hint { bottom: 12px; left: 12px; color: #9aa7b4; }
-
-#ostra-name {
-  font-weight: 600;
-  font-size: 15px;
-  letter-spacing: 0.01em;
-}
-
-#ostra-subtitle {
-  color: #8b98a5;
-  font-size: 12px;
-  font-style: italic;
-  margin-bottom: 6px;
-}
-
-#status { font-weight: 600; }
-
-/* Centred above the hint line, where the eye already is when walking. */
-#gate-prompt {
-  bottom: 58px;
-  left: 50%;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  color: #d7e2ee;
-}
-#status.error { color: #ff7b72; }
-
-#stats {
-  color: #9aa7b4;
-  font-variant-numeric: tabular-nums;
-}
-
-#roster { margin-top: 6px; }
-
-#roster div {
+/* The corner: purse, ping, help and sound, small and out of the way. */
+#corner {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--muted);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 85%);
 }
-
-#roster i {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
-  flex: none;
+#stats { font-variant-numeric: tabular-nums; opacity: 0.7; }
+#stats.slow { color: #f0a36a; opacity: 1; }
+#corner button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--hair);
+  background: var(--glass);
+  color: var(--gold-soft);
+  font: 600 13px var(--display);
+  cursor: pointer;
+  transition: border-color 120ms, color 120ms;
 }
+#corner button:hover { border-color: var(--hair-strong); color: #fff; }
+#corner button svg { width: 15px; height: 15px; }
+#sound-toggle .slash { display: none; }
+#sound-toggle.off { color: var(--muted); }
+#sound-toggle.off .wave { display: none; }
+#sound-toggle.off .slash { display: inline; }
 
-#roster .self { font-weight: 600; }
+/* The controls card. */
+#help {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(4 6 9 / 55%);
+  z-index: 9;
+}
+#help[hidden] { display: none; }
+.help-card {
+  width: min(460px, 92vw);
+  padding: 22px 26px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--hair-strong);
+  background: var(--glass-solid);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 60%);
+  text-align: center;
+}
+.help-card h2 {
+  margin: 0 0 14px;
+  font: 400 24px var(--display);
+  letter-spacing: 0.1em;
+  color: var(--ink);
+}
+.help-card dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 7px 16px;
+  margin: 0 0 18px;
+  text-align: left;
+  font-size: 13px;
+}
+.help-card dt { justify-self: end; color: var(--muted); white-space: nowrap; }
+.help-card dd { margin: 0; color: var(--ink); }
+.help-card button {
+  padding: 8px 22px;
+  border-radius: 8px;
+  border: 1px solid var(--hair-strong);
+  background: rgb(220 189 110 / 14%);
+  color: var(--gold-soft);
+  font: 600 13px var(--display);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.help-card button:hover { background: rgb(220 189 110 / 24%); }
+.help-card p { margin: 10px 0 0; font-size: 11px; color: var(--muted); }
 
 kbd {
   display: inline-block;
+  min-width: 20px;
   padding: 1px 5px;
-  border: 1px solid rgb(230 237 243 / 22%);
+  border: 1px solid rgb(214 188 132 / 30%);
   border-bottom-width: 2px;
   border-radius: 4px;
+  background: rgb(255 255 255 / 4%);
   font: inherit;
-  font-size: 12px;
+  font-size: 11.5px;
+  text-align: center;
+  color: var(--gold-soft);
 }
 
 /* Names are HTML rather than 3D text, so they stay crisp at any zoom. The
@@ -195,42 +321,89 @@ kbd {
 
 .nametag.dead .bar { display: none; }
 
+/* Your frame, top left: name and level, then health and the class's
+   resource with their numbers inside the bars. Party frames stack below. */
 #vitals {
   position: fixed;
-  bottom: 58px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 220px;
-  text-align: center;
+  top: 12px;
+  left: 12px;
+  width: 236px;
+  padding: 8px 10px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--hair);
+  background: var(--glass);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shade);
   pointer-events: none;
+  transition: border-color 200ms, box-shadow 200ms;
+}
+/* In a fight, the frame says so with its edge rather than a word. */
+#vitals:has(#combat-flag:not([hidden])) {
+  border-color: rgb(232 96 72 / 60%);
+  box-shadow: var(--shade), 0 0 14px rgb(232 96 72 / 18%);
 }
 
-#health-bar {
-  height: 9px;
+.pf-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+#pf-name {
+  overflow: hidden;
+  font: 600 15px var(--display);
+  letter-spacing: 0.03em;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#pf-level {
+  margin-left: auto;
+  min-width: 24px;
+  padding: 0 6px;
   border-radius: 5px;
-  border: 1px solid rgb(230 237 243 / 18%);
-  background: rgb(13 17 23 / 78%);
+  border: 1px solid var(--hair-strong);
+  font: 600 12px var(--display);
+  text-align: center;
+  color: var(--gold-soft);
+}
+
+#health-bar, #resource-bar {
+  position: relative;
+  border-radius: 4px;
+  border: 1px solid rgb(0 0 0 / 55%);
+  background: rgb(0 0 0 / 45%);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 60%), 0 0 0 1px rgb(255 255 255 / 5%);
   overflow: hidden;
 }
+#health-bar { height: 16px; }
 
-#health-bar i {
+#health-bar i, #resource-bar i {
   display: block;
   height: 100%;
   width: 100%;
-  background: linear-gradient(90deg, #4a9e5c, #6dcf7e);
   transition: width 140ms ease-out;
 }
-
-#health-bar i.low {
-  background: linear-gradient(90deg, #b23b2a, #e8563f);
+/* A sheen across the top half of every fill, so the bars read as lit. */
+#health-bar i::after, #resource-bar i::after, #tf-bar i::after, .pm-bar i::after {
+  content: "";
+  display: block;
+  height: 45%;
+  background: linear-gradient(rgb(255 255 255 / 22%), rgb(255 255 255 / 0%));
 }
+#health-bar i { background: linear-gradient(180deg, #5bbf6f, #2f8a44); }
+#health-bar i.low { background: linear-gradient(180deg, #e8604a, #9e2e1f); }
 
-#health-text {
-  margin-top: 3px;
+#health-text, #resource-text {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
   font-size: 11px;
-  color: #9aa7b4;
+  font-weight: 600;
+  color: #fff;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
+  text-shadow: 0 1px 2px rgb(0 0 0 / 95%);
 }
 
 #death {
@@ -259,16 +432,23 @@ kbd {
    fine because nothing else sets display. */
 #death[hidden] { display: none; }
 
-/* A cast under way: fills as it runs, red and "Interrupted" if you moved. */
+/* A cast under way: fills as it runs, red and "Interrupted" if you moved.
+   Centred just above the ability bar, where your eyes are when you cast. */
 #castbar {
-  position: relative;
-  height: 14px;
-  margin-bottom: 6px;
+  position: fixed;
+  bottom: 124px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 240px;
+  height: 16px;
   border-radius: 4px;
-  border: 1px solid rgb(240 208 96 / 45%);
-  background: rgb(13 17 23 / 82%);
+  border: 1px solid var(--hair-strong);
+  background: var(--glass-solid);
+  box-shadow: var(--shade);
   overflow: hidden;
+  pointer-events: none;
 }
+#castbar[hidden] { display: none; }
 
 #castbar i {
   display: block;
@@ -281,7 +461,9 @@ kbd {
   position: absolute;
   inset: 0;
   font-size: 10.5px;
-  line-height: 14px;
+  line-height: 15px;
+  text-align: center;
+  letter-spacing: 0.04em;
   font-weight: 600;
   color: #fff;
   text-shadow: 0 1px 2px #000;
@@ -292,86 +474,72 @@ kbd {
 
 /* --- the class's resource, and the ability bar ----------------------------- */
 
-#resource-bar {
-  height: 6px;
-  margin-top: 4px;
-  border-radius: 4px;
-  border: 1px solid rgb(230 237 243 / 18%);
-  background: rgb(13 17 23 / 78%);
-  overflow: hidden;
-}
-
-#resource-bar i {
-  display: block;
-  height: 100%;
-  width: 100%;
-  background: linear-gradient(90deg, #3f6ea8, #6aa9e0);
-  transition: width 140ms ease-out;
-}
+#resource-bar { height: 12px; margin-top: 4px; }
+#resource-text { font-size: 10px; font-weight: 500; }
+#resource-bar i { background: linear-gradient(180deg, #6aa9e0, #33609a); }
 
 /* Fervour burns: embers at the bottom, white-hot at the top. */
 #resource-bar[data-kind="fervour"] i { background: linear-gradient(90deg, #8f2f1c, #e06a2c 60%, #ffc46b); }
 
-#resource-text {
-  margin-top: 2px;
-  font-size: 11px;
-  color: #7f8f9f;
-  font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
-}
-
-/* The ability bar with the XP bar across its top: your kit, and how far you
-   are from the next thing in it. */
+/* The ability bar, centred at the bottom, with the XP bar across its top:
+   your kit, and how far you are from the next thing in it. */
 #actionbar {
   position: fixed;
-  bottom: 58px;
-  right: 12px;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
   pointer-events: none;
 }
 
 #abilities {
   display: flex;
-  gap: 6px;
+  gap: 5px;
+  padding: 5px;
+  border-radius: 12px;
+  border: 1px solid var(--hair);
+  background: rgb(8 10 13 / 62%);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shade);
 }
 
 .ability {
   position: relative;
-  width: 80px;
-  padding: 6px 7px 7px;
+  width: 78px;
+  height: 58px;
+  padding: 5px 7px 6px;
   border-radius: 8px;
-  border: 1px solid rgb(230 237 243 / 14%);
-  background: rgb(13 17 23 / 78%);
-  backdrop-filter: blur(6px);
+  border: 1px solid rgb(214 188 132 / 16%);
+  background: linear-gradient(180deg, rgb(255 255 255 / 5%), rgb(0 0 0 / 25%));
   overflow: hidden;
 }
 
 .ability .key {
-  display: inline-block;
-  min-width: 15px;
-  margin-bottom: 2px;
-  padding: 0 4px;
-  border-radius: 3px;
-  background: rgb(230 237 243 / 12%);
-  font-size: 11px;
-  text-align: center;
-  color: #c6d2de;
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font: 600 11px var(--display);
+  color: var(--gold);
 }
 
 .ability .name {
   display: block;
+  margin-top: 1px;
+  padding-right: 10px;
   font-size: 12px;
   font-weight: 600;
   line-height: 1.2;
-  color: #e6edf3;
+  color: var(--ink);
 }
 
 .ability .meta {
-  display: block;
+  position: absolute;
+  left: 7px;
+  bottom: 5px;
   font-size: 10px;
-  color: #8b98a5;
+  color: var(--muted);
 }
 
 /* Sweeps up from the bottom as the cooldown runs. */
@@ -395,23 +563,14 @@ kbd {
 .ability.locked .name { color: #8b98a5; }
 .ability.locked .meta { color: #f0d98a; }
 
-#power {
-  position: fixed;
-  bottom: 36px;
-  right: 12px;
-  font-size: 11px;
-  color: #c9a94a;
-  letter-spacing: 0.03em;
-  text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
-  pointer-events: none;
-}
+#power { color: var(--gold); letter-spacing: 0.03em; }
 
 
 /* --- loot ---------------------------------------------------------------- */
 
 #toast {
   position: fixed;
-  bottom: 96px;
+  bottom: 150px;
   left: 50%;
   transform: translateX(-50%);
   padding: 6px 12px;
@@ -924,13 +1083,13 @@ kbd {
 .char-menu button.danger:hover { background: rgb(255 123 114 / 12%); }
 
 /* While the screen has the camera, the rest of the HUD steps back. */
-#hud, #hint, #compass, #minimap, #actionbar, #power, #target-frame,
-#nametags, #gate-prompt, #speech, #vitals, #sound-toggle {
+#compass, #minimap, #actionbar, #corner, #target-frame, #party, #chat, #castbar,
+#nametags, #gate-prompt, #speech, #vitals, #quest-tracker {
   transition: opacity 300ms ease;
 }
 
-body.portrait :is(#hud, #hint, #compass, #minimap, #actionbar, #power, #target-frame,
-  #nametags, #gate-prompt, #speech, #vitals, #sound-toggle) {
+body.portrait :is(#compass, #minimap, #actionbar, #corner, #target-frame, #castbar,
+  #nametags, #gate-prompt, #speech, #vitals, #quest-tracker) {
   opacity: 0;
   pointer-events: none;
 }
@@ -1086,7 +1245,7 @@ body.portrait :is(#hud, #hint, #compass, #minimap, #actionbar, #power, #target-f
    middle, where the gate prompt also lives — you are never near both. */
 #speech {
   position: fixed;
-  bottom: 96px;
+  bottom: 150px;
   left: 50%;
   transform: translateX(-50%);
   max-width: 32rem;
@@ -1175,13 +1334,10 @@ body.portrait :is(#hud, #hint, #compass, #minimap, #actionbar, #power, #target-f
 .floater.level { color: #f0d060; font-size: 20px; font-weight: 800; letter-spacing: 0.04em; }
 
 #combat-flag {
-  margin-bottom: 4px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 13px;
+  line-height: 1;
   color: #ff8a72;
-  text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
+  text-shadow: 0 0 8px rgb(255 120 90 / 60%);
 }
 
 #combat-flag[hidden] { display: none; }
@@ -1259,24 +1415,7 @@ body.portrait :is(#hud, #hint, #compass, #minimap, #actionbar, #power, #target-f
   font-variant-numeric: tabular-nums;
 }
 
-#sound-toggle {
-  position: fixed;
-  bottom: 14px;
-  right: 12px;
-  padding: 3px 9px;
-  border-radius: 6px;
-  border: 1px solid rgb(230 237 243 / 16%);
-  background: rgb(13 17 23 / 72%);
-  color: #9aa7b4;
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
 
-#sound-toggle.off { color: #59646f; text-decoration: line-through; }
-
-/* Above the sound button, clear of the ability bar. */
-#power { bottom: 40px; }
 
 /* --- finding your way ------------------------------------------------------- */
 
@@ -1484,8 +1623,8 @@ body.portrait :is(#hud, #hint, #compass, #minimap, #actionbar, #power, #target-f
 #worldmap.picking .worldmap-hint { color: #ffd79a; }
 
 /* Screenshots without the furniture. */
-body.no-hud :is(#hud, #hint, #compass, #minimap, #actionbar, #power, #target-frame,
-  #nametags, #gate-prompt, #speech, #vitals, #sound-toggle) {
+body.no-hud :is(#compass, #minimap, #actionbar, #corner, #target-frame, #party, #chat, #castbar,
+  #nametags, #gate-prompt, #speech, #vitals, #quest-tracker, #zone-banner) {
   display: none;
 }
 
@@ -1785,9 +1924,9 @@ body.portrait #quest-tracker, body.no-hud #quest-tracker { display: none; }
    above and the hint line below. */
 #party {
   position: fixed;
-  top: 38%;
+  top: 100px;
   left: 12px;
-  width: 190px;
+  width: 236px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1885,12 +2024,12 @@ body.portrait :is(#party, #party-invite) { opacity: 0; pointer-events: none; }
 
 /* --- chat ------------------------------------------------------------------- */
 
-/* Bottom left, above the hint line (two lines of it, in a narrow window) and
-   clear of the ability bar to its right. */
+/* Bottom left, beside the centred ability bar — above it, in a window too
+   narrow for both. */
 #chat {
   position: fixed;
   left: 12px;
-  bottom: 96px;
+  bottom: 14px;
   width: min(340px, 30vw);
   font-size: 12.5px;
   line-height: 1.4;
@@ -1967,3 +2106,73 @@ body.portrait :is(#party, #party-invite) { opacity: 0; pointer-events: none; }
 }
 
 body.portrait #chat { opacity: 0; pointer-events: none; }
+
+/* --- one look ----------------------------------------------------------------
+   The theme applied to every panel defined above, so they read as one set:
+   the same glass, the same hairline, the same shadow, and names and titles in
+   the book face. Colours that mean something (red for danger, green for your
+   party, rarity colours) are left as they are. */
+
+#target-frame, .party-member, #toast, #speech, #party-window, #party-invite,
+#chat-form, #chat.open #chat-log, .announce, #player-menu {
+  border-color: var(--hair);
+  background: var(--glass);
+  box-shadow: var(--shade);
+  backdrop-filter: blur(8px);
+}
+#party-window, #party-invite, #player-menu { background: var(--glass-solid); border-color: var(--hair-strong); }
+#target-frame.hunting { border-color: rgb(232 86 63 / 85%); }
+.party-member { border-color: rgb(109 207 126 / 26%); }
+
+#compass {
+  border-color: var(--hair);
+  background: rgb(8 10 13 / 60%);
+}
+#minimap-canvas {
+  border: 2px solid rgb(214 188 132 / 42%);
+  box-shadow: 0 6px 22px rgb(0 0 0 / 50%), 0 0 0 1px rgb(0 0 0 / 60%);
+}
+#minimap-info { font-family: var(--display); font-size: 12px; letter-spacing: 0.03em; color: var(--ink); }
+
+/* The book face, wherever something is named. */
+.tf-head #tf-name, .pm-name, .level-up small, .level-up span, .announce b, .announce small,
+#death strong, .title-panel h1, #quest-tracker .tracked b, .pw-head b,
+#quest-dialog header b, #quest-log header b, #vendor header b, #worldmap-title, #party-window h4 {
+  font-family: var(--display);
+}
+.tf-head #tf-name { font-size: 14px; letter-spacing: 0.02em; }
+#tf-level { background: none; border: 1px solid rgb(232 86 63 / 50%); font-family: var(--display); }
+#tf-bar { height: 10px; border: 1px solid rgb(0 0 0 / 55%); background: rgb(0 0 0 / 45%); }
+.pm-name { font-size: 13.5px; letter-spacing: 0.02em; }
+.pm-bar { height: 8px; border: 1px solid rgb(0 0 0 / 50%); background: rgb(0 0 0 / 45%); }
+.pm-bar i { background: linear-gradient(180deg, #5bbf6f, #2f8a44); }
+.level-up span { font-weight: 400; }
+.announce b { font-weight: 400; letter-spacing: 0.03em; }
+#death strong { font-weight: 400; font-size: 36px; letter-spacing: 0.08em; }
+.title-panel h1 { font-weight: 400; font-size: 30px; letter-spacing: 0.1em; }
+#party-window h4 {
+  margin: 12px 0 2px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pw-head b { font-weight: 400; font-size: 17px; letter-spacing: 0.06em; color: var(--gold-soft); }
+
+/* XP: a thin gilded rule over the abilities. */
+#xp { padding: 0 6px; }
+#xp-bar { height: 5px; border-color: rgb(214 188 132 / 30%); background: rgb(0 0 0 / 55%); }
+#xp-text { margin-bottom: 3px; }
+#xp-text b { font-family: var(--display); font-weight: 600; letter-spacing: 0.04em; color: var(--gold-soft); }
+#xp-text span { color: var(--muted); }
+
+/* Where the ability bar would crowd the corners, the chat and the corner go
+   above it; narrower still, the compass shrinks clear of your frame. */
+@media (max-width: 1100px) {
+  #chat { bottom: 118px; }
+  #corner { bottom: 118px; }
+}
+@media (max-width: 960px) {
+  #compass { width: min(260px, calc(100vw - 520px)); min-width: 160px; }
+}

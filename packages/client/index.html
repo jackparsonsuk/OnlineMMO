@@ -37,13 +37,25 @@
       <div class="worldmap-hint"><kbd>M</kbd> or <kbd>Esc</kbd> to close</div>
     </div>
 
-    <div id="hud">
-      <div id="ostra-name">&nbsp;</div>
-      <div id="ostra-subtitle"></div>
-      <div id="status">connecting&hellip;</div>
-      <div id="stats"></div>
-      <div id="roster"></div>
+    <!-- Arriving somewhere: its name, big, then gone. -->
+    <div id="zone-banner" aria-live="polite">
+      <b id="ostra-name"></b>
+      <span id="ostra-subtitle"></span>
     </div>
+    <!-- Only there when something is wrong, or still happening. -->
+    <div id="status">connecting&hellip;</div>
+
+    <!-- You: name, level, health and the class's resource. -->
+    <div id="vitals">
+      <div class="pf-head">
+        <span id="pf-name"></span>
+        <span id="combat-flag" hidden title="In combat">&#9876;</span>
+        <span id="pf-level"></span>
+      </div>
+      <div id="health-bar"><i></i><span id="health-text"></span></div>
+      <div id="resource-bar"><i></i><span id="resource-text"></span></div>
+    </div>
+    <div id="party" hidden></div>
 
     <div id="gate-prompt" hidden></div>
 
@@ -52,15 +64,7 @@
       <span id="speech-line"></span>
     </div>
 
-    <div id="vitals">
-      <div id="castbar" hidden><i></i><span></span></div>
-      <div id="combat-flag" hidden>In combat</div>
-      <div id="health-bar"><i></i></div>
-      <div id="health-text"></div>
-      <div id="resource-bar"><i></i></div>
-      <div id="resource-text"></div>
-    </div>
-
+    <div id="castbar" hidden><i></i><span></span></div>
     <div id="actionbar">
       <div id="xp">
         <div id="xp-text"><b></b><span></span></div>
@@ -68,7 +72,6 @@
       </div>
       <div id="abilities"></div>
     </div>
-    <div id="power"></div>
     <div id="level-ups"></div>
 
     <div id="chat">
@@ -79,31 +82,50 @@
       </form>
     </div>
 
-    <div id="party" hidden></div>
     <form id="party-window" hidden autocomplete="off"></form>
     <div id="party-invite" hidden></div>
     <div id="player-menu" class="char-menu" hidden></div>
 
     <div id="toast" hidden></div>
-    <button id="sound-toggle" type="button">Sound on</button>
+
+    <!-- The corner: purse, ping, and the two things you might want to find. -->
+    <div id="corner">
+      <span id="power"></span>
+      <span id="stats"></span>
+      <button id="help-toggle" type="button" title="Controls (H)">?</button>
+      <button id="sound-toggle" type="button" title="Sound (click to mute)">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8h3l4-4v12l-4-4H3z" fill="currentColor"/><path class="wave" d="M13 7a4 4 0 0 1 0 6M15.5 4.5a7.5 7.5 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path class="slash" d="M13 7l5 6M18 7l-5 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <!-- Controls, on H. Shown by itself the first time you enter the world. -->
+    <div id="help" hidden>
+      <div class="help-card">
+        <h2>Controls</h2>
+        <dl>
+          <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Move</dd>
+          <dt><kbd>Shift</kbd></dt><dd>Sprint, out of combat</dd>
+          <dt><kbd>Space</kbd> <kbd>1</kbd>–<kbd>6</kbd></dt><dd>Abilities</dd>
+          <dt><kbd>Tab</kbd> or click</dt><dd>Target · <kbd>Esc</kbd> to let go</dd>
+          <dt>Drag · scroll</dt><dd>Turn the camera · zoom</dd>
+          <dt><kbd>E</kbd></dt><dd>Talk to someone</dd>
+          <dt><kbd>I</kbd></dt><dd>Character and pack</dd>
+          <dt><kbd>J</kbd></dt><dd>Quest log</dd>
+          <dt><kbd>M</kbd></dt><dd>Map</dd>
+          <dt><kbd>P</kbd></dt><dd>Party — or click a player</dd>
+          <dt><kbd>Enter</kbd></dt><dd>Chat</dd>
+          <dt>A Gate</dt><dd>Walk into its ring to travel</dd>
+        </dl>
+        <button type="button" data-close>Into the world</button>
+        <p><kbd>H</kbd> shows this again</p>
+      </div>
+    </div>
 
     <div id="character" hidden></div>
 
     <div id="death" hidden>
       <strong>You have fallen</strong>
       <span id="death-detail"></span>
-    </div>
-
-    <div id="hint">
-      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;&middot;&nbsp;
-      <kbd>Shift</kbd> sprint &nbsp;&middot;&nbsp;
-      <kbd>Space</kbd>/<kbd>1</kbd>–<kbd>6</kbd> abilities &nbsp;&middot;&nbsp;
-      <kbd>Tab</kbd>/click target &nbsp;&middot;&nbsp;
-      <kbd>M</kbd> map &nbsp;&middot;&nbsp;
-      <kbd>I</kbd> character &amp; pack &nbsp;&middot;&nbsp;
-      <kbd>P</kbd> party &nbsp;&middot;&nbsp;
-      <kbd>Enter</kbd> chat &nbsp;&middot;&nbsp;
-      drag to orbit &nbsp;&middot;&nbsp; scroll to zoom
     </div>
 
     <script type="module" src="/src/main.ts"></script>

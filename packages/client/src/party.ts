@@ -34,6 +34,8 @@ export interface PartyActions {
   respond(accept: boolean): void;
   leave(): void;
   kick(id: string): void;
+  /** Other players in the same room: who you could invite without typing. */
+  nearby(): Array<{ sessionId: string; name: string; level: number }>;
 }
 
 /** An invitation on screen is withdrawn after this long (the server lets it
@@ -74,6 +76,11 @@ export class PartyUI {
       if (!button) return;
       if (button.dataset["act"] === "leave") this.actions.leave();
       else if (button.dataset["act"] === "kick" && button.dataset["id"]) this.actions.kick(button.dataset["id"]);
+      else if (button.dataset["act"] === "invite" && button.dataset["id"]) {
+        this.actions.inviteSession(button.dataset["id"]);
+        button.disabled = true;
+        button.textContent = "Invited";
+      }
       else if (button.dataset["act"] === "close") this.setOpen(false);
     });
     this.menu.addEventListener("click", (event) => {
@@ -85,7 +92,8 @@ export class PartyUI {
     window.addEventListener("pointerdown", (event) => {
       if (!this.menu.hidden && !this.menu.contains(event.target as Node)) this.menu.hidden = true;
     });
-    this.drawWindow();
+    // No drawing yet: the window is drawn when it opens, and at construction
+    // there is no room to list anyone from.
   }
 
   /**
@@ -132,7 +140,7 @@ export class PartyUI {
     this.roster = roster ?? undefined;
     this.shown = "";
     this.drawFrames();
-    this.drawWindow();
+    if (this.isOpen) this.drawWindow();
   }
 
   showInvite(from: string): void {
@@ -214,14 +222,25 @@ export class PartyUI {
           `${member.online ? "" : ` <small class="pm-off">offline</small>`}</span>${kick}</li>`;
       }).join("")
       : "";
+    const full = (roster?.members.length ?? 0) >= PARTY_SIZE;
+    // Everyone here who is not already with you — the old corner roster,
+    // where it is useful.
+    const mateSessions = new Set(this.mates.map((member) => member.sessionId));
+    const nearby = this.actions.nearby().filter((player) => !mateSessions.has(player.sessionId));
+    const nearbyList = nearby.length > 0 && !full
+      ? `<h4>Nearby</h4><ul class="pw-nearby">${nearby.map((player) =>
+        `<li><span>${escapeHtml(player.name)} <small>${player.level}</small></span>` +
+        `<button type="button" data-act="invite" data-id="${escapeHtml(player.sessionId)}">Invite</button></li>`).join("")}</ul>`
+      : "";
     this.window.innerHTML =
       `<div class="pw-head"><b>Party</b><button type="button" data-act="close" title="Close (P)">&times;</button></div>` +
       (roster
         ? `<ul>${members}</ul>`
         : `<p class="pw-note">You are on your own. Invite someone by name, or click them in the world.</p>`) +
-      ((roster?.members.length ?? 0) < PARTY_SIZE
+      (!full
         ? `<label class="pw-invite"><input name="invite" maxlength="40" autocomplete="off" spellcheck="false" placeholder="Character name"><button type="submit">Invite</button></label>`
         : `<p class="pw-note">Your party is full.</p>`) +
+      nearbyList +
       `<p class="pw-note">A party shares kills and quest credit, and goes into a dungeon together.</p>` +
       (roster ? `<button type="button" class="pw-leave" data-act="leave">Leave party</button>` : "");
   }

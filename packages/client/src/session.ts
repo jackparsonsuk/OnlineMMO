@@ -790,8 +790,6 @@ export function createSession(
         },
       });
     }
-
-    hud.setRoster(room.state, room.sessionId);
   });
 
   const offEnemyAdd = $(room.state).enemies.onAdd((enemy: Enemy, enemyId: string) => {
@@ -847,7 +845,6 @@ export function createSession(
       reconciler = undefined;
       selfPlayer = undefined;
     }
-    hud.setRoster(room.state, room.sessionId);
   });
 
   // --- combat messages -----------------------------------------------------------
