@@ -18,6 +18,7 @@ import {
   type RuinDefinition,
 } from "./ostras.js";
 import { heightAt, lakeLevel, lakeReach, regionAt, waterDepthAt } from "./terrain.js";
+import { getVariant } from "./variants.js";
 
 /**
  * Everything on a big Ostra that nobody placed by hand.
@@ -70,6 +71,8 @@ export interface CampDefinition {
   z: number;
   radius: number;
   level: number;
+  /** A creature variant's id, for a camp in its hunting area. */
+  variant?: string;
 }
 
 /** Straight-line distance. Written out rather than `Math.hypot` or `**`,
@@ -674,6 +677,30 @@ export function campsIn(ostra: OstraDefinition): readonly CampDefinition[] {
     level: group.level ?? levelAt(ostra, group.x, group.z),
   }));
 
+  // Hunting areas: one camp in the middle, the rest spread round it on the
+  // eighths — table directions, for the reason at the top of this file (the
+  // client builds tree clearings from these camps, so both sides must agree
+  // to the bit). The middle one is a level up: the heart of the place.
+  const areas = ostra.areas ?? [];
+  areas.forEach((area, a) => {
+    const variant = getVariant(area.variant);
+    if (!variant) return;
+    const ring = Math.min(8, Math.max(0, area.camps - 1));
+    for (let k = 0; k <= ring; k++) {
+      const [ex, ez] = k === 0 ? [0, 0] : EIGHTHS[Math.floor(((k - 1) * 8) / ring)]!;
+      list.push({
+        id: `a${a}_${k}`,
+        kind: variant.kind,
+        variant: variant.id,
+        count: area.count,
+        x: area.x + ex * area.radius * 0.6,
+        z: area.z + ez * area.radius * 0.6,
+        radius: 3 + area.count,
+        level: area.level + (k === 0 ? 1 : 0),
+      });
+    }
+  });
+
   const wilds = ostra.wilds;
   if (wilds) {
     const half = ostra.size / 2;
@@ -711,6 +738,8 @@ export function campsIn(ostra: OstraDefinition): readonly CampDefinition[] {
         if (settlements.some((s) => dist(x, z, s.x, s.z) - radius - s.radius <= aggro + 16)) continue;
         if (ostra.gates.some((g) => dist(x, z, g.x, g.z) - radius <= aggro + 6)) continue;
         if (ostra.ruins.some((r) => dist(x, z, r.x, r.z) - radius - r.radius <= 30)) continue;
+        // A hunting area is its variant's alone.
+        if (areas.some((area) => dist(x, z, area.x, area.z) - radius - area.radius <= 25)) continue;
         if (ostra.terrain.lakes?.some((l) => dist(x, z, l.x, l.z) - radius * 0.5 <= lakeReach(l))) continue;
         if (roadDistance(ostra, x, z) - radius <= 10) continue;
 

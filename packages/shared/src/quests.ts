@@ -34,10 +34,15 @@ import { hash2 } from "./noise.js";
 import type { OstraId } from "./ostras.js";
 import { SETTLEMENTS, type SettlementDefinition, type VillagerDefinition } from "./settlements.js";
 
+/**
+ * A kill or collect can ask for one creature variant (`variants.ts`) rather
+ * than a whole kind: a variant lives in one hunting area, so the quest has a
+ * place, and the map can draw it. Its `creature`/`from` is still the kind.
+ */
 export type QuestObjective =
-  | { kind: "kill"; creature: EnemyKind; count: number; label: string }
+  | { kind: "kill"; creature: EnemyKind; variant?: string; count: number; label: string }
   | { kind: "slay"; elite: string; label: string }
-  | { kind: "collect"; from: EnemyKind; count: number; chance: number; label: string }
+  | { kind: "collect"; from: EnemyKind; variant?: string; count: number; chance: number; label: string }
   /** In `ostra` — Terra when absent. Every small Ostra and dungeon is built
    *  round its own origin, so coordinates alone would put the Gate Circle in
    *  the middle of the barrow's pillared hall. */
@@ -109,34 +114,34 @@ export const QUESTS: Record<string, QuestDefinition> = {
   "herla-wolves": {
     id: "herla-wolves", title: "A Hunter's Welcome", giver: "herla", turnIn: "herla", level: DASO_LEVEL,
     requires: [],
-    summary: "Kill Greywood Wolves on the woodcutters' path for Herla.",
+    summary: "Kill Pathstalkers on the Woodcutters' Path, south-west of Daso, for Herla.",
     offer: "You'll be wanting a bed, and I'll be wanting the wolves off the woodcutters' path. "
       + "Five of them, and the room's yours for the week.",
     progress: "Still hearing howling. Not five yet, then.",
     complete: "Five. I heard every one of them go quiet. Sit down — the first one's on the house.",
-    objectives: [{ kind: "kill", creature: "wolf", count: 5, label: "Greywood Wolves killed" }],
+    objectives: [{ kind: "kill", creature: "wolf", variant: "pathstalker", count: 5, label: "Pathstalkers killed" }],
     rewards: { gold: 12, xpShare: 0.5, choices: 2, rarity: "common" },
   },
   "osk-webs": {
     id: "osk-webs", title: "Webs in the Timber", giver: "osk", turnIn: "osk", level: DASO_LEVEL,
     requires: [],
-    summary: "Clear the Void Spiders out of the woods around Daso for Osk.",
-    offer: "Spiders have got into the stacked oak. Webs through the grain, eggs in the knots. "
-      + "Thin them out before the whole yard's worth nothing.",
+    summary: "Clear the Thicket Weavers out of the Webbed Thicket, north-west of Daso, for Osk.",
+    offer: "Spiders have got into the stacked oak. Webs through the grain, eggs in the knots. They come in from "
+      + "the thicket north-west of town — the Webbed Thicket, we call it now. Thin them out before the yard's worth nothing.",
     progress: "Found another nest this morning. Keep at it.",
     complete: "Good. I'll burn the worst of the stack, but the rest'll season. You've saved me a year.",
-    objectives: [{ kind: "kill", creature: "spider", count: 6, label: "Void Spiders killed" }],
+    objectives: [{ kind: "kill", creature: "spider", variant: "thicket-weaver", count: 6, label: "Thicket Weavers killed" }],
     rewards: { gold: 12, xpShare: 0.5, choices: 2, rarity: "common" },
   },
   "wen-fangs": {
     id: "wen-fangs", title: "Teeth for the Saw", giver: "wen", turnIn: "wen", level: DASO_LEVEL,
     requires: ["herla-wolves"],
-    summary: "Bring Wen fangs from Greywood Wolves.",
+    summary: "Bring Wen fangs from the Pathstalkers on the Woodcutters' Path.",
     offer: "Heard you've been at the wolves. Wolf fang makes a better saw-set than anything the smith sells — "
       + "don't ask me why. Bring me four good ones.",
     progress: "Those are chipped. Good ones, I said.",
     complete: "Now that's a set. Hear that? That's a blade that'll go through ash like it's butter.",
-    objectives: [{ kind: "collect", from: "wolf", count: 4, chance: 0.5, label: "Good wolf fangs" }],
+    objectives: [{ kind: "collect", from: "wolf", variant: "pathstalker", count: 4, chance: 0.5, label: "Good wolf fangs" }],
     rewards: { gold: 15, xpShare: 0.6, choices: 3, rarity: "uncommon" },
   },
   "ilda-westroad": {
@@ -157,23 +162,23 @@ export const QUESTS: Record<string, QuestDefinition> = {
   "brenna-risen": {
     id: "brenna-risen", title: "Dead Wood", giver: "brenna", turnIn: "brenna", level: 5,
     requires: [],
-    summary: "Put down Risen in the woods east of Daso, towards the Westroad, for Brenna.",
+    summary: "Put down the Rootbound Risen on the Felled Ridge, east of Daso, for Brenna.",
     offer: "I felled an oak on the east ridge yesterday and something climbed out of the roots after it. "
       + "Grey, slow, and it knew I was there. There's more of them out towards the road. Eight, and I'll cut there again.",
     progress: "Still hearing them out past the ridge. They don't sleep, you know. Neither do I, now.",
     complete: "Eight. Right. I'll take the east ridge back tomorrow — with you in earshot, if it's the same to you.",
-    objectives: [{ kind: "kill", creature: "zombie", count: 8, label: "Risen put down" }],
+    objectives: [{ kind: "kill", creature: "zombie", variant: "rootbound", count: 8, label: "Rootbound Risen put down" }],
     rewards: { gold: 16, xpShare: 0.7, choices: 2, rarity: "uncommon" },
   },
   "ilda-crates": {
     id: "ilda-crates", title: "Dragged into the Trees", giver: "ilda", turnIn: "ilda", level: 5,
     requires: ["ilda-westroad"],
-    summary: "Recover Daso's crates from the Void Spiders that dragged them off the Westroad.",
+    summary: "Recover Daso's crates from the Silk Snatchers in Silkstrand Hollow, off the Westroad.",
     offer: "The carts that do get through are coming in light. Spiders — they web the crates and drag them off the road "
       + "like they were flies. Some are still whole. Bring back five and I'll know what we've lost.",
-    progress: "Look where the webs are thickest. They don't take them far.",
+    progress: "Silkstrand Hollow, off the Westroad. Look where the webs are thickest.",
     complete: "Nails, salt, and the smith's iron. Mott'll be glad. Did you see anything of the driver out there? ...No. Thank you.",
-    objectives: [{ kind: "collect", from: "spider", count: 5, chance: 0.45, label: "Webbed crates recovered" }],
+    objectives: [{ kind: "collect", from: "spider", variant: "silk-snatcher", count: 5, chance: 0.45, label: "Webbed crates recovered" }],
     rewards: { gold: 18, xpShare: 0.7, choices: 3, rarity: "uncommon" },
   },
   "herla-circle": {

@@ -34,6 +34,12 @@ export const MoveInput = schema({
   aim: t.angle().default(0),
   /** Shift held. Honoured only out of combat. */
   sprint: t.boolean().default(false),
+  /** Space held: jump when on the ground (see `applyInput`). */
+  jump: t.boolean().default(false),
+  /** Asked to dodge this step — sent for one step per press, not held. */
+  dodge: t.boolean().default(false),
+  /** Asked to heal. The server gates it on its own cooldown. */
+  heal: t.boolean().default(false),
 }, "MoveInput");
 export type MoveInput = SchemaType<typeof MoveInput>;
 
@@ -48,6 +54,18 @@ export const Player = schema({
   y: t.float32().default(0),
   z: t.float32().default(0),
   yaw: t.angle().default(0),
+  /**
+   * Vertical speed, for a jump. Zero exactly while standing on the ground,
+   * which is how the step knows you can jump (see `applyInput`). Replicated
+   * and reconciled like position, since replaying a jump needs it.
+   */
+  vy: t.float32().default(0),
+  /** Steps left in a dodge, its direction, and the steps until the next one
+   *  — counted in inputs, like casts, so both sides agree on every frame. */
+  dodgeLeft: t.uint8().default(0),
+  dodgeX: t.float32().default(0),
+  dodgeZ: t.float32().default(0),
+  dodgeCooldown: t.uint16().default(0),
   /** Public, like a creature's: over your head, and in the roster. */
   level: t.uint8().default(1),
   /** Zero means dead and awaiting respawn. */
@@ -95,6 +113,9 @@ export const Enemy = schema({
   level: t.uint8().default(1),
   /** A rare elite's own name (see `elites.ts`); empty for anything ordinary. */
   name: t.string().default(""),
+  /** A creature variant's id (see `variants.ts`): its own name and colour
+   *  on its kind's body. Empty for the kind itself. */
+  variant: t.string().default(""),
   /** Drawn and collided this many times its kind's size — see
    *  `scaledArchetype`. 1 for anything ordinary. */
   scale: t.float32().default(1),

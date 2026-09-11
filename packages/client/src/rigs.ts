@@ -125,11 +125,13 @@ export function buildPlayerRig(scene: Scene, colour: number): Rig {
 }
 
 /** Hunched, long-armed, head forward of its shoulders, arms reaching. */
-function buildZombieRig(scene: Scene): Rig {
+function buildZombieRig(scene: Scene, colour?: number): Rig {
   const archetype = getArchetype("zombie");
+  // A variant's own colour on the kind's body.
+  const tint = colour ?? archetype.colour;
   const rig = newRig(scene, "zombie");
-  const flesh = flatMaterial(scene, "zombieFlesh", archetype.colour);
-  const dark = flatMaterial(scene, "zombieDark", hexColour(archetype.colour).scale(0.6));
+  const flesh = flatMaterial(scene, "zombieFlesh", tint);
+  const dark = flatMaterial(scene, "zombieDark", hexColour(tint).scale(0.6));
   // The one bright note on the model, so a Risen is identifiable at distance.
   const eyes = flatMaterial(scene, "zombieEyes", 0xd8e85a);
   eyes.emissiveColor = hexColour(0x7a8a20);
@@ -158,11 +160,13 @@ function buildZombieRig(scene: Scene): Rig {
 
 /** Low, wide, eight-legged. Reads instantly from above, which is the angle the
  *  third-person camera mostly gives you. */
-function buildSpiderRig(scene: Scene): Rig {
+function buildSpiderRig(scene: Scene, colour?: number): Rig {
   const archetype = getArchetype("spider");
+  // A variant's own colour on the kind's body.
+  const tint = colour ?? archetype.colour;
   const rig = newRig(scene, "spider");
-  const shell = flatMaterial(scene, "spiderShell", archetype.colour);
-  const dark = flatMaterial(scene, "spiderLeg", hexColour(archetype.colour).scale(0.55));
+  const shell = flatMaterial(scene, "spiderShell", tint);
+  const dark = flatMaterial(scene, "spiderLeg", hexColour(tint).scale(0.55));
   const eyes = flatMaterial(scene, "spiderEyes", 0xd8506a);
   eyes.emissiveColor = hexColour(0x8a2038);
   track(rig, shell, dark, eyes);
@@ -223,12 +227,14 @@ function addLegs(
 }
 
 /** Lean, long-snouted, tail up. Grey so it reads against both grass and pine. */
-function buildWolfRig(scene: Scene): Rig {
+function buildWolfRig(scene: Scene, colour?: number): Rig {
   const archetype = getArchetype("wolf");
+  // A variant's own colour on the kind's body.
+  const tint = colour ?? archetype.colour;
   const rig = newRig(scene, "wolf");
-  const fur = flatMaterial(scene, "wolfFur", archetype.colour);
-  const dark = flatMaterial(scene, "wolfDark", hexColour(archetype.colour).scale(0.62));
-  const pale = flatMaterial(scene, "wolfPale", hexColour(archetype.colour).scale(1.3));
+  const fur = flatMaterial(scene, "wolfFur", tint);
+  const dark = flatMaterial(scene, "wolfDark", hexColour(tint).scale(0.62));
+  const pale = flatMaterial(scene, "wolfPale", hexColour(tint).scale(1.3));
   const eyes = flatMaterial(scene, "wolfEyes", 0xf0d060);
   eyes.emissiveColor = hexColour(0x9a7a18);
   track(rig, fur, dark, pale, eyes);
@@ -253,11 +259,13 @@ function buildWolfRig(scene: Scene): Rig {
 
 /** Heavy, low-slung, all shoulder — with a crest of thorns down its back and
  *  tusks you can see from across a field. */
-function buildBoarRig(scene: Scene): Rig {
+function buildBoarRig(scene: Scene, colour?: number): Rig {
   const archetype = getArchetype("boar");
+  // A variant's own colour on the kind's body.
+  const tint = colour ?? archetype.colour;
   const rig = newRig(scene, "boar");
-  const hide = flatMaterial(scene, "boarHide", archetype.colour);
-  const dark = flatMaterial(scene, "boarDark", hexColour(archetype.colour).scale(0.55));
+  const hide = flatMaterial(scene, "boarHide", tint);
+  const dark = flatMaterial(scene, "boarDark", hexColour(tint).scale(0.55));
   const bone = flatMaterial(scene, "boarTusk", 0xe8e0c8);
   const eyes = flatMaterial(scene, "boarEyes", 0xd84a2a);
   eyes.emissiveColor = hexColour(0x7a1a0a);
@@ -289,11 +297,13 @@ function buildBoarRig(scene: Scene): Rig {
 }
 
 /** Squat, wide-mouthed, long-armed: a thing that sits in the mud and waits. */
-function buildWretchRig(scene: Scene): Rig {
+function buildWretchRig(scene: Scene, colour?: number): Rig {
   const archetype = getArchetype("wretch");
+  // A variant's own colour on the kind's body.
+  const tint = colour ?? archetype.colour;
   const rig = newRig(scene, "wretch");
-  const skin = flatMaterial(scene, "wretchSkin", archetype.colour);
-  const dark = flatMaterial(scene, "wretchDark", hexColour(archetype.colour).scale(0.55));
+  const skin = flatMaterial(scene, "wretchSkin", tint);
+  const dark = flatMaterial(scene, "wretchDark", hexColour(tint).scale(0.55));
   const belly = flatMaterial(scene, "wretchBelly", 0xa8a870);
   const glow = flatMaterial(scene, "wretchGlow", 0xc8ff6a);
   glow.emissiveColor = hexColour(0x6a9a1a);
@@ -326,15 +336,17 @@ function buildWretchRig(scene: Scene): Rig {
 
 /** A knot of embers that will not settle: a bright core and shards orbiting
  *  it. Glows, so it reads in the ash and the dark. */
-function buildWispRig(scene: Scene): Rig {
+function buildWispRig(scene: Scene, colour?: number): Rig {
   const archetype = getArchetype("wisp");
+  // A variant's own colour on the kind's body.
+  const tint = colour ?? archetype.colour;
   const rig = newRig(scene, "wisp");
   const core = new StandardMaterial("wispCore", scene);
   core.diffuseColor = hexColour(0xffd27a);
   core.emissiveColor = hexColour(0xff9a3a);
   core.specularColor = Color3.Black();
   const shard = new StandardMaterial("wispShard", scene);
-  shard.diffuseColor = hexColour(archetype.colour);
+  shard.diffuseColor = hexColour(tint);
   shard.emissiveColor = hexColour(0xc0441a);
   shard.specularColor = Color3.Black();
   track(rig, core, shard);
@@ -358,11 +370,13 @@ function buildWispRig(scene: Scene): Rig {
 }
 
 /** Stacked stone the size of a doorway, with a rune for a face. */
-function buildGolemRig(scene: Scene): Rig {
+function buildGolemRig(scene: Scene, colour?: number): Rig {
   const archetype = getArchetype("golem");
+  // A variant's own colour on the kind's body.
+  const tint = colour ?? archetype.colour;
   const rig = newRig(scene, "golem");
-  const stone = flatMaterial(scene, "golemStone", archetype.colour);
-  const dark = flatMaterial(scene, "golemDark", hexColour(archetype.colour).scale(0.68));
+  const stone = flatMaterial(scene, "golemStone", tint);
+  const dark = flatMaterial(scene, "golemDark", hexColour(tint).scale(0.68));
   const moss = flatMaterial(scene, "golemMoss", 0x5a7a44);
   const rune = flatMaterial(scene, "golemRune", 0x8ff0e0);
   rune.emissiveColor = hexColour(0x2a9a88);
@@ -391,15 +405,16 @@ function buildGolemRig(scene: Scene): Rig {
   return rig;
 }
 
-export function buildEnemyRig(scene: Scene, kind: EnemyKind): Rig {
+/** A creature's body. `colour` overrides its kind's, for a variant. */
+export function buildEnemyRig(scene: Scene, kind: EnemyKind, colour?: number): Rig {
   switch (kind) {
-    case "spider": return buildSpiderRig(scene);
-    case "wolf": return buildWolfRig(scene);
-    case "boar": return buildBoarRig(scene);
-    case "wretch": return buildWretchRig(scene);
-    case "wisp": return buildWispRig(scene);
-    case "golem": return buildGolemRig(scene);
-    default: return buildZombieRig(scene);
+    case "spider": return buildSpiderRig(scene, colour);
+    case "wolf": return buildWolfRig(scene, colour);
+    case "boar": return buildBoarRig(scene, colour);
+    case "wretch": return buildWretchRig(scene, colour);
+    case "wisp": return buildWispRig(scene, colour);
+    case "golem": return buildGolemRig(scene, colour);
+    default: return buildZombieRig(scene, colour);
   }
 }
 

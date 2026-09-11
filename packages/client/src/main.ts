@@ -28,6 +28,7 @@ import { CharacterScreen } from "./character.js";
 import { Chat, type ChatLine } from "./chat.js";
 import { DevMenu, type EliteStatus } from "./devtools.js";
 import { PartyUI, type PartyRoster } from "./party.js";
+import { questMarksFor } from "./questMarks.js";
 import { QuestUI } from "./questUI.js";
 import { VendorUI } from "./vendorUI.js";
 import { showTitleScreen } from "./titleScreen.js";
@@ -119,6 +120,8 @@ let level = 1;
 function refreshQuestMarkers(): void {
   const log = questUI.currentLog;
   session?.setQuestMarkers((id) => questMarker(id, log, level));
+  // ...and on the maps and the compass, where each quest wants you.
+  if (currentOstra) session?.setQuestMarks(questMarksFor(currentOstra, log));
   hud.refreshSpeech();
 }
 
@@ -208,15 +211,60 @@ window.addEventListener("keydown", (event) => {
       session?.cycleTarget();
       break;
     case "Escape":
-      // Close whatever is open first; only then drop the target.
-      if (hud.helpOpen) hud.toggleHelp(false);
+      // Close whatever is open first; then drop the target; and only with
+      // nothing left to close, the menu — the order every MMO has taught.
+      if (!gameMenu.hidden) setMenu(false);
+      else if (hud.helpOpen) hud.toggleHelp(false);
       else if (session?.mapOpen) session.toggleMap();
       else if (partyUI.isOpen) partyUI.setOpen(false);
       else if (vendorUI.close()) break;
       else if (questUI.close()) break;
       else if (characterScreen.isOpen) characterScreen.setOpen(false);
-      else session?.clearTarget();
+      else if (session?.clearTarget()) break;
+      else if (session) setMenu(true);
       break;
+  }
+});
+
+// --- the game menu -------------------------------------------------------------
+
+const gameMenu = document.getElementById("game-menu") as HTMLElement;
+
+function setMenu(open: boolean): void {
+  gameMenu.hidden = !open;
+  const sound = gameMenu.querySelector<HTMLButtonElement>("[data-act=sound]");
+  if (sound) sound.textContent = audio.isMuted ? "Sound: off" : "Sound: on";
+}
+
+/** Set once signed in: what "Sign out" forgets. */
+let signOut: (() => void) | undefined;
+
+/**
+ * Leave the world and go back to the title screen. Leaving the room first,
+ * consented, is what saves where you stood; a reload then starts clean at the
+ * character list (or, signed out, at the sign-in form) — simpler and surer
+ * than unwinding a live session by hand.
+ */
+async function leaveWorld(forgetAccount: boolean): Promise<void> {
+  gameMenu.hidden = true;
+  travelling = true;
+  await room?.leave(true).catch(() => undefined);
+  if (forgetAccount) signOut?.();
+  location.reload();
+}
+
+gameMenu.addEventListener("click", (event) => {
+  const target = event.target as HTMLElement;
+  if (target === gameMenu) {
+    setMenu(false);
+    return;
+  }
+  switch (target.closest<HTMLButtonElement>("button[data-act]")?.dataset["act"]) {
+    case "resume": setMenu(false); break;
+    case "controls": setMenu(false); hud.toggleHelp(true); break;
+    case "sound": hud.setMuted(audio.toggleMute()); setMenu(true); break;
+    case "logout": void leaveWorld(false); break;
+    case "signout": void leaveWorld(true); break;
   }
 });
 
@@ -265,6 +313,7 @@ async function main(): Promise<void> {
     .then((r) => r.json() as Promise<{ realmId: string }>);
 
   const account = new AccountClient(HTTP_ENDPOINT, health.realmId);
+  signOut = () => account.signOut();
   const character = await showTitleScreen(account);
   characterScreen.setName(character.name);
   // Known before the room is, so the ability bar is right on the first frame.

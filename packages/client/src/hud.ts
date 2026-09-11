@@ -302,6 +302,19 @@ export class Hud {
         learnedAt: level,
       });
     });
+
+    // Every class's two, on their own keys, set apart from the class's bar.
+    const utility = (key: string, name: string, meta: string, title: string): HTMLElement => {
+      const root = document.createElement("div");
+      root.className = "ability utility";
+      root.title = title;
+      root.innerHTML = `<span class="key">${key}</span><span class="name">${name}</span>` +
+        `<span class="meta">${meta}</span><span class="cool"></span>`;
+      this.abilities.appendChild(root);
+      return root.querySelector(".cool") as HTMLElement;
+    };
+    this.dodgeCool = utility("Q", "Dodge", "dash", "Dodge: a quick dash where you are steering (or back). Blows miss you while it lasts.");
+    this.healCool = utility("R", "Second Wind", "heal", "Second Wind: a third of your health back at once. Usable in a fight; a long cooldown.");
     this.drawLocks();
     // The resource line re-greys against the new slots on its next update.
     this.shownResource = -1;
@@ -362,6 +375,21 @@ export class Hud {
     drop.textContent = `+${amount.toLocaleString()} XP`;
     this.xpRoot.appendChild(drop);
     window.setTimeout(() => drop.remove(), 1400);
+  }
+
+  private dodgeCool: HTMLElement | undefined;
+  private healCool: HTMLElement | undefined;
+  private shownUtility = "";
+
+  /** The Dodge and Second Wind slots' cooldowns, as the fraction left. */
+  setUtility(dodge: number, heal: number): void {
+    const d = Math.max(0, Math.min(1, dodge));
+    const h = Math.max(0, Math.min(1, heal));
+    const key = `${d.toFixed(3)}|${h.toFixed(3)}`;
+    if (key === this.shownUtility) return;
+    this.shownUtility = key;
+    if (this.dodgeCool) this.dodgeCool.style.height = `${d * 100}%`;
+    if (this.healCool) this.healCool.style.height = `${h * 100}%`;
   }
 
   /** Sweep the cooldown shade on each slot. Cheap enough to run every frame. */

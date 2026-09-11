@@ -117,8 +117,10 @@ smaller entries below; those are the first step towards them.
 - **Day/night and weather.** Terra is permanently mid-afternoon.
 - **Unnamed Ostras.** The lore's small, beast-ridden Ostras, generated into the
   same shape as the named ones.
-- **Slopes and jumping.** Terrain does not affect movement: you climb a 120 m
-  peak at walking speed.
+- **Slopes, and a jump that clears things.** Terrain does not slow you: you
+  climb a 120 m peak at walking speed. You can jump, but collision is flat, so
+  a jump clears nothing; low things (logs, fences) could be skipped when high
+  enough in the air.
 - **Swimming / deep water.** Lakes are deliberately wadeable because there is no
   swimming.
 
@@ -200,4 +202,13 @@ smaller entries below; those are the first step towards them.
 - **Settings.** Key rebinding, volume, view distance.
 - **Postgres store.** SQLite means one process per realm; `CharacterStore` exists
   so this is a swap, not a rewrite.
-- **Minimap zoom** and waypoints you can place on the world map.
+- **Minimap zoom** and waypoints you can place on the world map. (The world
+  map zooms and pans now.)
+- **Hunting grounds for the rest of Terra.** Four areas with variants round
+  Daso (`variants.ts`); Fanshona's quests and every region past the Westwood
+  still ask for whole kinds, so they get no map mark. One area and variant
+  per quest, as the Daso ones are.
+- **Consumables.** Second Wind stands in for potions; potions that drop, sell
+  and sit on a key would replace or join it.
+- **A jump and dodge pose.** The body lifts and dashes, but its limbs do not
+  tuck or roll.

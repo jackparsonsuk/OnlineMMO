@@ -235,10 +235,20 @@ export function castSteps(spell: Spell): number {
   return spell.castMs <= 0 ? 0 : Math.max(1, Math.round((spell.castMs / 1000) * TICK_RATE));
 }
 
-/** A step with any movement in it: what cancels a cast. */
-export function isMoving(input: { moveX: number; moveZ: number }): boolean {
-  return input.moveX !== 0 || input.moveZ !== 0;
+/** A step with any movement in it — walking, a jump or a dodge: what cancels
+ *  a cast, as it does in WoW. */
+export function isMoving(input: { moveX: number; moveZ: number; jump?: boolean; dodge?: boolean }): boolean {
+  return input.moveX !== 0 || input.moveZ !== 0 || input.jump === true || input.dodge === true;
 }
+
+/**
+ * Catching your breath: a share of your health back at once, usable in a
+ * fight, on a long cooldown. Every class has it — it is the stand-in for
+ * potions until there are consumables to carry. Cooldown checked by the
+ * server; the client only draws it.
+ */
+export const HEAL_FRACTION = 0.35;
+export const HEAL_COOLDOWN_MS = 40_000;
 
 // --- damage -----------------------------------------------------------------
 

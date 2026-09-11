@@ -34,7 +34,7 @@
     <div id="worldmap" hidden>
       <div id="worldmap-title"></div>
       <canvas id="worldmap-canvas"></canvas>
-      <div class="worldmap-hint"><kbd>M</kbd> or <kbd>Esc</kbd> to close</div>
+      <div class="worldmap-hint">Scroll to zoom · drag to move · <kbd>M</kbd> or <kbd>Esc</kbd> to close</div>
     </div>
 
     <!-- Arriving somewhere: its name, big, then gone. -->
@@ -102,7 +102,9 @@
         <dl>
           <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Move</dd>
           <dt><kbd>Shift</kbd></dt><dd>Sprint, out of combat</dd>
-          <dt><kbd>Space</kbd> <kbd>1</kbd>–<kbd>6</kbd></dt><dd>Abilities</dd>
+          <dt><kbd>1</kbd>–<kbd>6</kbd></dt><dd>Abilities</dd>
+          <dt><kbd>Space</kbd></dt><dd>Jump</dd>
+          <dt><kbd>Q</kbd> · <kbd>R</kbd></dt><dd>Dodge · Second Wind (a heal)</dd>
           <dt><kbd>Tab</kbd> or click</dt><dd>Target · <kbd>Esc</kbd> to let go</dd>
           <dt>Drag · scroll</dt><dd>Turn the camera · zoom</dd>
           <dt><kbd>E</kbd></dt><dd>Talk to someone</dd>
@@ -115,6 +117,19 @@
         </dl>
         <button type="button" data-close>Into the world</button>
         <p><kbd>H</kbd> shows this again</p>
+      </div>
+    </div>
+
+    <!-- Esc, once there is nothing else for it to close. -->
+    <div id="game-menu" hidden>
+      <div class="menu-card">
+        <h2>Ostracon</h2>
+        <button type="button" data-act="resume" class="primary">Resume</button>
+        <button type="button" data-act="controls">Controls</button>
+        <button type="button" data-act="sound">Sound</button>
+        <hr>
+        <button type="button" data-act="logout">Log out <small>to your characters</small></button>
+        <button type="button" data-act="signout">Sign out <small>of this account</small></button>
       </div>
     </div>
 

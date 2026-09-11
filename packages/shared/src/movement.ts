@@ -1,4 +1,15 @@
-import { COLLISION_ITERATIONS, MOVE_SPEED, PLAYER_RADIUS, SPRINT_MULTIPLIER } from "./constants.js";
+import {
+  COLLISION_ITERATIONS,
+  DODGE_COOLDOWN_STEPS,
+  DODGE_SPEED,
+  DODGE_STEPS,
+  GRAVITY,
+  JUMP_SPEED,
+  MOVE_SPEED,
+  PLAYER_RADIUS,
+  SPRINT_MULTIPLIER,
+  STEP_DOWN,
+} from "./constants.js";
 import { heightAt, type TerrainSettings } from "./terrain.js";
 
 /**
@@ -23,6 +34,16 @@ export interface MoveState {
   yaw: number;
 }
 
+/** A player's body: a position, plus what a jump and a dodge carry from one
+ *  step to the next. Creatures are only `MoveState`. */
+export interface PlayerMoveState extends MoveState {
+  vy: number;
+  dodgeLeft: number;
+  dodgeX: number;
+  dodgeZ: number;
+  dodgeCooldown: number;
+}
+
 /** Structural view of `MoveInput`, so the sim doesn't depend on the schema. */
 export interface MoveCommand {
   moveX: number;
@@ -30,6 +51,8 @@ export interface MoveCommand {
   yaw: number;
   /** Asking to run. Only honoured out of combat — see `applyInput`. */
   sprint?: boolean;
+  jump?: boolean;
+  dodge?: boolean;
 }
 
 /**
@@ -121,7 +144,7 @@ function clamp(value: number, min: number, max: number): number {
  *   not letting anyone outrun a spider by holding Shift.
  */
 export function applyInput(
-  state: MoveState,
+  state: PlayerMoveState,
   command: MoveCommand,
   dt: number,
   world: MoveWorld,
@@ -135,25 +158,82 @@ export function applyInput(
   const moveX = clamp(Number.isFinite(command.moveX) ? command.moveX : 0, -1, 1);
   const moveZ = clamp(Number.isFinite(command.moveZ) ? command.moveZ : 0, -1, 1);
 
+  // Babylon is left-handed with +Y up: a mesh at rotation.y = yaw faces
+  // (sin yaw, 0, cos yaw), and its right is (cos yaw, 0, -sin yaw).
+  const sin = Math.sin(yaw);
+  const cos = Math.cos(yaw);
+
   // Normalising the stick is what stops diagonals being ~41% faster; it also
   // means a client sending (1, 1) gains nothing over (0, 1).
   const magnitude = Math.hypot(moveX, moveZ);
-  let deltaX = 0;
-  let deltaZ = 0;
-  if (magnitude > 0) {
-    const inputX = moveX / magnitude;
-    const inputZ = moveZ / magnitude;
+  const inputX = magnitude > 0 ? moveX / magnitude : 0;
+  const inputZ = magnitude > 0 ? moveZ / magnitude : 0;
+  const steerX = inputX * cos + inputZ * sin;
+  const steerZ = inputZ * cos - inputX * sin;
 
-    // Babylon is left-handed with +Y up: a mesh at rotation.y = yaw faces
-    // (sin yaw, 0, cos yaw), and its right is (cos yaw, 0, -sin yaw).
-    const sin = Math.sin(yaw);
-    const cos = Math.cos(yaw);
-    const speed = command.sprint === true && canSprint ? MOVE_SPEED * SPRINT_MULTIPLIER : MOVE_SPEED;
-    deltaX = (inputX * cos + inputZ * sin) * speed * dt;
-    deltaZ = (inputZ * cos - inputX * sin) * speed * dt;
+  if (state.dodgeCooldown > 0) state.dodgeCooldown--;
+  // A dodge goes where you are steering, or straight back if you are not —
+  // back is away from whatever is in front of you, which is usually the
+  // thing you are dodging.
+  if (command.dodge === true && state.dodgeCooldown === 0 && state.dodgeLeft === 0) {
+    state.dodgeX = magnitude > 0 ? steerX : -sin;
+    state.dodgeZ = magnitude > 0 ? steerZ : -cos;
+    state.dodgeLeft = DODGE_STEPS;
+    state.dodgeCooldown = DODGE_COOLDOWN_STEPS;
   }
 
+  let deltaX = 0;
+  let deltaZ = 0;
+  if (state.dodgeLeft > 0) {
+    state.dodgeLeft--;
+    deltaX = state.dodgeX * DODGE_SPEED * dt;
+    deltaZ = state.dodgeZ * DODGE_SPEED * dt;
+  } else if (magnitude > 0) {
+    const speed = command.sprint === true && canSprint ? MOVE_SPEED * SPRINT_MULTIPLIER : MOVE_SPEED;
+    deltaX = steerX * speed * dt;
+    deltaZ = steerZ * speed * dt;
+  }
+
+  const lastY = state.y;
   moveBody(state, deltaX, deltaZ, world, PLAYER_RADIUS);
+  if (world.terrain) fall(state, lastY, command.jump === true, dt);
+}
+
+/**
+ * Up and down, after `moveBody` has put the body on the ground at its new x/z.
+ *
+ * Height used to be purely derived — where you stand decides how high you
+ * are — which is why nothing vertical could drift. A jump needs a velocity,
+ * so it is carried in the state and reconciled like position; but on the
+ * ground `vy` is exactly zero and `y` is exactly the ground, so walking is
+ * still derived, and only a jump or a real drop is integrated.
+ */
+function fall(state: PlayerMoveState, lastY: number, jump: boolean, dt: number): void {
+  const ground = state.y;
+  let vy = state.vy;
+  let y = lastY;
+  if (vy === 0) {
+    if (jump) vy = JUMP_SPEED;
+    // Off an edge taller than a step: start falling. A hair below zero,
+    // since zero means standing.
+    else if (lastY - ground > STEP_DOWN) vy = -1e-6;
+    else return;
+  }
+  vy -= GRAVITY * dt;
+  y += vy * dt;
+  if (y <= ground) {
+    y = ground;
+    vy = 0;
+  } else if (vy === 0) {
+    vy = -1e-6;
+  }
+  state.y = y;
+  state.vy = vy;
+}
+
+/** Whether a player is in the middle of a dodge: blows miss them. */
+export function isDodging(state: { dodgeLeft: number }): boolean {
+  return state.dodgeLeft > 0;
 }
 
 /**

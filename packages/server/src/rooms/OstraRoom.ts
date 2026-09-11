@@ -55,6 +55,7 @@ import {
   GATE_ARRIVAL_OFFSET,
   GATE_RADIUS,
   getOstra,
+  getVariant,
   isEnemyKind,
   isOstraId,
   leechFraction,
@@ -83,6 +84,9 @@ import {
   vendorStock,
   castSteps,
   isMoving,
+  isDodging,
+  HEAL_COOLDOWN_MS,
+  HEAL_FRACTION,
   STRIKE_COMBO_LENGTH,
   STRIKE_COMBO_WINDOW_MS,
   wear,
@@ -178,6 +182,8 @@ interface Session {
   healthCarry: number;
   /** Wall-clock ms until which Fervour does not drain (Battle Cry). */
   fervourHoldUntil: number;
+  /** Wall-clock ms when the heal is ready again (see HEAL_COOLDOWN_MS). */
+  healReadyAt: number;
   /** A cast with a cast time under way: inputs left until it lands, and the
    *  latest aim. Moving cancels it (see `stepCast`). */
   pendingCast: { spell: Spell; stepsLeft: number; aim: number } | undefined;
@@ -503,6 +509,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         for (const input of this.inputs.get(sessionId)) {
           applyInput(player, input, ctx.dt, world, !player.inCombat);
           this.stepCast(sessionId, session, player, input, now);
+          if (input.heal) this.tryHeal(sessionId, session, player, now);
         }
 
         this.checkGates(sessionId, session, player);
@@ -620,6 +627,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       resourceCarry: 0,
       healthCarry: 0,
       fervourHoldUntil: 0,
+      healReadyAt: 0,
       respawnAt: 0,
       diedAtX: x,
       diedAtZ: z,
@@ -839,7 +847,9 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
   private wakeCamp(camp: CampDefinition, now: number): void {
     const archetype = getArchetype(camp.kind);
-    const maxHealth = this.scaledHealth(archetype.maxHealth, camp.level);
+    // A hunting area's variant: its kind's body at its own size and strength.
+    const variant = getVariant(camp.variant);
+    const maxHealth = Math.min(65535, Math.round(this.scaledHealth(archetype.maxHealth, camp.level) * (variant?.health ?? 1)));
     const enemyIds: string[] = [];
 
     for (let n = 0; n < camp.count; n++) {
@@ -861,6 +871,9 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         maxHealth,
         level: camp.level,
         state: EnemyState.Idle,
+        variant: variant?.id ?? "",
+        // Rounded to the float32 it travels as, like an elite's.
+        scale: Math.fround(variant?.scale ?? 1),
       }));
       this.brains.set(id, createBrain(x, z, camp.id, maxHealth));
       enemyIds.push(id);
@@ -1203,10 +1216,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   }
 
   /** How much harder than its kind this creature hits: an elite's multiplier,
-   *  and more once enraged. 1 for anything ordinary. */
+   *  and more once enraged, or a variant's. 1 for anything ordinary. */
   private eliteDamageScale(enemyId: string): number {
     const fight = this.eliteOf.get(enemyId);
-    if (!fight) return 1;
+    if (!fight) return getVariant(this.state.enemies.get(enemyId)?.variant)?.damage ?? 1;
     return fight.elite.damage * (fight.enraged ? ENRAGE_DAMAGE : 1);
   }
 
@@ -1430,9 +1443,12 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         quest.objectives.forEach((objective, i) => {
           const have = progress[i] ?? 0;
           if (have >= objectiveTarget(objective)) return;
-          const counts = objective.kind === "kill" ? objective.creature === enemy.kind
+          // A variant objective wants that variant; a plain one, the kind.
+          const matches = (kind: string, variant: string | undefined): boolean =>
+            variant !== undefined ? enemy.variant === variant : kind === enemy.kind;
+          const counts = objective.kind === "kill" ? matches(objective.creature, objective.variant)
             : objective.kind === "slay" ? objective.elite === eliteId
-              : objective.kind === "collect" ? objective.from === enemy.kind && Math.random() < objective.chance
+              : objective.kind === "collect" ? matches(objective.from, objective.variant) && Math.random() < objective.chance
                 : false;
           if (!counts) return;
           progress[i] = have + 1;
@@ -1653,10 +1669,30 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     player.x = x;
     player.z = z;
     player.y = groundHeight(this.ostra, x, z);
+    this.standStill(player);
     session.suppressedGate = travel ? undefined : this.gateContaining(x, z)?.id;
     this.releaseFrom(client.sessionId);
     client.send("teleported", { x, z });
     this.updateCamps(Date.now());
+  }
+
+  /** Put down mid-jump or mid-dodge (a teleport, a respawn): no velocity or
+   *  dash carries across. The dodge's cooldown does. */
+  private standStill(player: Player): void {
+    player.vy = 0;
+    player.dodgeLeft = 0;
+  }
+
+  /**
+   * The heal: a share of your health back at once, if it is ready and you
+   * are standing. Everyone near sees it, so a party knows who just used theirs.
+   */
+  private tryHeal(sessionId: string, session: Session, player: Player, now: number): void {
+    if (player.health === 0 || now < session.healReadyAt) return;
+    session.healReadyAt = now + HEAL_COOLDOWN_MS;
+    const amount = Math.min(player.maxHealth - player.health, Math.round(player.maxHealth * HEAL_FRACTION));
+    player.health += amount;
+    this.broadcastNear(player.x, player.z, "healed", { id: sessionId, amount, readyIn: HEAL_COOLDOWN_MS });
   }
 
   /** Every creature forgets this player: no threat, no quarry, no blow on
@@ -1876,6 +1912,12 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
     const now = Date.now();
     if (session.god) return;
+    // Mid-dodge, the blow finds nothing there. Checked when it lands, like
+    // every other test of a blow, against where the server has you.
+    if (isDodging(player)) {
+      this.broadcastNear(player.x, player.z, "evade", { id: sessionId, by: byEnemyId });
+      return;
+    }
     const reduction = armourReduction(session.stats.totals.armour, attackerLevel);
     const amount = Math.max(1, Math.round(raw * (1 - reduction)));
     player.health = Math.max(0, player.health - amount);
@@ -1939,6 +1981,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       player.x = spot.x;
       player.z = spot.z;
       player.y = groundHeight(this.ostra, spot.x, spot.z);
+      this.standStill(player);
       player.health = player.maxHealth;
       player.resource = getClass(session.classId).resource === "fervour" ? 0 : player.maxResource;
       session.resourceCarry = 0;

@@ -1302,6 +1302,7 @@ body.portrait :is(#compass, #minimap, #actionbar, #corner, #target-frame, #castb
 .floater.taken { color: #ff6b5a; font-size: 19px; }
 .floater.other { color: #c6d2de; font-size: 13px; font-weight: 700; opacity: 0.85; }
 .floater.note { color: #9fd8ff; font-size: 14px; font-weight: 700; letter-spacing: 0.04em; }
+.floater.heal { color: #7fe894; font-size: 17px; font-weight: 800; }
 .floater.level { color: #f0d060; font-size: 20px; font-weight: 800; letter-spacing: 0.04em; }
 
 /* Crossed swords at the left end of the health bar while you are fighting. */
@@ -2151,4 +2152,82 @@ body.portrait #chat { opacity: 0; pointer-events: none; }
 }
 @media (max-width: 960px) {
   #compass { width: min(260px, calc(100vw - 520px)); min-width: 160px; }
+}
+
+/* Dodge and Second Wind: every class's, on Q and R, set apart from the bar. */
+.ability.utility { width: 64px; border-color: rgb(127 191 154 / 26%); }
+.ability.utility .key { color: #a8e6b4; }
+.ability.utility:first-of-type { margin-left: 0; }
+.ability.utility:nth-last-child(2) { margin-left: 8px; }
+
+/* --- the game menu (Esc) ------------------------------------------------------ */
+
+#game-menu {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(4 6 9 / 58%);
+  backdrop-filter: blur(2px);
+  z-index: 11;
+}
+#game-menu[hidden] { display: none; }
+.menu-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(300px, 90vw);
+  padding: 22px 22px 20px;
+  border-radius: 14px;
+  border: 1px solid var(--hair-strong);
+  background: var(--glass-solid);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 60%);
+}
+.menu-card h2 {
+  margin: 0 0 10px;
+  font: 400 26px var(--display);
+  letter-spacing: 0.12em;
+  text-align: center;
+  color: var(--ink);
+}
+.menu-card hr { width: 100%; margin: 6px 0; border: none; border-top: 1px solid var(--hair); }
+.menu-card button {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--hair);
+  background: rgb(255 255 255 / 3%);
+  color: var(--ink);
+  font: 600 14px var(--display);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms;
+}
+.menu-card button:hover { border-color: var(--hair-strong); background: rgb(220 189 110 / 10%); }
+.menu-card button.primary { justify-content: center; border-color: var(--hair-strong); background: rgb(220 189 110 / 16%); color: var(--gold-soft); }
+.menu-card button small { font: 400 11px ui-sans-serif, system-ui, sans-serif; color: var(--muted); letter-spacing: 0; }
+
+/* Quest marks on the compass: gold, and a "?" where one is ready to hand in. */
+#compass .landmark.quest {
+  width: 8px;
+  height: 8px;
+  top: 19px;
+  background: #f7d66e;
+  border: 1px solid #1a1408;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+#compass .landmark.quest.area { border-radius: 50%; clip-path: none; background: rgb(247 214 110 / 70%); }
+#compass .landmark.quest.turnin { width: 10px; height: 10px; top: 18px; clip-path: none; border-radius: 50%; background: #fff1b8; }
+#worldmap-canvas { cursor: grab; }
+#worldmap-canvas:active { cursor: grabbing; }
+
+/* Eight slots in a narrow window: smaller, so the bar still fits. */
+@media (max-width: 860px) {
+  .ability { width: 60px; height: 54px; padding: 4px 5px 5px; }
+  .ability.utility { width: 54px; }
+  .ability .name { font-size: 10.5px; }
+  .ability .meta { font-size: 9px; left: 5px; }
 }

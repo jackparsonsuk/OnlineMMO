@@ -38,6 +38,21 @@ export interface MapBlip {
   elite?: boolean;
 }
 
+/**
+ * Where a quest wants you, drawn on the maps and the compass: an area to hunt
+ * in (a kill or collect whose creature lives in one place), a point to go to
+ * (a visit, an elite), or the person to hand it back to.
+ */
+export interface QuestMark {
+  kind: "area" | "point" | "turnin";
+  x: number;
+  z: number;
+  /** Metres, for an area. */
+  radius?: number;
+  /** The quest's title, for the world map. */
+  label: string;
+}
+
 interface Landmark {
   name: string;
   x: number;
@@ -158,11 +173,28 @@ export class Cartographer {
   private picker: ((x: number, z: number) => void) | undefined;
   private readonly onPickMove = (event: MouseEvent) => this.describePick(event);
   private readonly onPickClick = (event: MouseEvent) => this.pick(event);
+  private readonly onWheel = (event: WheelEvent) => this.zoomAt(event);
+  private readonly onDragStart = (event: MouseEvent) => this.startDrag(event);
+  private readonly onDragMove = (event: MouseEvent) => this.moveDrag(event);
+  private readonly onDragEnd = () => { this.drag = undefined; };
+  /** The world map's view: how far in (1 = the whole Ostra), and the point at
+   *  its centre. Kept between openings; recentred on you when zoomed in. */
+  private zoom = 1;
+  private centreX = 0;
+  private centreZ = 0;
+  private drag: { x: number; y: number; moved: boolean } | undefined;
+  /** Set on a drag that moved, so the click that ends it is not a pick. */
+  private dragged = false;
+  private questMarks: QuestMark[] = [];
+  private questCompass: HTMLElement[] = [];
+  private lastX = 0;
+  private lastZ = 0;
 
   constructor(ostra: OstraDefinition) {
     this.ostra = ostra;
     const palette = groundPalette(ostra);
-    this.local = new TileCache(ostra, palette, Math.min(3, ostra.size / 180), 900);
+    // Big enough for the world map zoomed right in, as well as the minimap.
+    this.local = new TileCache(ostra, palette, Math.min(3, ostra.size / 180), 3000);
     this.world = new TileCache(ostra, palette, Math.max(0.12, ostra.size / 520), 4096);
 
     const settlements = settlementsIn(ostra);
@@ -199,6 +231,75 @@ export class Cartographer {
     this.defaultHint = this.worldHint.innerHTML;
     this.worldCanvas.addEventListener("mousemove", this.onPickMove);
     this.worldCanvas.addEventListener("click", this.onPickClick);
+    this.worldCanvas.addEventListener("wheel", this.onWheel, { passive: false });
+    this.worldCanvas.addEventListener("mousedown", this.onDragStart);
+    window.addEventListener("mousemove", this.onDragMove);
+    window.addEventListener("mouseup", this.onDragEnd);
+  }
+
+  /** Where your quests want you. Replaces the last set. */
+  setQuestMarks(marks: QuestMark[]): void {
+    this.questMarks = marks;
+    for (const mark of this.questCompass) mark.remove();
+    this.questCompass = [];
+    for (const mark of marks) {
+      const el = document.createElement("span");
+      el.className = `landmark quest ${mark.kind}`;
+      el.title = mark.label;
+      el.dataset["x"] = String(mark.x);
+      el.dataset["z"] = String(mark.z);
+      this.compass.appendChild(el);
+      this.questCompass.push(el);
+    }
+  }
+
+  // --- the world map's view ------------------------------------------------------
+
+  /** Metres of the Ostra across the world map at the current zoom. */
+  private get viewMetres(): number {
+    return this.ostra.size / this.zoom;
+  }
+
+  /** Keep the view over the Ostra: never scrolled off into nothing. */
+  private clampView(): void {
+    const half = this.ostra.size / 2;
+    const reach = Math.max(0, half - this.viewMetres / 2);
+    this.centreX = Math.max(-reach, Math.min(reach, this.centreX));
+    this.centreZ = Math.max(-reach, Math.min(reach, this.centreZ));
+  }
+
+  /** Scroll: in or out about the point under the cursor, which stays put. */
+  private zoomAt(event: WheelEvent): void {
+    event.preventDefault();
+    const before = this.worldPointAt(event);
+    const factor = Math.exp(-event.deltaY * 0.0015);
+    this.zoom = Math.max(1, Math.min(24, this.zoom * factor));
+    const after = this.worldPointAt(event);
+    this.centreX += before.x - after.x;
+    this.centreZ += before.z - after.z;
+    this.clampView();
+  }
+
+  private startDrag(event: MouseEvent): void {
+    if (event.button !== 0) return;
+    this.drag = { x: event.clientX, y: event.clientY, moved: false };
+    this.dragged = false;
+  }
+
+  private moveDrag(event: MouseEvent): void {
+    const drag = this.drag;
+    if (!drag || !this.worldOpen) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    drag.moved = true;
+    this.dragged = true;
+    const mpp = this.viewMetres / Math.max(1, this.worldCanvas.getBoundingClientRect().width);
+    this.centreX -= dx * mpp;
+    this.centreZ += dy * mpp;
+    drag.x = event.clientX;
+    drag.y = event.clientY;
+    this.clampView();
   }
 
   get worldOpen(): boolean {
@@ -207,6 +308,12 @@ export class Cartographer {
 
   toggleWorld(): void {
     this.worldPanel.hidden = !this.worldPanel.hidden;
+    // Opening zoomed in: start where you are, not wherever you left it.
+    if (!this.worldPanel.hidden && this.zoom > 1) {
+      this.centreX = this.lastX;
+      this.centreZ = this.lastZ;
+      this.clampView();
+    }
     // Closing the map by any route ends a pick.
     if (this.worldPanel.hidden && this.picker) this.setPicker(undefined);
   }
@@ -230,15 +337,14 @@ export class Cartographer {
     return this.picker !== undefined;
   }
 
-  /** A pointer position on the world map, as a place in the world. The map is
-   *  the whole Ostra fitted to a square canvas, north up. */
+  /** A pointer position on the world map, as a place in the world: the
+   *  current view fitted to a square canvas, north up. */
   private worldPointAt(event: MouseEvent): { x: number; z: number } {
     const rect = this.worldCanvas.getBoundingClientRect();
-    const half = this.ostra.size / 2;
-    const metresPerPixel = this.ostra.size / Math.max(1, rect.width);
+    const metresPerPixel = this.viewMetres / Math.max(1, rect.width);
     return {
-      x: -half + (event.clientX - rect.left) * metresPerPixel,
-      z: half - (event.clientY - rect.top) * metresPerPixel,
+      x: this.centreX - this.viewMetres / 2 + (event.clientX - rect.left) * metresPerPixel,
+      z: this.centreZ + this.viewMetres / 2 - (event.clientY - rect.top) * metresPerPixel,
     };
   }
 
@@ -252,7 +358,7 @@ export class Cartographer {
 
   private pick(event: MouseEvent): void {
     const picker = this.picker;
-    if (!picker) return;
+    if (!picker || this.dragged) return;
     const { x, z } = this.worldPointAt(event);
     this.setPicker(undefined);
     this.worldPanel.hidden = true;
@@ -263,6 +369,11 @@ export class Cartographer {
   dispose(): void {
     this.worldCanvas.removeEventListener("mousemove", this.onPickMove);
     this.worldCanvas.removeEventListener("click", this.onPickClick);
+    this.worldCanvas.removeEventListener("wheel", this.onWheel);
+    this.worldCanvas.removeEventListener("mousedown", this.onDragStart);
+    window.removeEventListener("mousemove", this.onDragMove);
+    window.removeEventListener("mouseup", this.onDragEnd);
+    for (const mark of this.questCompass) mark.remove();
     this.setPicker(undefined);
   }
 
@@ -303,6 +414,8 @@ export class Cartographer {
    * @param heading Where the camera faces, as a yaw (0 = north, π/2 = east).
    */
   update(x: number, z: number, heading: number, blips: readonly MapBlip[], targetBearing: number | undefined): void {
+    this.lastX = x;
+    this.lastZ = z;
     this.drawMinimap(x, z, heading, blips);
     this.drawCompass(x, z, heading, targetBearing);
     this.updateInfo(x, z);
@@ -351,6 +464,23 @@ export class Cartographer {
       const py = (top - landmark.z) / mpp;
       if (px < -6 || py < -6 || px > size + 6 || py > size + 6) continue;
       drawLandmark(ctx, landmark, px, py, 1);
+    }
+
+    // Quests: areas and points where they are, and anything beyond the
+    // edge as a gold notch on the rim, pointing the way.
+    for (const mark of this.questMarks) {
+      const px = (mark.x - left) / mpp;
+      const py = (top - mark.z) / mpp;
+      const radius = (mark.radius ?? 0) / mpp;
+      const dx = px - size / 2;
+      const dy = py - size / 2;
+      const distance = Math.hypot(dx, dy);
+      const rim = size / 2 - 9;
+      if (distance - radius > rim) {
+        drawRimNotch(ctx, size / 2 + (dx / distance) * rim, size / 2 + (dy / distance) * rim, Math.atan2(dx, -dy), mark.kind);
+        continue;
+      }
+      drawQuestMark(ctx, mark, px, py, radius, 1);
     }
 
     for (const blip of blips) {
@@ -409,13 +539,14 @@ export class Cartographer {
     }
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const cache = this.world;
-    const half = this.ostra.size / 2;
-    // The whole Ostra, fitted.
-    const scale = size / (this.ostra.size / cache.mpp);
-    const mpp = cache.mpp / scale;
-    const left = -half;
-    const top = half;
+    // The view: the whole Ostra at zoom 1, and closer from there. Zoomed well
+    // in, the minimap's detailed tiles take over from the world map's, which
+    // would only be stretched.
+    const mpp = this.viewMetres / size;
+    const cache = mpp < this.world.mpp / 2.5 ? this.local : this.world;
+    const scale = cache.mpp / mpp;
+    const left = this.centreX - this.viewMetres / 2;
+    const top = this.centreZ + this.viewMetres / 2;
     ctx.fillStyle = "#12161c";
     ctx.fillRect(0, 0, size, size);
     this.drawTiles(ctx, cache, left, top, size, size, scale);
@@ -443,6 +574,23 @@ export class Cartographer {
       ctx.fillText(region.name.toUpperCase(), rx, ry);
     }
 
+    // Hunting grounds, named, whether or not a quest wants you there — the
+    // place you go to find Pathstalkers should be findable without one.
+    ctx.font = "italic 11px ui-serif, Georgia, serif";
+    for (const area of this.ostra.areas ?? []) {
+      const [ax, ay] = toPx(area.x, area.z);
+      const radius = Math.max(4, area.radius / mpp);
+      ctx.beginPath();
+      ctx.arc(ax, ay, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(230, 210, 170, 0.35)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillText(area.name, ax + 1, ay + radius + 13);
+      ctx.fillStyle = "rgba(240, 228, 200, 0.85)";
+      ctx.fillText(area.name, ax, ay + radius + 12);
+    }
+
     ctx.font = "600 12px ui-sans-serif, system-ui, sans-serif";
     for (const landmark of this.landmarks) {
       const [px, py] = toPx(landmark.x, landmark.z);
@@ -453,6 +601,19 @@ export class Cartographer {
       ctx.fillStyle = landmark.kind === "settlement" ? "#ffe2a8" : landmark.kind === "ruin" ? "#e8dcc0" : "#e6edf3";
       ctx.fillText(landmark.name, px, py - 10);
     }
+
+    // Quests, over the land and under the markers.
+    ctx.font = "italic 600 12px ui-serif, Georgia, serif";
+    for (const mark of this.questMarks) {
+      const [qx, qy] = toPx(mark.x, mark.z);
+      const radius = Math.max(mark.kind === "area" ? 8 : 0, (mark.radius ?? 0) / mpp);
+      drawQuestMark(ctx, mark, qx, qy, radius, 1.4);
+      ctx.fillStyle = "rgba(0,0,0,0.7)";
+      ctx.fillText(mark.label, qx + 1, qy - radius - 7);
+      ctx.fillStyle = "#f7e3a0";
+      ctx.fillText(mark.label, qx, qy - radius - 8);
+    }
+    ctx.font = "600 12px ui-sans-serif, system-ui, sans-serif";
 
     // Your target, and every living elite — gold, ringed, a little larger.
     for (const blip of blips) {
@@ -568,6 +729,61 @@ function drawArrow(ctx: CanvasRenderingContext2D, x: number, y: number, heading:
   ctx.lineWidth = 2;
   ctx.stroke();
   ctx.fill();
+  ctx.restore();
+}
+
+/** A quest's mark: a hunting ground, a place, or a "?" to hand it in. */
+function drawQuestMark(ctx: CanvasRenderingContext2D, mark: QuestMark, x: number, y: number, radius: number, scale: number): void {
+  ctx.save();
+  if (mark.kind === "area") {
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(240, 200, 70, 0.18)";
+    ctx.fill();
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = "rgba(247, 214, 110, 0.95)";
+    ctx.stroke();
+  } else if (mark.kind === "point") {
+    const s = 5 * scale;
+    ctx.beginPath();
+    ctx.moveTo(x, y - s * 1.3); ctx.lineTo(x + s, y); ctx.lineTo(x, y + s * 1.3); ctx.lineTo(x - s, y);
+    ctx.closePath();
+    ctx.fillStyle = "#f7d66e";
+    ctx.strokeStyle = "#1a1408";
+    ctx.lineWidth = 1.6;
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.arc(x, y, 6.5 * scale, 0, Math.PI * 2);
+    ctx.fillStyle = "#1a1408";
+    ctx.fill();
+    ctx.strokeStyle = "#f7d66e";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = "#f7d66e";
+    ctx.font = `800 ${Math.round(10 * scale)}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("?", x, y + 0.5);
+  }
+  ctx.restore();
+}
+
+/** A gold notch on the minimap's rim, pointing at a quest mark beyond it. */
+function drawRimNotch(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, kind: QuestMark["kind"]): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.beginPath();
+  ctx.moveTo(0, -6); ctx.lineTo(5, 3); ctx.lineTo(-5, 3);
+  ctx.closePath();
+  ctx.fillStyle = kind === "turnin" ? "#fff1b8" : "#f7d66e";
+  ctx.strokeStyle = "#1a1408";
+  ctx.lineWidth = 1.4;
+  ctx.fill();
+  ctx.stroke();
   ctx.restore();
 }
 

@@ -29,8 +29,10 @@ one.
 | `npm run dev:server` / `npm run dev:client` | One side only |
 | `npm run typecheck` | Type-checks all three packages |
 
-Controls: **WASD** move, **Shift** sprint (out of combat), **Space / 1–6**
-abilities, **Tab** or click to target, **Esc** to let go, **M** map, **I** (or **C**)
+Controls: **WASD** move, **Shift** sprint (out of combat), **Space** jump,
+**1–6** abilities, **Q** dodge, **R** Second Wind (a heal), **Tab** or click to
+target, **Esc** to let go (and, with nothing left to close, the game menu:
+log out, sign out, sound), **M** map (scroll to zoom, drag to pan), **I** (or **C**)
 character and pack, **E** talk to a villager, **J** quest log, **P** party (or
 click another player to invite them), **Enter** chat, **H** this list, drag to
 orbit, scroll to zoom, walk into a Gate ring to travel.
@@ -187,6 +189,30 @@ Charm, Fenwater Phial, Emberheart, Cairnstone Maul), kept out of the random
 loot pool. The client gives each its own procedurally animated body, windup
 sound and blow effect — a spit flies, a pulse bursts, a slam shakes the camera.
 
+### Variants and hunting grounds
+
+A quest can only point at a place if what it asks for lives in one. "Kill
+five wolves" on a map where wolves live everywhere is a quest with no
+direction, so a **variant** (`variants.ts`) is a kind's body and fight with its
+own name, colour and size, and multipliers on health and damage — and each
+lives in exactly one **hunting area** (`OstraDefinition.areas`) and nowhere
+else. The area's camps are one in the middle, a level up, and the rest round
+it; the generated camps keep out of it, so it is theirs alone. The first four
+are Daso's work:
+
+| Area | Variant | Of | Levels |
+| --- | --- | --- | --- |
+| The Woodcutters' Path, south-west | Pathstalker | wolf, lean and brown | 2–3 |
+| The Webbed Thicket, north-west | Thicket Weaver | spider, small and green | 3–4 |
+| The Felled Ridge, east | Rootbound Risen | Risen, mossy and bigger | 5–6 |
+| Silkstrand Hollow, off the Westroad | Silk Snatcher | spider, wine-red | 6–7 |
+
+Nothing new to learn in a fight: the kind decides the body, the AI and the
+effects. The size travels as `Enemy.scale`, like an elite's, so a bigger body
+is never a smaller hitbox; the id travels as `Enemy.variant` for the name and
+colour. A quest objective names a variant (`variant` on kill and collect) to
+ask for it rather than the whole kind.
+
 The state machine is Idle → Wander → Chase → Return.
 
 Two details carry most of the feel. **Deaggro is wider than aggro** (20 m vs 13 m
@@ -312,8 +338,34 @@ A cancel is also sent as `castCancelled` in case the two ever disagree. Strike
 is a slow, heavy swing to match — one every 1.8 s, each worth three of the old
 0.6 s ones.
 
-Cooldowns are enforced server-side, so holding Space auto-attacks and spamming
-it gains nothing. The client mirrors the same constant purely so the swing draws
+Cooldowns are enforced server-side, so holding 1 auto-attacks and spamming
+it gains nothing.
+
+### Jump, dodge and Second Wind
+
+**Space jumps** — about a metre, two thirds of a second in the air. Height
+used to be derived from where you stand and nothing else, which is why
+nothing vertical could drift between client and server; a jump needs a
+vertical speed (`Player.vy`), so it is carried in the state and reconciled
+like position. On the ground `vy` is exactly zero and `y` is exactly the
+ground, so walking is still derived; only a jump, or walking off something
+taller than `STEP_DOWN`, is integrated (`fall` in `movement.ts`). Collision is
+still flat: a jump clears nothing but looks like it should.
+
+**Q dodges**: a dash of about four metres in a quarter of a second, where you
+are steering or straight back if you are not, every five seconds. Blows that
+land while it lasts miss (`isDodging`, checked in `damagePlayer`, so a slam
+misses too). Like a cast, it is counted in input steps — `dodgeLeft` and
+`dodgeCooldown` on the player, reconciled — so the client predicts the exact
+dash the server runs. It is sent for one step per press, not held.
+
+A jump or a dodge cancels a cast with a cast time, as walking does
+(`isMoving`).
+
+**R is Second Wind**: 35% of your health back at once, usable in a fight,
+every 40 seconds — every class's, and the stand-in for potions until there
+are consumables to carry. The server gates it on its own clock; everyone near
+sees it land. The client mirrors the same constant purely so the swing draws
 on the frame you press rather than a round trip later.
 
 Death: creatures drop to a `Dead` state — still in the map, so the client can
@@ -700,6 +752,15 @@ world can already tell apart:
 - **collect** N of something only some of a creature carry
 - **visit** a place
 
+**Where each quest wants you is on the maps and the compass**
+(`questMarks.ts`): the hunting area of a variant it asks for, highlighted in
+gold with the quest's name; a gold marker for a place to visit or an elite to
+find (for a dungeon's boss, the Gate down to it); and a "?" over whoever takes
+it back once it is done. Only what is left is drawn — a quest half done points
+at its other half — and marks beyond the minimap's edge are notches on its
+rim, pointing the way. An objective for a whole kind has no single place and
+gets no mark, which is the argument for variants.
+
 A quest handed back to someone other than its giver is a delivery. Collected
 things are counted, not carried, because thirty slots of wolf fangs would be
 clutter the loot system has no use for. A kill counts for **everyone who fought
@@ -1074,7 +1135,10 @@ runs out of precision long before eight kilometres.
 
 **You can find your way.** A minimap (north up), a compass strip with bearings
 to landmarks, and a world map on **M** that paints itself in tiles in the
-background from the same `groundTone` as the terrain. Waystones have light
+background from the same `groundTone` as the terrain. The world map zooms on
+the scroll wheel about the point under the cursor, up to 24 times, and drags
+to pan; zoomed well in it draws from the minimap's detailed tiles rather than
+stretching its own. Hunting areas are named on it. Waystones have light
 columns that show above the haze.
 
 The size is one number (`TERRA_SIZE` in `ostras.ts`); everything above scales
@@ -1177,9 +1241,9 @@ build next live in [TODO.md](TODO.md).
 - **AI has no pathfinding.** A creature walks straight at its goal and slides
   along whatever it hits. Generated camps sit in clearings, but a chase through
   thick woodland shows it.
-- **Terrain does not affect movement.** Slopes cost nothing to climb — including
-  the rim's 120 m peaks — and there is no jumping; you simply follow the
-  surface.
+- **Terrain does not slow you.** Slopes cost nothing to climb — including the
+  rim's 120 m peaks. You can jump, but collision is flat, so a jump clears
+  nothing a walk would not.
 - **Villagers are scenery.** They stand where they are put and say one line,
   and some give quests. No trading, no schedule.
 

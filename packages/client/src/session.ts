@@ -15,6 +15,9 @@ import {
   CLASSES,
   type ClassId,
   DIFFICULTY_COLOUR,
+  DODGE_COOLDOWN_STEPS,
+  getVariant,
+  HEAL_COOLDOWN_MS,
   difficultyOf,
   type Enemy,
   type EnemyArchetype,
@@ -56,7 +59,7 @@ import { CombatText } from "./combatText.js";
 import { Effects, type ShardColour } from "./effects.js";
 import type { Hud } from "./hud.js";
 import type { KeyboardInput } from "./input.js";
-import { Cartographer, type MapBlip } from "./map.js";
+import { Cartographer, type MapBlip, type QuestMark } from "./map.js";
 import { Nametags, type NametagTarget, type NametagVariant } from "./nametags.js";
 import {
   Animator,
@@ -104,6 +107,8 @@ export interface OstraSession {
   nearestVillager(): VillagerDefinition | undefined;
   /** Mark villagers' nametags with what they have for you ("!", "?", "…"). */
   setQuestMarkers(markerFor: (id: string) => string): void;
+  /** Where your quests want you, for the maps and the compass. */
+  setQuestMarks(marks: QuestMark[]): void;
   /** Development: open the world map and hand the next click to `picker`. */
   pickOnMap(picker: ((x: number, z: number) => void) | undefined): void;
   /** Who is in your party, by session id: their names go green, and they
@@ -237,6 +242,8 @@ interface PlayerView {
   dead: boolean;
   /** The level on their nametag, to notice when it changes. */
   level: number;
+  /** Mid-dodge last frame, to notice one starting. */
+  dodging: boolean;
 }
 
 export function createSession(
@@ -484,6 +491,12 @@ export function createSession(
         radius: archetypeOf(enemy).radius,
       });
     });
+  }
+
+  /** What a creature is called: an elite's own name, a variant's, or its
+   *  kind's. */
+  function enemyName(enemy: Enemy): string {
+    return enemy.name || getVariant(enemy.variant)?.name || archetypeOf(enemy).name;
   }
 
   /** Falls back rather than throwing, so a creature kind this build doesn't
@@ -757,7 +770,7 @@ export function createSession(
     const rig = buildPlayerRig(scene, player.colour);
     // Others can be clicked; you clicking yourself would only get in the way.
     if (sessionId !== room.sessionId) for (const mesh of rig.pickables) mesh.metadata = { playerId: sessionId };
-    players.set(sessionId, { rig, animator: new Animator(rig), castYaw: 0, dead: false, level: player.level });
+    players.set(sessionId, { rig, animator: new Animator(rig), castYaw: 0, dead: false, level: player.level, dodging: false });
     meshes.set(sessionId, rig.root);
     nametags.add(
       sessionId,
@@ -781,7 +794,9 @@ export function createSession(
       reconciler = predict.reconciler(player, {
         // `yaw` stays in the mirrored set because the step writes it, but it is
         // never *read* back for rendering — see the note in `frame`.
-        fields: ["x", "y", "z", "yaw"],
+        // Everything the step reads from one input to the next: a jump's
+        // speed and a dodge's timers replay like position does.
+        fields: ["x", "y", "z", "yaw", "vy", "dodgeLeft", "dodgeX", "dodgeZ", "dodgeCooldown"],
         input,
         step: (ctx, state, command) => {
           // The server discards a dead player's input; so do we.
@@ -794,7 +809,8 @@ export function createSession(
 
   const offEnemyAdd = $(room.state).enemies.onAdd((enemy: Enemy, enemyId: string) => {
     const archetype = archetypeOf(enemy);
-    const rig = buildEnemyRig(scene, archetype.kind);
+    const variant = getVariant(enemy.variant);
+    const rig = buildEnemyRig(scene, archetype.kind, variant?.colour);
     for (const mesh of rig.pickables) mesh.metadata = { enemyId };
     const animator = new Animator(rig);
     // Camps wake as you approach. Anything arriving after the first moment
@@ -805,7 +821,7 @@ export function createSession(
     // pose the animator puts the parts in scales with it.
     if (enemy.scale !== 1) rig.root.scaling.setAll(enemy.scale);
     enemies.set(enemyId, { swing: 0, rig, animator, archetype, state: enemy.state, health: enemy.health, variant: "hostile" });
-    nametags.add(enemyId, enemy.name || archetype.name, archetype.colour, "hostile", true, enemy.name !== "");
+    nametags.add(enemyId, enemyName(enemy), variant?.colour ?? archetype.colour, "hostile", true, enemy.name !== "");
     nametags.setLevel(enemyId, enemy.level, levelColour(enemy.level));
     nametags.setHealth(enemyId, enemy.health / Math.max(1, enemy.maxHealth));
   });
@@ -1061,6 +1077,23 @@ export function createSession(
     combatText.spawn(now, x, y + PLAYER_HALF * 2 + 0.5, z, `Level ${payload.level}!`, "level");
   });
 
+  // Someone caught their breath: green off them, and the number. Your own
+  // starts the heal's cooldown on the bar.
+  const offHealed = room.onMessage("healed", (payload: { id: string; amount: number; readyIn: number }) => {
+    const player = room.state.players.get(payload.id);
+    if (!player) return;
+    const now = performance.now();
+    const x = predict.value(player, "x");
+    const y = predict.value(player, "y");
+    const z = predict.value(player, "z");
+    effects.shockwave(now, x, y, z, 2.4, 0x6dcf7e, 8);
+    combatText.spawn(now, x, y + PLAYER_HALF * 2 + 0.3, z, `+${payload.amount}`, "heal");
+    play("cry", x, z, 0.5);
+    if (payload.id === room.sessionId) healReadyAt = now + payload.readyIn;
+  });
+  /** When your heal is ready again, on this clock, as the server said. */
+  let healReadyAt = 0;
+
   // --- fixed-step input ---------------------------------------------------
   // The server advertises its own step rate through the join handshake; using
   // it (rather than our own constant) is what keeps prediction and replay on
@@ -1096,6 +1129,9 @@ export function createSession(
       // or not — the server takes the latest aim.
       input.data.aim = aimFor(localCast?.spell ?? (wanted ? SPELLS[wanted] : undefined));
       input.data.sprint = keyboard.sprinting();
+      input.data.jump = keyboard.jumping();
+      input.data.dodge = keyboard.takeDodge();
+      input.data.heal = keyboard.healing();
       // The same step the server will run on this input (`stepCast`).
       stepLocalCast(input.data, wanted, now);
       // The reconciler is subscribed to this handle, so sending is also what
@@ -1166,7 +1202,11 @@ export function createSession(
    * same step on both sides. Learned, off cooldown and affordable are checked
    * here too, so a cast the server is about to ignore draws nothing.
    */
-  function stepLocalCast(command: { moveX: number; moveZ: number }, wanted: SpellId | undefined, now: number): void {
+  function stepLocalCast(
+    command: { moveX: number; moveZ: number; jump?: boolean; dodge?: boolean },
+    wanted: SpellId | undefined,
+    now: number,
+  ): void {
     if (!selfPlayer || selfPlayer.health === 0) {
       if (localCast) {
         localCast = undefined;
@@ -1297,6 +1337,14 @@ export function createSession(
           ? facingYaw()
           : predict.value(player, "yaw");
 
+      // The first frame of a dodge: a puff of dust where they pushed off.
+      const dodging = (mine ? predict.value(player, "dodgeLeft") : player.dodgeLeft) > 0;
+      if (dodging && !view.dodging) {
+        effects.dust(x, y, z, 10);
+        play("evade", x, z, mine ? 0.8 : 0.4);
+      }
+      view.dodging = dodging;
+
       const dead = player.health === 0;
       if (dead && !view.dead) view.animator.die(now);
       if (!dead && view.dead) view.animator.revive(now);
@@ -1411,7 +1459,7 @@ export function createSession(
         if (!dead) effects.showTarget(now, x, y, z, view.archetype.radius + 0.35, locked.state === EnemyState.Chase);
         else effects.hideTarget();
         hud.setTarget({
-          name: locked.name || view.archetype.name,
+          name: enemyName(locked),
           level: locked.level,
           health: locked.health,
           maxHealth: locked.maxHealth,
@@ -1449,6 +1497,10 @@ export function createSession(
 
       hud.setResource(resourceKind, selfPlayer.resource, selfPlayer.maxResource);
       hud.setCooldowns(now, nextCastAt);
+      hud.setUtility(
+        predict.value(selfPlayer, "dodgeCooldown") / DODGE_COOLDOWN_STEPS,
+        Math.max(0, healReadyAt - now) / HEAL_COOLDOWN_MS,
+      );
       recolourLevels();
       // Follow the *rendered* position, not the raw schema one, or the camera
       // judders by exactly the correction the reconciler is smoothing out.
@@ -1535,6 +1587,7 @@ export function createSession(
     offCastCancelled();
     hud.endCast(false);
     offLevelUp();
+    offHealed();
     cartographer.dispose();
     scene.onPointerObservable.remove(pointer);
     reconciler?.dispose();
@@ -1586,6 +1639,7 @@ export function createSession(
     pickOnMap: (picker) => cartographer.setPicker(picker),
     get picking() { return cartographer.picking; },
     setParty,
+    setQuestMarks: (marks) => cartographer.setQuestMarks(marks),
     say: (sessionId, text) => nametags.say(sessionId, text),
     onPlayerClick: undefined,
     dispose,

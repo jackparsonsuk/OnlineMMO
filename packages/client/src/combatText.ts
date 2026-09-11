@@ -27,7 +27,9 @@ export type CombatTextStyle =
   /** A word rather than a number: Evaded, Staggered. */
   | "note"
   /** Somebody levelled. */
-  | "level";
+  | "level"
+  /** Health coming back. */
+  | "heal";
 
 interface Floater {
   el: HTMLElement;

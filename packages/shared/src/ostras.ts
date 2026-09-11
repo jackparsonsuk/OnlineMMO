@@ -164,6 +164,26 @@ export interface RuinDefinition {
 }
 
 /**
+ * A named hunting ground: one creature variant (`variants.ts`) lives here and
+ * nowhere else, in a few camps spread over the area, and nothing else lives
+ * here — the generated camps keep out. Quests ask for its variant, so the map
+ * can draw the area as where to go.
+ */
+export interface HuntingArea {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  radius: number;
+  variant: string;
+  level: number;
+  /** How many camps, one in the middle and the rest round it. At most 9. */
+  camps: number;
+  /** Creatures in each. */
+  count: number;
+}
+
+/**
  * Generated content for a large Ostra: woodland, boulders, and creature camps,
  * all derived deterministically from `seed` so every client and the server
  * agree on where every tree is without sending any of it.
@@ -223,6 +243,8 @@ export interface OstraDefinition {
   /** Present on a dungeon: instanced per party, and built of rock walls
    *  (see `dungeons.ts`). */
   dungeon?: DungeonDefinition;
+  /** Hunting grounds, each the only home of one creature variant. */
+  areas?: HuntingArea[];
 }
 
 /** Face the middle of the Ostra from a point on its edge. */
@@ -544,6 +566,26 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     roads: TERRA_ROADS,
     regions: TERRA_REGIONS,
     ruins: TERRA_RUINS,
+    // Daso's work, each somewhere you can point at: every quest in town asks
+    // for a creature that lives in one of these and nowhere else.
+    areas: [
+      {
+        id: "woodcutters-path", name: "The Woodcutters' Path", x: -1600, z: -430, radius: 45,
+        variant: "pathstalker", level: 2, camps: 5, count: 2,
+      },
+      {
+        id: "webbed-thicket", name: "The Webbed Thicket", x: -1680, z: 60, radius: 45,
+        variant: "thicket-weaver", level: 3, camps: 5, count: 3,
+      },
+      {
+        id: "felled-ridge", name: "The Felled Ridge", x: -1180, z: -330, radius: 48,
+        variant: "rootbound", level: 5, camps: 5, count: 3,
+      },
+      {
+        id: "silkstrand-hollow", name: "Silkstrand Hollow", x: -980, z: -250, radius: 45,
+        variant: "silk-snatcher", level: 6, camps: 5, count: 3,
+      },
+    ],
     wilds: {
       seed: 9001,
       forest: 0.5,

@@ -24,6 +24,28 @@ export const MOVE_SPEED = 6;
  */
 export const SPRINT_MULTIPLIER = 1.6;
 
+/**
+ * A jump: up at this many metres a second, pulled down by GRAVITY. About a
+ * metre high and two thirds of a second in the air — enough to hop a log
+ * and feel like a jump, not enough to matter to collision, which is flat.
+ */
+export const JUMP_SPEED = 6.2;
+export const GRAVITY = 20;
+/** Walking off anything lower than this keeps you on the ground; anything
+ *  higher and you fall. Steep enough for every hillside on Terra. */
+export const STEP_DOWN = 0.6;
+
+/**
+ * A dodge: a short dash at DODGE_SPEED for DODGE_STEPS inputs — about four
+ * metres in a quarter of a second — in the direction you are steering, or
+ * straight back if you are not. While it lasts, blows miss you. Counted in
+ * input steps rather than milliseconds, like a cast, so the client predicts
+ * exactly the dash the server runs.
+ */
+export const DODGE_SPEED = 16;
+export const DODGE_STEPS = 8;
+export const DODGE_COOLDOWN_STEPS = 150;
+
 /** Player cube dimensions. */
 export const PLAYER_SIZE = 1;
 export const PLAYER_HALF = PLAYER_SIZE / 2;

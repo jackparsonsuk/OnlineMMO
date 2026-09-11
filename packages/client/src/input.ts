@@ -5,7 +5,7 @@
  * step* — not how many OS key-repeat events happened to fire in between.
  */
 
-type Action = "forward" | "back" | "left" | "right" | "sprint"
+type Action = "forward" | "back" | "left" | "right" | "sprint" | "jump" | "dodge" | "heal"
   | "spell1" | "spell2" | "spell3" | "spell4" | "spell5" | "spell6";
 
 /** How many slots the ability bar has keys for. */
@@ -16,11 +16,12 @@ const BINDINGS: Record<string, Action> = {
   KeyS: "back", ArrowDown: "back",
   KeyA: "left", ArrowLeft: "left",
   KeyD: "right", ArrowRight: "right",
-  // Space rather than a mouse button: left-drag already orbits the camera,
-  // and a click-vs-drag distinction is a bad way to start a fight. Space
-  // doubles as the first slot, Strike, so the free option is always under a
-  // thumb, with 1-6 for the bar.
-  Space: "spell1", Digit1: "spell1",
+  // Space jumps, as it does in every game with a jump; the bar is 1-6, under
+  // the fingers that are not steering.
+  Space: "jump",
+  KeyQ: "dodge",
+  KeyR: "heal",
+  Digit1: "spell1",
   Digit2: "spell2",
   Digit3: "spell3",
   Digit4: "spell4",
@@ -39,6 +40,9 @@ export interface MoveAxes {
 
 export class KeyboardInput {
   private held = new Set<string>();
+  /** A dodge is one press, not a held key: set on keydown, taken by the
+   *  next input step. Holding Q should not dodge again the moment it can. */
+  private dodgeQueued = false;
   private detach: () => void;
 
   constructor(target: Window = window) {
@@ -48,6 +52,7 @@ export class KeyboardInput {
       if ((event.target as HTMLElement | null)?.tagName === "INPUT") return;
       const action = BINDINGS[event.code];
       if (!action) return;
+      if (action === "dodge" && !event.repeat) this.dodgeQueued = true;
       this.held.add(action);
       // Stop the arrow keys scrolling the page out from under the canvas.
       event.preventDefault();
@@ -85,13 +90,28 @@ export class KeyboardInput {
    * cost, so holding a key auto-repeats and spamming it gains nothing.
    *
    * A higher slot wins when several are held: reaching for Sunder while
-   * still leaning on Space should cast Sunder.
+   * still leaning on 1 should cast Sunder.
    */
   castSlot(): number {
     for (let slot = ABILITY_KEYS; slot >= 1; slot--) {
       if (this.held.has(`spell${slot}` as Action)) return slot;
     }
     return 0;
+  }
+
+  jumping(): boolean {
+    return this.held.has("jump");
+  }
+
+  healing(): boolean {
+    return this.held.has("heal");
+  }
+
+  /** Whether a dodge was pressed since the last step asked. */
+  takeDodge(): boolean {
+    const queued = this.dodgeQueued;
+    this.dodgeQueued = false;
+    return queued;
   }
 
   /** Shift held. Whether it is honoured is up to the simulation. */

@@ -13,6 +13,7 @@ npm install
 npm run dev          # builds shared, then shared --watch + server + client
 npm run typecheck    # all three packages; this is the gate — there are no tests
 npm run build        # production build (server serves client/dist itself)
+npm run host         # build, run production locally, and tunnel it for friends
 ```
 
 - Client: http://localhost:5173 (Vite). Server: ws/http on :2567.
@@ -40,6 +41,7 @@ packages/shared/   one copy of everything both sides must agree on
                      Fervour
   stats.ts           Might/Focus/Vigour/Spirit + secondaries, and what they do
   elites.ts          rare named elites per region; unsafeElites() at boot
+  variants.ts        creature variants, each living in one hunting area
   dungeons.ts        instanced dungeons: carve() cuts rooms out of rock
   quests.ts          quest data, objectives, reward choices, questXp
   vendors.ts         sell prices, vendor stock (pure function of vendor + level)
@@ -57,6 +59,7 @@ packages/client/src/
   character.ts       the character screen: slots, lines to the body, pack, abilities
   devtools.ts        the ` dev menu (dev builds only; server gates `dev` too)
   questUI.ts         quest dialogue (E), tracker, quest log (J)
+  questMarks.ts      where each quest wants you, for the maps and compass
   chat.ts            chat (Enter): say and party channels, the log
   party.ts           party frames, the party window (P), invites
   terrain.ts         chunk streamer + horizon mesh + groundTone
