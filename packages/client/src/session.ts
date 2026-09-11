@@ -1,6 +1,5 @@
 import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents.js";
-import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.js";
-import { Viewport } from "@babylonjs/core/Maths/math.viewport.js";
+import { Vector3 } from "@babylonjs/core/Maths/math.js";
 import type { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import type { Data } from "@colyseus/schema";
 import {
@@ -177,6 +176,14 @@ const PORTRAIT_BETA = 1.2;
 const PORTRAIT_RADIUS = 3.6;
 /** Aim a little above the waist, so the head is not cut off at the top. */
 const PORTRAIT_LIFT = 0.22;
+/**
+ * In play the camera orbits a point this far above your waist — over your
+ * head — rather than your body, so the middle of the screen, where the
+ * reticle is, looks past you instead of at your back. Looking down the usual
+ * way, the reticle then lands on the ground a couple of metres ahead: about
+ * where a swing does. You sit a little below it, as in any action game.
+ */
+const AIM_LIFT = 1.2;
 const PORTRAIT_OPEN_MS = 560;
 const PORTRAIT_CLOSE_MS = 440;
 /**
@@ -1367,7 +1374,12 @@ export function createSession(
 
       // Party members' names read from further off: across a hall, or a field.
       const mate = partySessions.has(sessionId);
-      nametagTargets.push({ sessionId, x, y, z, ...(mate ? { maxDistance: 160 } : {}) });
+      // Not your own while the mouse is held: the camera looks over your
+      // head, so your name would sit on the reticle. The player frame says
+      // who you are, and the chat log what you said.
+      if (!(mine && document.pointerLockElement !== null)) {
+        nametagTargets.push({ sessionId, x, y, z, ...(mate ? { maxDistance: 160 } : {}) });
+      }
       if (!mine) {
         blips.push(mate
           ? { x, z, colour: "#6dcf7e", size: 4.4, ring: true }
@@ -1516,7 +1528,10 @@ export function createSession(
       // judders by exactly the correction the reconciler is smoothing out.
       stepPortrait(now);
       applyPortraitNear();
-      world.camera.target.set(x, y + PLAYER_HALF + cameraLift, z);
+      // The over-the-head aim point gives way to the character screen's
+      // framing along the same curve, so opening it never jumps.
+      const aimLift = AIM_LIFT * (1 - Math.min(1, cameraLift / PORTRAIT_LIFT));
+      world.camera.target.set(x, y + PLAYER_HALF + cameraLift + aimLift, z);
       // After the target moves, so the ray starts from where the player
       // actually is this frame.
       updateCameraCollision(world);
@@ -1577,30 +1592,25 @@ export function createSession(
     if (canvas) {
       nametags.update(scene, world.camera, canvas, nametagTargets);
       combatText.update(now, scene, world.camera, canvas);
-      drawReticle(canvas);
+      drawReticle();
     }
   }
 
   /**
-   * The reticle: a point a few metres ahead of you at chest height, where a
-   * swing goes, drawn over the thing it would land on — hot when Strike would
-   * connect. Only while the game holds the mouse: with a cursor out, you are
-   * pointing at the screen, not the world.
+   * The reticle: the middle of the screen, where the camera looks — hot when
+   * Strike would connect. It never moves: the mouse moves the world under it,
+   * which is what makes it feel like the mouse. (It used to be a point pinned
+   * 6 m ahead of you on the ground, projected; that slid DOWN the screen as
+   * you looked up, and hid behind your back when you looked level.) Only
+   * while the game holds the mouse: with a cursor out, you are pointing at
+   * the screen, not the world.
    */
   const reticle = document.getElementById("reticle") as HTMLElement;
-  const reticlePoint = new Vector3();
-  const reticleViewport = new Viewport(0, 0, 0, 0);
-  function drawReticle(canvas: HTMLCanvasElement): void {
+  function drawReticle(): void {
     const show = document.pointerLockElement !== null && selfPlayer !== undefined && selfPlayer.health > 0;
     if (reticle.hidden === show) reticle.hidden = !show;
     if (!show) return;
     const self = selfPosition();
-    const yaw = facingYaw();
-    reticlePoint.set(self.x + Math.sin(yaw) * 6, self.y + 1.1, self.z + Math.cos(yaw) * 6);
-    reticleViewport.width = canvas.clientWidth;
-    reticleViewport.height = canvas.clientHeight;
-    const at = Vector3.Project(reticlePoint, Matrix.IdentityReadOnly, scene.getTransformMatrix(), reticleViewport);
-    reticle.style.transform = `translate(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px)`;
     const strike = SPELLS.strike;
     const hot = predictHits(strike, self.x, self.z, aimFor(strike)).length > 0;
     if (reticle.classList.contains("hot") !== hot) reticle.classList.toggle("hot", hot);

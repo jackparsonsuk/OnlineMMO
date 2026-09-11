@@ -269,7 +269,9 @@ The turning is done here, one browser mouse event to one turn, rather than by
 Babylon's orbit camera: its device layer reports each movement twice, and its
 inertia would carry every flick ten times as far as the hand went. Its drag
 input is switched off while the mouse is held and back on with a cursor, so
-the character screen still orbits on a drag.
+the character screen still orbits on a drag. Up and down turn at the same rate
+as left and right, and the rate is the player's (Esc menu, Mouse
+sensitivity, kept per browser).
 
 **Strike swings on the move** — every 0.7 s, three to a chain — where it used
 to be a 0.9 s standing cast every 1.8 s; its damage scaled with the time between
@@ -283,9 +285,16 @@ plant-your-feet windups.
 "Blocked". Behind a guard you cannot swing, and Fervour drains rather than
 builds. `Player.blocking` is replicated, so everyone sees the guard go up.
 
-**Aim is the camera.** A reticle marks a point ahead of you at chest height,
-projected each frame, so it sits on what a swing would land on, and goes red
-when Strike would connect. Without a locked target, a blow leans toward
+**Aim is the camera.** The reticle is the middle of the screen and never
+moves — the mouse moves the world under it, which is what makes it feel like
+the mouse — and goes red when Strike would connect. The camera orbits a point
+over your head (`AIM_LIFT`) rather than your body, so the middle of the
+screen looks past you: at the usual downward angle the reticle lands on the
+ground about 2.5 m ahead, where a swing does, and further out as you look up.
+Your own name is hidden while the mouse is held, since it would sit on the
+reticle. (The first reticle was a point pinned 6 m ahead and projected; it
+slid down the screen as you looked up, and hid behind your back looking
+level.) Without a locked target, a blow leans toward
 something within ~40° of where you look (it was ~75° for tab-targeting). Tab
 still locks a target, which turns your swings toward it; clicking things in
 the world (a creature to target, a player to invite) is for a free cursor.

@@ -253,7 +253,21 @@ function setMenu(open: boolean): void {
   gameMenu.hidden = !open;
   const sound = gameMenu.querySelector<HTMLButtonElement>("[data-act=sound]");
   if (sound) sound.textContent = audio.isMuted ? "Sound: off" : "Sound: on";
+  if (open) showSensitivity(true);
 }
+
+const sensitivityInput = gameMenu.querySelector<HTMLInputElement>("[data-set=sensitivity]") as HTMLInputElement;
+
+function showSensitivity(fromGame: boolean): void {
+  if (fromGame) sensitivityInput.value = String(mouseLook.sensitivity);
+  const output = sensitivityInput.parentElement?.querySelector("output");
+  if (output) output.textContent = `${Number(sensitivityInput.value).toFixed(2)}×`;
+}
+
+sensitivityInput.addEventListener("input", () => {
+  mouseLook.sensitivity = Number(sensitivityInput.value);
+  showSensitivity(false);
+});
 
 /** Set once signed in: what "Sign out" forgets. */
 let signOut: (() => void) | undefined;

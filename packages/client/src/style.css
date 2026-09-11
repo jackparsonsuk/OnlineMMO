@@ -2209,6 +2209,20 @@ body.portrait #chat { opacity: 0; pointer-events: none; }
 .menu-card button:hover { border-color: var(--hair-strong); background: rgb(220 189 110 / 10%); }
 .menu-card button.primary { justify-content: center; border-color: var(--hair-strong); background: rgb(220 189 110 / 16%); color: var(--gold-soft); }
 .menu-card button small { font: 400 11px ui-sans-serif, system-ui, sans-serif; color: var(--muted); letter-spacing: 0; }
+.menu-slider {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 10px;
+  padding: 10px 14px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--hair);
+  background: rgb(255 255 255 / 3%);
+  color: var(--ink);
+  font: 600 14px var(--display);
+  letter-spacing: 0.04em;
+}
+.menu-slider output { font: 400 12px ui-sans-serif, system-ui, sans-serif; color: var(--muted); letter-spacing: 0; align-self: center; }
+.menu-slider input { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: var(--gold-soft); cursor: pointer; }
 
 /* Quest marks on the compass: gold, and a "?" where one is ready to hand in. */
 #compass .landmark.quest {
@@ -2234,12 +2248,12 @@ body.portrait #chat { opacity: 0; pointer-events: none; }
 
 /* --- action combat --------------------------------------------------------- */
 
-/* Where your swings go: a point ahead of you at chest height, projected each
-   frame, so it sits on the thing you would hit. */
+/* Where you look, and so where your swings go: the middle of the screen, held
+   still while the mouse moves the world under it. */
 #reticle {
   position: fixed;
-  top: 0;
-  left: 0;
+  top: 50%;
+  left: 50%;
   width: 14px;
   height: 14px;
   margin: -7px 0 0 -7px;
@@ -2247,7 +2261,6 @@ body.portrait #chat { opacity: 0; pointer-events: none; }
   border: 1.5px solid rgb(255 244 220 / 70%);
   box-shadow: 0 0 0 1px rgb(0 0 0 / 45%), inset 0 0 0 1px rgb(0 0 0 / 35%);
   pointer-events: none;
-  will-change: transform;
   z-index: 2;
 }
 #reticle::after {

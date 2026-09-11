@@ -199,8 +199,8 @@ smaller entries below; those are the first step towards them.
 
 - **Draw calls.** Every creature rig is ~10 meshes; a busy fight is several
   hundred draw calls. Merging each rig's static parts would cut it sharply.
-- **Settings.** Key rebinding, volume, view distance, mouse sensitivity and
-  invert (`MouseLook.TURN`/`PITCH` are fixed for now).
+- **Settings.** Key rebinding, volume, view distance, and invert-Y (mouse
+  sensitivity is on the Esc menu already).
 - **A class that dodges on right-click.** `ClassDefinition.guard` is there
   for it; only the Warrior (block) exists.
 - **Block, shields and weapons.** Block works bare-handed; a shield could

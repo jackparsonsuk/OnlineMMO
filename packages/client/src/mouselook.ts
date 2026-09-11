@@ -64,18 +64,41 @@ export class MouseLook {
     document.addEventListener("mousemove", (event) => this.look(event));
   }
 
-  /** Radians of turn per pixel of mouse movement: about a quarter-turn for
-   *  a comfortable sweep of the hand. */
+  /** Radians of turn per pixel of mouse movement at sensitivity 1: about a
+   *  quarter-turn for a comfortable sweep of the hand. Up and down turns the
+   *  same as left and right — anything else feels like dragging through mud
+   *  one way. */
   private static readonly TURN = 1 / 420;
-  private static readonly PITCH = 1 / 520;
+
+  /** The player's multiplier on TURN, from the game menu; kept per browser,
+   *  since it belongs to the mouse and the desk, not the character. */
+  private scale = MouseLook.storedSensitivity();
+  private static readonly STORAGE_KEY = "ostracon:mouse-sensitivity";
+
+  private static storedSensitivity(): number {
+    let stored: string | null = null;
+    try { stored = localStorage.getItem(MouseLook.STORAGE_KEY); } catch { /* storage blocked */ }
+    const value = stored === null ? NaN : Number(stored);
+    return Number.isFinite(value) && value > 0 ? value : 1;
+  }
+
+  get sensitivity(): number {
+    return this.scale;
+  }
+
+  set sensitivity(value: number) {
+    this.scale = value;
+    try { localStorage.setItem(MouseLook.STORAGE_KEY, String(value)); } catch { /* storage blocked */ }
+  }
 
   /** Mouse movement while held: turn and tilt the camera. Right turns right
    *  (alpha down, in Babylon's orbit), down looks down. */
   private look(event: MouseEvent): void {
     if (!this.locked) return;
     const camera = this.camera;
-    camera.alpha -= event.movementX * MouseLook.TURN;
-    const beta = camera.beta - event.movementY * MouseLook.PITCH;
+    const turn = MouseLook.TURN * this.scale;
+    camera.alpha -= event.movementX * turn;
+    const beta = camera.beta - event.movementY * turn;
     camera.beta = Math.max(camera.lowerBetaLimit ?? 0.1, Math.min(camera.upperBetaLimit ?? 3, beta));
   }
 
