@@ -447,6 +447,16 @@ dash the server runs. It is sent for one step per press, not held.
 A jump or a dodge cancels a cast with a cast time, as walking does
 (`isMoving`).
 
+Both have a pose (`posePlayer` in `rigs.ts`). In the air a knee comes up and
+the arms go out, the legs reaching for the ground on the way down, with a dip
+at the knees on landing; the blend follows `vy`, eased so leaving and meeting
+the ground never snap. A dodge goes low and leans into the dash — hard
+forward, a little back from a backstep, sideways to the side — legs split,
+arms flung behind the motion. Everyone else's `vy` and `dodgeLeft` arrive raw
+while their body is drawn `INTERP_DELAY_MS` in the past, so the client logs
+each change and reads it back that much later (`lateMoves`); read straight,
+their legs would tuck before they left the ground.
+
 **R is Second Wind**: 35% of your health back at once, usable in a fight,
 every 40 seconds — every class's, and the stand-in for potions until there
 are consumables to carry. The server gates it on its own clock; everyone near

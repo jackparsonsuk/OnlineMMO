@@ -257,6 +257,13 @@ interface PlayerView {
   level: number;
   /** Mid-dodge last frame, to notice one starting. */
   dodging: boolean;
+  /**
+   * Someone else's jump and dodge as of the moment their body is drawn at.
+   * Their position is interpolated INTERP_DELAY_MS behind the server, but
+   * these arrive raw: read straight, the legs would tuck before the body left
+   * the ground. Each change is logged and read back that much later.
+   */
+  moves: Array<{ at: number; vy: number; dodgeLeft: number }>;
 }
 
 export function createSession(
@@ -767,7 +774,7 @@ export function createSession(
     const rig = buildPlayerRig(scene, player.colour);
     // Others can be clicked; you clicking yourself would only get in the way.
     if (sessionId !== room.sessionId) for (const mesh of rig.pickables) mesh.metadata = { playerId: sessionId };
-    players.set(sessionId, { rig, animator: new Animator(rig), castYaw: 0, dead: false, level: player.level, dodging: false });
+    players.set(sessionId, { rig, animator: new Animator(rig), castYaw: 0, dead: false, level: player.level, dodging: false, moves: [] });
     meshes.set(sessionId, rig.root);
     nametags.add(
       sessionId,
@@ -1352,9 +1359,17 @@ export function createSession(
           ? facingYaw()
           : predict.value(player, "yaw");
 
+      const moves = mine
+        ? { vy: predict.value(player, "vy"), dodgeLeft: predict.value(player, "dodgeLeft") }
+        : lateMoves(view, now, player);
+      view.animator.vy = moves.vy;
       // The first frame of a dodge: a puff of dust where they pushed off.
-      const dodging = (mine ? predict.value(player, "dodgeLeft") : player.dodgeLeft) > 0;
+      const dodging = moves.dodgeLeft > 0;
       if (dodging && !view.dodging) {
+        // Ours from the prediction: the server has not heard of this dodge yet.
+        view.animator.dodge(now,
+          mine ? predict.value(player, "dodgeX") : player.dodgeX,
+          mine ? predict.value(player, "dodgeZ") : player.dodgeZ);
         effects.dust(x, y, z, 10);
         play("evade", x, z, mine ? 0.8 : 0.4);
       }
@@ -1614,6 +1629,17 @@ export function createSession(
     const strike = SPELLS.strike;
     const hot = predictHits(strike, self.x, self.z, aimFor(strike)).length > 0;
     if (reticle.classList.contains("hot") !== hot) reticle.classList.toggle("hot", hot);
+  }
+
+  function lateMoves(view: PlayerView, now: number, player: Player): { vy: number; dodgeLeft: number } {
+    const log = view.moves;
+    const last = log[log.length - 1];
+    if (!last || last.vy !== player.vy || last.dodgeLeft !== player.dodgeLeft) {
+      log.push({ at: now, vy: player.vy, dodgeLeft: player.dodgeLeft });
+    }
+    const due = now - INTERP_DELAY_MS;
+    while (log.length > 1 && log[1]!.at <= due) log.shift();
+    return log[0]!;
   }
 
   function dispose(): void {

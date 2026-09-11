@@ -218,5 +218,3 @@ smaller entries below; those are the first step towards them.
   per quest, as the Daso ones are.
 - **Consumables.** Second Wind stands in for potions; potions that drop, sell
   and sit on a key would replace or join it.
-- **A jump and dodge pose.** The body lifts and dashes, but its limbs do not
-  tuck or roll.

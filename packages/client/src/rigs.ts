@@ -4,7 +4,7 @@ import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh.js";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import type { Scene } from "@babylonjs/core/scene.js";
-import { getArchetype, PLAYER_SIZE, type EnemyKind, type SpellId } from "@mmo/shared";
+import { getArchetype, JUMP_SPEED, PLAYER_SIZE, type EnemyKind, type SpellId } from "@mmo/shared";
 import { facet, flatMaterial, hexColour } from "./lowpoly.js";
 
 /**
@@ -433,6 +433,13 @@ const ease = (t: number): number => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * 
 const easeOut = (t: number): number => (t <= 0 ? 0 : t >= 1 ? 1 : 1 - (1 - t) * (1 - t));
 
 /** Blend between keyed values at times (ms). Clamped at the ends. */
+const mix = (a: number, b: number, t: number): number => a + (b - a) * t;
+
+/** A dodge's pose: in at once, held through the dash (~0.27 s), and out. */
+const DODGE_POSE: ReadonlyArray<readonly [number, number]> = [[0, 0], [50, 1], [240, 1], [360, 0]];
+const DODGE_POSE_MS = 360;
+const LANDING_MS = 200;
+
 function keys(t: number, frames: ReadonlyArray<readonly [number, number]>): number {
   if (t <= frames[0]![0]) return frames[0]![1];
   for (let i = 1; i < frames.length; i++) {
@@ -491,8 +498,26 @@ export class Animator {
   /** A player with their guard raised: arms up across the body, set each
    *  frame by whoever knows (the input for our own, the server for others). */
   guarding = false;
+  /** Vertical speed, and exactly 0 standing (as in `applyInput`); set each
+   *  frame by whoever knows, like `guarding`. */
+  vy = 0;
+  /** 0 on the ground to 1 in the air, eased, so leaving and meeting the
+   *  ground blend rather than snap. */
+  private air = 0;
+  private landedAt = -Infinity;
+  private dodgeAt = -Infinity;
+  private dodgeX = 0;
+  private dodgeZ = 0;
 
   constructor(readonly rig: Rig) {}
+
+  /** A dodge starting, along world (x, z). */
+  dodge(now: number, x: number, z: number): void {
+    const length = Math.hypot(x, z) || 1;
+    this.dodgeAt = now;
+    this.dodgeX = x / length;
+    this.dodgeZ = z / length;
+  }
 
   play(action: Action): void {
     this.action = action;
@@ -560,6 +585,11 @@ export class Animator {
     this.lastX = x;
     this.lastZ = z;
     this.phase += dt * this.speed * (STRIDE[this.rig.kind] ?? 2.1);
+
+    const airborne = this.vy !== 0;
+    if (!airborne && this.air > 0.5) this.landedAt = now;
+    this.air += ((airborne ? 1 : 0) - this.air) * Math.min(1, realDt * 16);
+    if (!airborne && this.air < 0.01) this.air = 0;
 
     this.flash(now);
 
@@ -637,6 +667,54 @@ export class Animator {
     armR.rotation.x = swing * 0.5;
     this.rig.body.position.y += Math.abs(Math.cos(this.phase)) * 0.06 * stride;
     chest.rotation.x = stride * (sprinting ? 0.28 : 0.1) + Math.sin(this.clock / 500) * 0.02;
+    const body = this.rig.body;
+
+    // In the air: a knee up and arms out for balance. Rising, the leading leg
+    // tucks; falling, the legs reach for the ground and the arms lift.
+    const air = this.air;
+    if (air > 0) {
+      const fall = (1 - Math.max(-1, Math.min(1, this.vy / JUMP_SPEED))) / 2;
+      legL.rotation.x = mix(legL.rotation.x, -1 + fall * 0.6, air);
+      legR.rotation.x = mix(legR.rotation.x, 0.3 - fall * 0.4, air);
+      armL.rotation.x = mix(armL.rotation.x, -0.45 - fall * 0.55, air);
+      armR.rotation.x = mix(armR.rotation.x, -0.3 - fall * 0.55, air);
+      armL.rotation.z = (0.3 + fall * 0.45) * air;
+      armR.rotation.z = -(0.3 + fall * 0.45) * air;
+      chest.rotation.x = mix(chest.rotation.x, 0.14 - fall * 0.2, air);
+    }
+
+    // Meeting the ground: a quick dip at the knees.
+    const land = (now - this.landedAt) / LANDING_MS;
+    if (land >= 0 && land < 1) {
+      const dip = Math.sin(land * Math.PI);
+      body.position.y -= dip * 0.07;
+      legL.rotation.x -= dip * 0.35;
+      legR.rotation.x += dip * 0.2;
+      chest.rotation.x += dip * 0.18;
+    }
+
+    // A dodge: low, and leaning hard into the dash — forward, back or to the
+    // side, whichever way it goes relative to where you face — legs split,
+    // arms flung out behind the motion.
+    const dodgeT = now - this.dodgeAt;
+    if (dodgeT >= 0 && dodgeT < DODGE_POSE_MS) {
+      const k = keys(dodgeT, DODGE_POSE);
+      const yaw = this.rig.root.rotation.y;
+      const ahead = this.dodgeX * Math.sin(yaw) + this.dodgeZ * Math.cos(yaw);
+      const side = this.dodgeX * Math.cos(yaw) - this.dodgeZ * Math.sin(yaw);
+      // Hard into a forward dash, only a little back from a backstep (the
+      // torso stays over the feet, or it reads as falling over).
+      body.rotation.x += (ahead > 0 ? ahead * 0.5 : ahead * 0.16) * k;
+      body.rotation.z -= side * 0.4 * k;
+      body.position.y -= 0.16 * k;
+      legL.rotation.x = mix(legL.rotation.x, -0.9, k);
+      legR.rotation.x = mix(legR.rotation.x, 0.8, k);
+      armL.rotation.x = mix(armL.rotation.x, 0.85 * ahead, k);
+      armR.rotation.x = mix(armR.rotation.x, 0.7 * ahead, k);
+      armL.rotation.z = mix(armL.rotation.z, 0.6, k);
+      armR.rotation.z = mix(armR.rotation.z, -0.6, k);
+      chest.rotation.x = mix(chest.rotation.x, 0.12 + 0.2 * Math.max(0, ahead), k);
+    }
 
     const action = this.action;
     if (this.guarding && action?.type !== "cast") {
