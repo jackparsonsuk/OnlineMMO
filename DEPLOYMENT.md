@@ -29,6 +29,35 @@ This server:
 
 There is nowhere to put a zombie's brain between invocations.
 
+## Option 0: Host it from your own machine (free, for friends)
+
+For a play session with a few people, the machine you develop on is a fine
+server. One command:
+
+```bash
+npm run host
+```
+
+It builds, then runs the **production** server (no dev menu; the client
+served from the same origin) on port 2567, with its database in `data/` and
+a session secret it makes once and keeps in `data/host-secret`, so restarting
+does not sign everyone out. If Cloudflare's `cloudflared` is installed it also
+opens a **quick tunnel**: a free public `https://….trycloudflare.com` address
+forwarding to your machine, WebSockets included, with no account, no router
+settings and no certificate to manage. The script prints the link to send.
+Install `cloudflared` once with:
+
+```bash
+winget install --id Cloudflare.cloudflared
+```
+
+The catches: the realm is only up while that window is open and the machine
+is awake; the link changes every time the tunnel starts; and everyone's
+connection goes through your upload. For five friends that is nothing (a
+player is a few kilobytes a second). `node scripts/host.mjs --no-tunnel` runs
+it for your own network only. Characters here are their own realm (`home`),
+separate from any hosted one.
+
 You *could* host the client on Vercel, since that's static files. But the server
 serves the client from its own origin on purpose — that's what removes CORS and
 removes the server URL baked into the bundle at build time. Splitting them
