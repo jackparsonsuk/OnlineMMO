@@ -43,6 +43,8 @@ export class Nametags {
   // Reused every frame; projecting allocates otherwise, 60 times a second.
   private readonly scratch = new Vector3();
   private readonly viewport = new Viewport(0, 0, 0, 0);
+  /** Labels drawn this frame; reused. */
+  private readonly seen = new Set<string>();
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -195,9 +197,15 @@ export class Nametags {
     const forwardY = camera.target.y - cameraPosition.y;
     const forwardZ = camera.target.z - cameraPosition.z;
 
+    // A label nobody asked for this frame (its body is past draw distance —
+    // after a teleport or waking at a far waystone, say) must go, not stay
+    // pinned wherever it was last drawn.
+    const seen = this.seen;
+    seen.clear();
     for (const target of targets) {
       const tag = this.tags.get(target.sessionId);
       if (!tag) continue;
+      seen.add(target.sessionId);
 
       const worldY = target.y + (target.height ?? DEFAULT_HEIGHT);
       const toX = target.x - cameraPosition.x;
@@ -223,6 +231,9 @@ export class Nametags {
       if (tag.hidden) tag.hidden = false;
       tag.style.transform =
         `translate(-50%, -100%) translate(${projected.x.toFixed(1)}px, ${projected.y.toFixed(1)}px)`;
+    }
+    for (const [id, tag] of this.tags) {
+      if (!seen.has(id) && !tag.hidden) tag.hidden = true;
     }
   }
 }
