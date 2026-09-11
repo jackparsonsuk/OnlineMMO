@@ -46,7 +46,8 @@ smaller entries below; those are the first step towards them.
   eight-kilometre Terra; they need regions, roads and camps of their own. They
   are where levels 30–65 and 65–100 are meant to be earned, so until they are
   built the curve stops at 30.
-- **Weather** (and day/night, below).
+- **Weather.** Rain and heavier fog, from the clock like day/night
+  (`daylight.ts`) so it needs nothing from the server.
 - **Fishing** — Fanshona is a fishing town on a lake nobody can fish.
 - **Life skills.** Gathering and crafting (logging for Daso, mining, cooking,
   smithing), each with its own level — the one place use-based training might
@@ -114,7 +115,9 @@ smaller entries below; those are the first step towards them.
   haze now fades them in, but the horizon mesh has no trees and the far hills
   are hazier for it. Billboards or a coarse tree LOD on the horizon would let
   the fog thin out again.
-- **Day/night and weather.** Terra is permanently mid-afternoon.
+- **Lamplight at night.** Lanterns and windows glow but light nothing; a few
+  point lights in town (mind the four-lights-per-material limit) would pool
+  light on the street.
 - **Unnamed Ostras.** The lore's small, beast-ridden Ostras, generated into the
   same shape as the named ones.
 - **Slopes, and a jump that clears things.** Terrain does not slow you: you

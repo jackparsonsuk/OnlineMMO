@@ -36,6 +36,7 @@ import { Hud } from "./hud.js";
 import { KeyboardInput } from "./input.js";
 import { MouseLook } from "./mouselook.js";
 import { applyOstra, createWorld } from "./scene.js";
+import { updateDaylight } from "./daylight.js";
 import { createSession, type OstraSession } from "./session.js";
 
 /**
@@ -402,6 +403,7 @@ async function main(): Promise<void> {
 function frame(now: number): void {
   // Mid-transfer there is no session; keep drawing so the canvas doesn't
   // freeze on the last frame while the new room connects.
+  updateDaylight(world);
   if (session) session.frame(now);
   else world.scene.render();
   characterScreen.update(now, world.scene, canvas, session?.selfRig());
@@ -432,6 +434,7 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   room = next;
   currentOstra = ostra;
   applyOstra(world, ostra);
+  updateDaylight(world, Date.now(), true);
   session = startSession(next, ostra);
 
   hud.setOstra(ostra);

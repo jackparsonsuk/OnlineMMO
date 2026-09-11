@@ -66,6 +66,7 @@ packages/client/src/
   terrain.ts         chunk streamer + horizon mesh + groundTone
   scenery.ts         thin-instanced trees/rocks/grass per chunk
   rigs.ts            procedural animated bodies (Animator)
+  daylight.ts        the day/night cycle, from the wall clock
   effects.ts combatText.ts audio.ts map.ts hud.ts nametags.ts scene.ts
 ```
 

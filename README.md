@@ -184,6 +184,21 @@ Nothing is loaded from a model file. There is no exporter in the pipeline, and a
 creature's proportions sit next to the numbers the simulation uses, so a spider
 cannot be drawn wider than the circle it collides with.
 
+### Day and night
+
+A day is forty minutes (`daylight.ts`), so an evening's play sees a dusk and a
+dawn; night is about a third of it. The time comes from the wall clock, not the
+server: every player sees the same sky with nothing sent, and since the light
+decides nothing in the simulation there is nothing to keep in step. It is
+keyframes — night, dawn, morning, afternoon, dusk — blended for the sky (as
+tints on each Ostra's own palette, so a wilds Ostra keeps its colour), the fog
+that meets it, and the sun's colour, strength and direction, which swings
+across the sky so the shading moves through the day. Night is moonlit blue,
+dark enough that Daso's lamps and windows (emissive, so they glow unaided)
+read as lit, never so dark you cannot see what is biting you. Dungeons keep
+their torchlight and ignore the clock. `setDayOffset(ms)` moves the clock for
+testing.
+
 ## Enemies and AI
 
 Creatures are entirely server-driven. Clients predict their own movement and

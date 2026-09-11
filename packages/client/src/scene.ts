@@ -78,8 +78,11 @@ export interface World {
   sun: DirectionalLight;
 }
 
-const AMBIENT_INTENSITY = 0.85;
-const SUN_INTENSITY = 0.8;
+export const AMBIENT_INTENSITY = 0.85;
+export const SUN_INTENSITY = 0.8;
+/** The daytime sun; daylight.ts moves it round from here. */
+const SUN_DIRECTION = new Vector3(-0.55, -0.85, -0.4);
+const SUN_COLOUR = new Color3(1, 0.96, 0.87);
 
 export function createWorld(canvas: HTMLCanvasElement): World {
   const engine = new Engine(canvas, true, { stencil: true }, true);
@@ -116,11 +119,11 @@ export function createWorld(canvas: HTMLCanvasElement): World {
   // and the whole point of the facets is that you can read the form.
   ambient.intensity = AMBIENT_INTENSITY;
 
-  const sun = new DirectionalLight("sun", new Vector3(-0.55, -0.85, -0.4), scene);
+  const sun = new DirectionalLight("sun", SUN_DIRECTION.clone(), scene);
   sun.intensity = SUN_INTENSITY;
   // Warm, so the light has a direction and a time of day rather than being
   // a neutral wash.
-  sun.diffuse = new Color3(1, 0.96, 0.87);
+  sun.diffuse = SUN_COLOUR.clone();
 
   window.addEventListener("resize", () => engine.resize());
 
@@ -165,7 +168,7 @@ function buildSky(scene: Scene): Mesh {
   return sky;
 }
 
-function paintSky(sky: Mesh, horizon: Color3, zenith: Color3): void {
+export function paintSky(sky: Mesh, horizon: Color3, zenith: Color3): void {
   const positions = sky.getVerticesData(VertexBuffer.PositionKind);
   if (!positions) return;
   const colours = new Float32Array((positions.length / 3) * 4);
@@ -202,6 +205,10 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
   world.ambient.groundColor = Color3.FromHexString(palette.bounce);
   world.ambient.intensity = AMBIENT_INTENSITY * (palette.light ?? 1);
   world.sun.intensity = SUN_INTENSITY * (palette.light ?? 1);
+  // Daytime, which a dungeon keeps; out in the open daylight.ts takes over.
+  world.sun.direction.copyFrom(SUN_DIRECTION);
+  world.sun.diffuse.copyFrom(SUN_COLOUR);
+  world.ambient.diffuse.set(1, 1, 1);
   paintSky(world.sky, sky, sky.scale(ostra.wilds ? 0.62 : 0.5));
 
   // Haze. On a big Ostra it is what gives distance its depth, and it hides the
