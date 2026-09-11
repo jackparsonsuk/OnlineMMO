@@ -139,6 +139,11 @@ export class Nametags {
     this.tags.get(sessionId)?.classList.toggle("targeted", targeted);
   }
 
+  /** Mark a player who is in your party. */
+  setParty(sessionId: string, inParty: boolean): void {
+    this.tags.get(sessionId)?.classList.toggle("party", inParty);
+  }
+
   remove(sessionId: string): void {
     this.tags.get(sessionId)?.remove();
     this.tags.delete(sessionId);

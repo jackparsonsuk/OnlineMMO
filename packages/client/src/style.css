@@ -1778,3 +1778,107 @@ h3 .quest-level { margin-left: 10px; padding-left: 0; }
 #quest-log .abandon.confirm { border-color: #ff7b72; background: rgb(255 123 114 / 14%); }
 
 body.portrait #quest-tracker, body.no-hud #quest-tracker { display: none; }
+
+/* --- parties ---------------------------------------------------------------- */
+
+/* Down the left, where party frames always are: clear of the status panel
+   above and the hint line below. */
+#party {
+  position: fixed;
+  top: 38%;
+  left: 12px;
+  width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+#party[hidden] { display: none; }
+
+.party-member {
+  padding: 6px 9px 7px;
+  border-radius: 8px;
+  border: 1px solid rgb(109 207 126 / 30%);
+  background: rgb(13 17 23 / 78%);
+  backdrop-filter: blur(6px);
+  font-size: 12px;
+}
+.party-member.away { opacity: 0.6; }
+.party-member.dead .pm-name { color: #8b98a5; text-decoration: line-through; }
+.pm-head { display: flex; align-items: baseline; gap: 6px; font-weight: 600; }
+.pm-crown { color: #f0c83c; font-size: 11px; }
+.pm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-level { margin-left: auto; font-size: 11px; color: #9aa7b4; }
+.pm-bar { height: 6px; margin-top: 4px; border-radius: 3px; background: rgb(255 255 255 / 10%); overflow: hidden; }
+.pm-bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #3f9a52, #6dcf7e); transition: width 120ms linear; }
+.pm-bar i.low { background: linear-gradient(90deg, #b23b2a, #e8563f); }
+.pm-text { margin-top: 2px; font-size: 10.5px; color: #9aa7b4; font-variant-numeric: tabular-nums; }
+
+#party-window {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(320px, 92vw);
+  padding: 12px 14px 14px;
+  border-radius: 12px;
+  border: 1px solid rgb(109 207 126 / 35%);
+  background: rgb(12 15 20 / 97%);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 60%);
+  font-size: 13px;
+  z-index: 7;
+  pointer-events: auto;
+}
+#party-window[hidden] { display: none; }
+.pw-head { display: flex; align-items: center; margin-bottom: 8px; }
+.pw-head b { font-size: 15px; color: #a8e6b4; }
+.pw-head button {
+  margin-left: auto; width: 26px; height: 26px; border-radius: 6px;
+  border: 1px solid rgb(230 237 243 / 14%); background: none; color: #9aa7b4; font-size: 17px; cursor: pointer;
+}
+#party-window ul { margin: 0 0 10px; padding: 0; list-style: none; }
+#party-window li {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 5px 0; border-top: 1px solid rgb(230 237 243 / 7%);
+}
+#party-window li small { color: #9aa7b4; }
+#party-window li .pm-off { color: #6b7682; font-style: italic; }
+.pw-note { margin: 6px 0; font-size: 11.5px; color: #8b98a5; }
+.pw-invite { display: flex; gap: 6px; }
+.pw-invite input {
+  flex: 1; min-width: 0; padding: 6px 8px; border-radius: 6px;
+  border: 1px solid rgb(230 237 243 / 18%); background: rgb(0 0 0 / 30%); color: #e6edf3; font: inherit;
+}
+#party-window button[type=submit], #party-window li button, .pw-leave, .party-invite-buttons button {
+  padding: 5px 11px; border-radius: 6px; border: 1px solid rgb(230 237 243 / 18%);
+  background: rgb(230 237 243 / 5%); color: #e6edf3; font: inherit; font-size: 12px; cursor: pointer;
+}
+#party-window button[type=submit] { border-color: rgb(109 207 126 / 55%); background: rgb(109 207 126 / 14%); color: #c9f0d1; }
+.pw-leave { margin-top: 6px; color: #ff9d8f; }
+
+#party-invite {
+  position: fixed;
+  top: 120px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgb(109 207 126 / 55%);
+  background: rgb(12 15 20 / 95%);
+  box-shadow: 0 12px 34px rgb(0 0 0 / 55%);
+  font-size: 13px;
+  text-align: center;
+  z-index: 8;
+  pointer-events: auto;
+}
+#party-invite[hidden] { display: none; }
+.party-invite-buttons { display: flex; justify-content: center; gap: 8px; margin-top: 8px; }
+.party-invite-buttons button[data-answer=yes] { border-color: rgb(109 207 126 / 60%); background: rgb(109 207 126 / 16%); color: #c9f0d1; font-weight: 600; }
+
+#player-menu { position: fixed; z-index: 8; min-width: 160px; }
+
+/* A party member's name over their head. */
+.nametag.party { border-color: rgb(109 207 126 / 85%); }
+.nametag.party .label { color: #a8e6b4; }
+
+body.portrait :is(#party, #party-invite) { opacity: 0; pointer-events: none; }

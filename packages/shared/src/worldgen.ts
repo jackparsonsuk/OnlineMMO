@@ -570,6 +570,17 @@ export function buildingColliders(ostra: OstraDefinition): readonly BoxCollider[
         });
       });
     }
+    // A dungeon's rock: the same boxes, so its passages predict like streets.
+    ostra.dungeon?.walls.forEach((wall, index) => {
+      boxes.push({
+        id: `rock:${index}`,
+        x: wall.x,
+        z: wall.z,
+        halfWidth: wall.width / 2,
+        halfDepth: wall.depth / 2,
+        yaw: 0,
+      });
+    });
     cached = boxes;
     boxColliderCache.set(ostra.id, cached);
   }

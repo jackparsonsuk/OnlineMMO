@@ -78,7 +78,8 @@ export function groundPalette(ostra: OstraDefinition): GroundPalette {
   return {
     low,
     // Crests catch the light: the grid colour is the Ostra's brighter tone.
-    high: Color3.Lerp(low, grid, 0.55),
+    // A dungeon's floor is earth, whatever colour its Gate glows.
+    high: ostra.dungeon ? low.scale(1.3) : Color3.Lerp(low, grid, 0.55),
     regionLow: ostra.regions.map((r) => Color3.FromHexString(r.ground)),
     regionHigh: ostra.regions.map((r) => Color3.Lerp(Color3.FromHexString(r.ground), Color3.FromHexString(r.crest), 0.6)),
     lakebed: Color3.FromHexString("#4a4a36"),
@@ -116,6 +117,12 @@ export function groundTone(
    *  water mesh drawn on top of it. */
   asMap = false,
 ): Color3 {
+  // A dungeon's rock, so the map draws its rooms rather than a field. (The
+  // 3D ground under the rock is never seen.)
+  const walls = ostra.dungeon?.walls;
+  if (walls?.some((w) => Math.abs(x - w.x) <= w.width / 2 && Math.abs(z - w.z) <= w.depth / 2)) {
+    return out.copyFrom(palette.rock).scaleInPlace(0.45);
+  }
   const lift = Math.min(1, Math.max(0, height / palette.relief * 0.5 + 0.5));
   let low = palette.low;
   let high = palette.high;

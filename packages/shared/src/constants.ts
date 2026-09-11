@@ -63,3 +63,10 @@ export const GATE_RADIUS = 1.75;
 export const GATE_ARRIVAL_OFFSET = 3.5;
 
 export const ROOM_NAME = "ostra";
+
+/** Dungeons are matched by party as well as by Ostra, so they are defined
+ *  under their own name — see `OstraRoom` and the server's index. */
+export const DUNGEON_ROOM_NAME = "dungeon";
+
+/** A party is at most this many, and so is a dungeon instance. */
+export const PARTY_SIZE = 5;

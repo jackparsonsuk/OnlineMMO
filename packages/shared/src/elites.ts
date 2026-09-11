@@ -56,9 +56,13 @@ export interface EliteDefinition {
   /** It comes back somewhere in this window after it falls, in minutes. */
   respawnMinutes: [number, number];
   /** Items it drops for each player who earned a share (see `CREDIT_*`),
-   *  each rolled from the elite loot table. */
+   *  each rolled from the elite loot table — or a dungeon's, for a dungeon's
+   *  boss. */
   drops: number;
   abilities: EliteAbility[];
+  /** Its level, where there is no ground to read one from — a dungeon has
+   *  no regions. Otherwise a few above wherever it stands. */
+  level?: number;
 }
 
 /**
@@ -136,6 +140,26 @@ export const ELITES: readonly EliteDefinition[] = [
       { kind: "enrage", at: 0.3, cry: "The Drowned Abbot rises out of the water!" },
     ],
   },
+
+  // --- dungeon bosses -------------------------------------------------------------
+  // One per instance: it does not come back until the party has left and the
+  // instance has reset, so `respawnMinutes` is never read for these.
+  {
+    id: "hollow-king", ostra: "barrow", name: "The Hollow King", title: "Who Was Buried Standing",
+    // Built for a party: everything it does is something one player can dodge
+    // and the others must deal with — a ring to leave, a court to hold off.
+    // About 10,000 health: most of a minute for two level-8 Warriors, half
+    // that for four. Longer would only be attrition, with no healers yet.
+    // No bigger than 1.7: a Risen swings from `attackRange`, which grows with
+    // scale faster than a Strike's reach to its surface does, and at 1.9 it
+    // stood just out of reach of every blow aimed at it.
+    kind: "zombie", x: 0, z: 80, scale: 1.7, health: 22, damage: 1.3, respawnMinutes: [0, 0], drops: 2, level: 10,
+    abilities: [
+      { kind: "summon", creature: "zombie", count: 2, at: [0.7, 0.4], cry: "The Hollow King's court claws up out of the floor!" },
+      { kind: "slam", radius: 6, windupMs: 1500, everyMs: 11000, damage: 1.7, cry: "The Hollow King raises his blade over his head!" },
+      { kind: "enrage", at: 0.2, cry: "The Hollow King will not lie down again!" },
+    ],
+  },
 ];
 
 export function elitesIn(ostra: OstraId): EliteDefinition[] {
@@ -148,6 +172,7 @@ export function getElite(id: string): EliteDefinition | undefined {
 
 /** A few levels above the ground it stands on. */
 export function eliteLevel(ostra: OstraDefinition, elite: EliteDefinition): number {
+  if (elite.level !== undefined) return Math.min(MAX_ENEMY_LEVEL, elite.level);
   return Math.min(MAX_ENEMY_LEVEL, levelAt(ostra, elite.x, elite.z) + ELITE_LEVEL_BONUS);
 }
 

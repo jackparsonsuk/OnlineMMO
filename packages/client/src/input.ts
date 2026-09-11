@@ -43,6 +43,9 @@ export class KeyboardInput {
 
   constructor(target: Window = window) {
     const onKeyDown = (event: KeyboardEvent) => {
+      // Typing a name into the party window is not walking. (Key-up still
+      // counts, so a key held while clicking into a box is let go.)
+      if ((event.target as HTMLElement | null)?.tagName === "INPUT") return;
       const action = BINDINGS[event.code];
       if (!action) return;
       this.held.add(action);

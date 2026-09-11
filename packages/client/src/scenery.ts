@@ -411,8 +411,11 @@ export class SceneryStreamer implements ChunkListener {
       const y = heightAt(x, z, ostra.terrain);
       if (y > snowLine) continue;
 
+      // Under a dungeon's rock nothing much grows: a few grey tufts in the
+      // dirt, and only a third as many.
+      if (ostra.dungeon && n % 3 !== 0) continue;
       // Reeds at the water's edge, and in the shallows; nothing in the deep.
-      let kind: GrassPool = regionOf(ostra, x, z)?.grass ?? "grass";
+      let kind: GrassPool = ostra.dungeon ? "ash" : regionOf(ostra, x, z)?.grass ?? "grass";
       const lake = lakes.find((l) => Math.hypot(x - l.x, z - l.z) < lakeReach(l));
       if (lake) {
         const depth = lakeLevel(lake, ostra.terrain) - y;

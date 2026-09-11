@@ -26,6 +26,7 @@ import { AccountClient } from "./account.js";
 import { SoundBoard } from "./audio.js";
 import { CharacterScreen } from "./character.js";
 import { DevMenu, type EliteStatus } from "./devtools.js";
+import { PartyUI, type PartyRoster } from "./party.js";
 import { QuestUI } from "./questUI.js";
 import { VendorUI } from "./vendorUI.js";
 import { showTitleScreen } from "./titleScreen.js";
@@ -85,6 +86,19 @@ const vendorUI = new VendorUI({
   sell: (vendor, item) => sendToRoom?.("vendorSell", { vendor, item }),
   sellAll: (vendor) => sendToRoom?.("vendorSellAll", { vendor }),
 });
+
+const partyUI = new PartyUI({
+  invite: (name) => sendToRoom?.("partyInvite", { name }),
+  inviteSession: (sessionId) => sendToRoom?.("partyInvite", { sessionId }),
+  respond: (accept) => sendToRoom?.("partyRespond", { accept }),
+  leave: () => sendToRoom?.("partyLeave"),
+  kick: (id) => sendToRoom?.("partyKick", { id }),
+});
+
+/** Tell the session which bodies in this room are your party. */
+function markParty(): void {
+  session?.setParty(new Set(partyUI.mates.filter((m) => m.online && m.sessionId).map((m) => m.sessionId)));
+}
 
 /** Your class and where you are on the curve, as the server last said. */
 let classId: ClassId = DEFAULT_CLASS;
@@ -161,6 +175,9 @@ window.addEventListener("keydown", (event) => {
     case "KeyJ":
       if (session) questUI.toggleJournal();
       break;
+    case "KeyP":
+      if (session) partyUI.toggle();
+      break;
     case "KeyM":
       session?.toggleMap();
       break;
@@ -172,6 +189,7 @@ window.addEventListener("keydown", (event) => {
     case "Escape":
       // Close whatever is open first; only then drop the target.
       if (session?.mapOpen) session.toggleMap();
+      else if (partyUI.isOpen) partyUI.setOpen(false);
       else if (vendorUI.close()) break;
       else if (questUI.close()) break;
       else if (characterScreen.isOpen) characterScreen.setOpen(false);
@@ -281,6 +299,7 @@ function frame(now: number): void {
   else world.scene.render();
   characterScreen.update(now, world.scene, canvas, session?.selfRig());
   devMenu?.update(now);
+  partyUI.update(room?.state);
   if (session) {
     const self = session.selfPosition();
     questUI.update(self.x, self.z);
@@ -288,12 +307,23 @@ function frame(now: number): void {
   }
 }
 
+/** A session for a room, with what the rest of the client hangs off it. */
+function startSession(next: Room<unknown, WorldState>, ostra: OstraDefinition): OstraSession {
+  const started = createSession(world, next, ostra, hud, keyboard, cameraYaw, audio, classId);
+  started.onPlayerClick = (sessionId, name, x, y) => partyUI.showPlayerMenu(sessionId, name, x, y);
+  // A member's session id is their connection wherever they are, so the
+  // roster from before a Gate still marks anyone already here; the server
+  // re-sends it on arrival regardless.
+  started.setParty(new Set(partyUI.mates.filter((m) => m.online && m.sessionId).map((m) => m.sessionId)));
+  return started;
+}
+
 /** Wire the client up to an Ostra it has just joined. */
 function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefinition): void {
   room = next;
   currentOstra = ostra;
   applyOstra(world, ostra);
-  session = createSession(world, next, ostra, hud, keyboard, cameraYaw, audio, classId);
+  session = startSession(next, ostra);
 
   hud.setOstra(ostra);
   hud.setStatus("connected");
@@ -367,6 +397,20 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
     }
   });
   next.onMessage("eliteStatus", (payload: EliteStatus[]) => devMenu?.showElites(payload));
+  next.onMessage("dungeonCleared", (payload: { name: string; boss: string }) => {
+    hud.announce("Dungeon cleared", payload.name, `${payload.boss} is laid to rest. The way back up is behind you.`, true);
+  });
+
+  // Parties outlive rooms; the server re-sends yours on every arrival.
+  next.onMessage("party", (payload: PartyRoster | null) => {
+    partyUI.setRoster(payload);
+    markParty();
+  });
+  next.onMessage("partyInvite", (payload: { from: string }) => {
+    partyUI.showInvite(payload.from);
+    audio.play("pickup", 0.6);
+  });
+  next.onMessage("partyNote", (payload: { text: string }) => hud.flash(payload.text, "#a8e6b4"));
 
   sendToRoom = (type, payload) => next.send(type, payload);
   next.send("requestProfile");
@@ -422,7 +466,7 @@ async function travel(client: Client, payload: GateMessage): Promise<void> {
     // Rebuild the session we tore down so the player isn't left frozen. They
     // never left, so this is the Ostra they were already standing in.
     if (previous && room === previous && currentOstra) {
-      session = createSession(world, previous, currentOstra, hud, keyboard, cameraYaw, audio, classId);
+      session = startSession(previous, currentOstra);
     }
   } finally {
     travelling = false;

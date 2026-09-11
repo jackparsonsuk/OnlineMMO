@@ -1,3 +1,4 @@
+import { carve, type DungeonDefinition, type DungeonSpace } from "./dungeons.js";
 import type { EnemyKind, SpawnGroup } from "./enemies.js";
 import { DASO, FANSHONA, SETTLEMENTS, type SettlementDefinition } from "./settlements.js";
 import {
@@ -24,7 +25,7 @@ import {
  * skeleton the generated land hangs off.
  */
 
-export type OstraId = "terra" | "ascendant" | "barals";
+export type OstraId = "terra" | "ascendant" | "barals" | "barrow";
 
 export interface GateDefinition {
   /** Unique within its own Ostra. */
@@ -59,6 +60,8 @@ export interface OstraPalette {
   bounce: string;
   /** High peaks. Defaults to `edge`. */
   peak?: string;
+  /** Scales the sun and the ambient light. 1 when absent; a crypt is darker. */
+  light?: number;
 }
 
 /** A solid circular prop. Collided against by both sides, and identical on
@@ -217,6 +220,9 @@ export interface OstraDefinition {
    *  `regions`, so the land and its look can never disagree about borders. */
   regions: RegionDefinition[];
   ruins: RuinDefinition[];
+  /** Present on a dungeon: instanced per party, and built of rock walls
+   *  (see `dungeons.ts`). */
+  dungeon?: DungeonDefinition;
 }
 
 /** Face the middle of the Ostra from a point on its edge. */
@@ -258,6 +264,9 @@ const TERRA_RUINS: RuinDefinition[] = [
   { id: "the-anvil", name: "The Anvil", kind: "spire", x: 2150, z: -1950, radius: 8 },
   { id: "sunken-hall", name: "The Sunken Hall", kind: "tower", x: -520, z: -2230, radius: 8 },
   { id: "sunward-ring", name: "Sunward Ring", kind: "ring", x: 1650, z: 520, radius: 10 },
+  // In the west woods behind Daso, where Basan hears his name. The way down
+  // into it is a Gate standing in the gap on the barrow's south side.
+  { id: "hollow-barrow", name: "The Hollow Barrow", kind: "barrow", x: -1720, z: -160, radius: 11 },
 ];
 
 const ruin = (id: string): { x: number; z: number } => {
@@ -406,6 +415,33 @@ function terraFlats(): FlatZone[] {
   return flats;
 }
 
+// --- the Hollow Barrow ---------------------------------------------------------
+
+const BARROW_SIZE = 200;
+
+/**
+ * The barrow, entrance to throne: rooms and the passages between them, along
+ * one straight spine running north (+z). Everything else is rock. Passages
+ * are fourteen metres long, so a camp in one room cannot notice someone
+ * standing in the last.
+ */
+const BARROW_SPACES: DungeonSpace[] = [
+  // The entrance hall, with the Gate back up at its south end.
+  { x0: -9, x1: 9, z0: -88, z1: -66 },
+  { x0: -3, x1: 3, z0: -66, z1: -52 },
+  // The first chamber: Risen, who were buried here.
+  { x0: -12, x1: 12, z0: -52, z1: -30 },
+  { x0: -3, x1: 3, z0: -30, z1: -16 },
+  // The pillared hall, webbed.
+  { x0: -16, x1: 16, z0: -16, z1: 12 },
+  { x0: -3, x1: 3, z0: 12, z1: 26 },
+  // The lamp-room, where the barrow-lights drift, and its keeper.
+  { x0: -13, x1: 13, z0: 26, z1: 48 },
+  { x0: -3.5, x1: 3.5, z0: 48, z1: 60 },
+  // The King's hall.
+  { x0: -17, x1: 17, z0: 60, z1: 94 },
+];
+
 export const OSTRAS: Record<OstraId, OstraDefinition> = {
   terra: {
     id: "terra",
@@ -446,6 +482,17 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
         x: -20,
         z: 20,
         exitYaw: facingCentre(-20, 20),
+      },
+      {
+        id: "terra-barrow",
+        label: "Into the Hollow Barrow — a dungeon for a party, levels 7–10",
+        target: "barrow",
+        targetGate: "barrow-terra",
+        // In the gap on the barrow's south side, between the mound and the
+        // ring; you come back out facing south, clear of the stones.
+        x: ruin("hollow-barrow").x,
+        z: ruin("hollow-barrow").z - 8.5,
+        exitYaw: Math.PI,
       },
     ],
     // The standing stones of the Gate Circle.
@@ -618,6 +665,77 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     roads: [],
     regions: [],
     ruins: [],
+  },
+
+  barrow: {
+    id: "barrow",
+    name: "The Hollow Barrow",
+    subtitle: "Beneath the west woods",
+    size: BARROW_SIZE,
+    // In the entrance hall, back from the Gate: where you wake after a wipe,
+    // and the one place in the barrow nothing can see.
+    spawn: { x: 0, z: -75 },
+    palette: {
+      sky: "#0c0e12",
+      ground: "#2b2822",
+      // Barrow-light: the pale green of the Gate on Terra that leads here.
+      grid: "#7fbf9a",
+      edge: "#57524a",
+      bounce: "#1c2622",
+      light: 0.7,
+    },
+    gates: [
+      {
+        id: "barrow-terra",
+        label: "Back up into the Westwood",
+        target: "terra",
+        targetGate: "terra-barrow",
+        x: 0,
+        z: -82,
+        exitYaw: 0,
+      },
+    ],
+    // The pillars holding up what is left of the roof, in the two big halls.
+    obstacles: [
+      { x: -10, z: -8, radius: 1.3, height: 7.5 },
+      { x: 10, z: -8, radius: 1.3, height: 7.5 },
+      { x: -10, z: 5, radius: 1.3, height: 7.5 },
+      { x: 10, z: 5, radius: 1.3, height: 7.5 },
+      { x: -11, z: 70, radius: 1.5, height: 8.5 },
+      { x: 11, z: 70, radius: 1.5, height: 8.5 },
+      { x: -11, z: 86, radius: 1.5, height: 8.5 },
+      { x: 11, z: 86, radius: 1.5, height: 8.5 },
+    ],
+    obstacleStyle: "pillar",
+    // A floor of packed earth, a little uneven; flat enough that nothing is
+    // hidden behind a rise in a room twenty metres across.
+    terrain: { seed: 313, hills: { amplitude: 0.3, wavelength: 26, octaves: 2 }, flats: [] },
+    settlements: [],
+    // Tougher than the woods above but no harder-hitting: nobody can heal
+    // yet, so what makes it a party's fight is how much there is to kill and
+    // how the King fights, not blows that take half a bar. (Loot is tilted
+    // by `health`, like any Ostra's.)
+    difficulty: { damage: 0.6, health: 1.15 },
+    // One pull per room, two in the bigger halls, each a thing to learn
+    // before the King: the Risen's overhead, a spider's speed, a wisp's burst
+    // and a golem that cannot be staggered. The King himself is an elite
+    // (`elites.ts`), at the far end of the last hall.
+    spawns: [
+      { kind: "zombie", count: 3, x: 0, z: -40, radius: 4, level: 7 },
+      { kind: "spider", count: 3, x: -8, z: -2, radius: 3, level: 8 },
+      { kind: "spider", count: 3, x: 8, z: 0, radius: 3, level: 8 },
+      { kind: "wisp", count: 3, x: -6, z: 34, radius: 3, level: 8 },
+      { kind: "golem", count: 1, x: 6, z: 42, radius: 1, level: 9 },
+    ],
+    waystones: [],
+    roads: [],
+    regions: [],
+    ruins: [],
+    dungeon: {
+      levels: [7, 10],
+      entrance: "terra-barrow",
+      ...carve(BARROW_SPACES, BARROW_SIZE / 2, 6.5),
+    },
   },
 };
 

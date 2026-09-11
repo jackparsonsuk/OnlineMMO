@@ -34,8 +34,12 @@ smaller entries below; those are the first step towards them.
   story as a chain.
   The system still lacks talk-to objectives, escorts, quest items you carry
   and use, and shared progress within a party (once there are parties).
-- **Dungeons.** Instanced, for a party; the first real source of mythic loot.
-- **Raids.** Larger instances; where World and Ostra rarity come from.
+- **More dungeons.** The Hollow Barrow (7–10) is the first; the system is
+  in (`dungeons.ts`, instanced per party). One per band of levels, each
+  reached from its region — and the Ascendant and Barals could open with one
+  each before their open ground is built.
+- **Raids.** Larger instances; where World and Ostra rarity come from. The
+  dungeon machinery is most of it; raids need bigger parties.
 - **Player houses.** Also the answer to "somewhere to store more than thirty
   items".
 - **The other Ostras.** Ascendant and Barals are small hand-built maps next to
@@ -50,8 +54,8 @@ smaller entries below; those are the first step towards them.
 - **Mounts.** Terra takes fourteen minutes to cross at a sprint.
 - **Pets.**
 - **Graphics redo.**
-- **Parties and chat.** Nothing lets you group up or talk, and dungeons and
-  raids need it. Parties should share loot claims and XP credit.
+- **Chat.** Parties exist (`parties.ts`); nothing lets anyone talk. Say, party
+  and Ostra channels, and bubbles over heads. Needs the moderation below.
 - **Trading, vendors and gold.** A currency, vendors in Daso and Fanshona, and
   player-to-player trade — until then the only thing to do with loot you don't
   want is destroy it.
@@ -128,7 +132,10 @@ smaller entries below; those are the first step towards them.
   someone who only wants the loot.
 - **World events.** A camp that spills over, a golem that walks the roads.
 - **Taunt and group threat tools.** Threat is damage-only; nothing lets you hold
-  a creature off a friend.
+  a creature off a friend. The Hollow King is where this will be felt first.
+- **Healing.** No class heals, so every group fight is attrition; the
+  dungeon's damage is held at Terra's for that reason. A caster, or even a
+  bandage, changes what a boss can be.
 - **Player-vs-player.** Possible but untested — `isInArc` only ever runs against
   creatures.
 - **Creature persistence.** Camps are never saved; a sleeping camp wakes fresh.
@@ -166,13 +173,24 @@ smaller entries below; those are the first step towards them.
   not the Might and Vigour, or the gear that just became wearable.
 - **Rested XP, or something like it**, if the curve past 30 turns out to feel
   like a wall rather than a road.
-- **XP in a group.** Everyone who fights a creature gets its full XP. Kind to
-  grouping, and cheap to exploit by tagging; revisit when parties exist
-  (split, or full within a party only).
+- **XP in a group.** Everyone who fights a creature gets its full XP, and so
+  does their party within 60 m. Kind to grouping, and cheap to exploit by
+  tagging a stranger's fight; with parties in, "full within a party only"
+  is now an option.
+- **Dungeon lockouts.** Leaving resets an instance, so a party can clear the
+  barrow for its King's drops as often as it likes. A daily lockout per boss,
+  or loot only on the first clear of the day.
+- **Party loot rules.** Drops stay the killer's; a party that wants to share
+  has no way to. Round-robin or need/greed, once pickup is a choice rather
+  than walking over it.
+- **Party polish.** Pass leadership, a party marker on the world map for
+  members in other Ostras, and summoning a member to the dungeon Gate.
+- **Dungeon checks at boot.** Nothing checks a dungeon's camps against its
+  rock: a camp placed in a wall scatters creatures into solid stone, which
+  pushes them out wherever is nearest.
 - **An economy.** Vendors in Daso and Fanshona, a currency, trading between
   players, and somewhere to store more than thirty items.
 - **Gold has nowhere to go.** Quests pay it; nothing sells. Vendors first.
-- **Grouping and chat.** No way to form a party or talk.
 
 ## Client and tech
 

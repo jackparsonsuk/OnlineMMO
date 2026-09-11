@@ -106,6 +106,11 @@ export interface OstraSession {
   setQuestMarkers(markerFor: (id: string) => string): void;
   /** Development: open the world map and hand the next click to `picker`. */
   pickOnMap(picker: ((x: number, z: number) => void) | undefined): void;
+  /** Who is in your party, by session id: their names go green, and they
+   *  show on the maps in green too. */
+  setParty(sessionIds: ReadonlySet<string>): void;
+  /** Called when another player is clicked, with where on screen. */
+  onPlayerClick: ((sessionId: string, name: string, x: number, y: number) => void) | undefined;
   readonly picking: boolean;
   dispose(): void;
   /** Render internals, for the console and for tests. Reading a pose two ways
@@ -561,10 +566,28 @@ export function createSession(
   // never changes your target.
   const pointer = scene.onPointerObservable.add((info) => {
     if (info.type !== PointerEventTypes.POINTERTAP) return;
-    const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) => mesh.metadata?.enemyId !== undefined);
+    const pick = scene.pick(
+      scene.pointerX, scene.pointerY,
+      (mesh) => mesh.metadata?.enemyId !== undefined || mesh.metadata?.playerId !== undefined,
+    );
     const id = pick?.pickedMesh?.metadata?.enemyId as string | undefined;
     if (id && livingEnemy(id)) setTarget(id);
+    // Another player: offer what can be done with them (for now, a party).
+    const playerId = pick?.pickedMesh?.metadata?.playerId as string | undefined;
+    const other = playerId ? room.state.players.get(playerId) : undefined;
+    if (playerId && other) {
+      const event = info.event as PointerEvent;
+      api.onPlayerClick?.(playerId, other.name, event.clientX, event.clientY);
+    }
   });
+
+  /** Session ids of your party members in this room. */
+  let partySessions: ReadonlySet<string> = new Set();
+  function setParty(sessionIds: ReadonlySet<string>): void {
+    for (const id of partySessions) if (!sessionIds.has(id)) nametags.setParty(id, false);
+    for (const id of sessionIds) nametags.setParty(id, true);
+    partySessions = sessionIds;
+  }
 
   /**
    * Which way to aim a cast.
@@ -730,6 +753,8 @@ export function createSession(
 
   const offAdd = $(room.state).players.onAdd((player: Player, sessionId: string) => {
     const rig = buildPlayerRig(scene, player.colour);
+    // Others can be clicked; you clicking yourself would only get in the way.
+    if (sessionId !== room.sessionId) for (const mesh of rig.pickables) mesh.metadata = { playerId: sessionId };
     players.set(sessionId, { rig, animator: new Animator(rig), castYaw: 0, dead: false, level: player.level });
     meshes.set(sessionId, rig.root);
     nametags.add(
@@ -739,6 +764,8 @@ export function createSession(
       sessionId === room.sessionId ? "self" : "player",
     );
     nametags.setLevel(sessionId, player.level);
+    // The roster can arrive before their body does.
+    if (partySessions.has(sessionId)) nametags.setParty(sessionId, true);
 
     if (sessionId === room.sessionId) {
       selfPlayer = player;
@@ -1281,9 +1308,13 @@ export function createSession(
         nametags.setLevel(sessionId, player.level);
       }
 
-      nametagTargets.push({ sessionId, x, y, z });
+      // Party members' names read from further off: across a hall, or a field.
+      const mate = partySessions.has(sessionId);
+      nametagTargets.push({ sessionId, x, y, z, ...(mate ? { maxDistance: 160 } : {}) });
       if (!mine) {
-        blips.push({ x, z, colour: `#${player.colour.toString(16).padStart(6, "0")}`, size: 3.5 });
+        blips.push(mate
+          ? { x, z, colour: "#6dcf7e", size: 4.4, ring: true }
+          : { x, z, colour: `#${player.colour.toString(16).padStart(6, "0")}`, size: 3.5 });
       }
     });
 
@@ -1400,7 +1431,8 @@ export function createSession(
       hud.setCombat(alive && selfPlayer.inCombat);
       if (alive === wasDead) {
         wasDead = !alive;
-        hud.setDead(!alive, alive ? "" : "You will wake at the nearest waystone…");
+        hud.setDead(!alive, alive ? ""
+          : ostra.dungeon ? "You will wake at the entrance…" : "You will wake at the nearest waystone…");
         if (!alive) audio.play("death", 1);
       }
 
@@ -1537,7 +1569,7 @@ export function createSession(
     hud.setSpeech(undefined);
   }
 
-  return {
+  const api: OstraSession = {
     frame,
     cycleTarget,
     clearTarget: () => {
@@ -1554,7 +1586,10 @@ export function createSession(
     setQuestMarkers,
     pickOnMap: (picker) => cartographer.setPicker(picker),
     get picking() { return cartographer.picking; },
+    setParty,
+    onPlayerClick: undefined,
     dispose,
     debug: { predict, meshes, colliders, input, target: () => target },
   };
+  return api;
 }

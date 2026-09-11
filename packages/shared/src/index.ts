@@ -1,6 +1,7 @@
 export * from "./classes.js";
 export * from "./combat.js";
 export * from "./constants.js";
+export * from "./dungeons.js";
 export * from "./elites.js";
 export * from "./enemies.js";
 export * from "./items.js";

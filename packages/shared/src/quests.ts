@@ -146,6 +146,21 @@ export const QUESTS: Record<string, QuestDefinition> = {
     objectives: [{ kind: "visit", x: -700, z: -62, radius: 14, label: "Reach the Westroad Stone" }],
     rewards: { gold: 10, xpShare: 0.4, choices: 2, rarity: "common" },
   },
+  // The first dungeon. The sound Basan hears is the vault's story, and it
+  // does not end here: the King is what is in the barrow, not what is
+  // calling. Pitched for a party, and paid like it.
+  "basan-barrow": {
+    id: "basan-barrow", title: "The Hollow Barrow", giver: "basan", turnIn: "basan", level: 9,
+    requires: [],
+    summary: "Go down into the Hollow Barrow in the west woods and put its King back in the ground.",
+    offer: "There's a barrow in the west woods, a few minutes past the last house. Hollow — you can walk down into it. "
+      + "Something down there is walking too. I can hear it at night, pacing. Take friends. I mean that.",
+    progress: "Still pacing. Past the last house, due west. Take friends.",
+    complete: "Quiet. The pacing's stopped. ...The other sound hasn't, mind. Still says my name. "
+      + "But that's mine to worry about, not yours.",
+    objectives: [{ kind: "slay", elite: "hollow-king", label: "The Hollow King laid to rest" }],
+    rewards: { gold: 30, xpShare: 1, choices: 3, rarity: "rare" },
+  },
   "ilda-haul": {
     id: "ilda-haul", title: "The Long Haul", giver: "ilda", turnIn: "ysolde", level: 18,
     requires: ["ilda-westroad"],

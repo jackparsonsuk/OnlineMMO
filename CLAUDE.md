@@ -40,11 +40,14 @@ packages/shared/   one copy of everything both sides must agree on
                      Fervour
   stats.ts           Might/Focus/Vigour/Spirit + secondaries, and what they do
   elites.ts          rare named elites per region; unsafeElites() at boot
+  dungeons.ts        instanced dungeons: carve() cuts rooms out of rock
   quests.ts          quest data, objectives, reward choices, questXp
   vendors.ts         sell prices, vendor stock (pure function of vendor + level)
   combat.ts spells.ts enemies.ts settlements.ts schema.ts constants.ts
 packages/server/
-  rooms/OstraRoom.ts one room per Ostra: sim loop, camps, casts, loot, gates
+  rooms/OstraRoom.ts one room per Ostra (per party, for a dungeon): sim loop,
+                     camps, casts, loot, gates, dungeon grants
+  parties.ts         parties, realm-wide: invites, presence, dungeon instances
   loot.ts            the only place items are rolled; old-save item migration
   ai/enemyAI.ts      creature state machine, windups, threat, knockback
   auth.ts, store/    accounts (JWT + scrypt), SQLite persistence
@@ -54,6 +57,7 @@ packages/client/src/
   character.ts       the character screen: slots, lines to the body, pack, abilities
   devtools.ts        the ` dev menu (dev builds only; server gates `dev` too)
   questUI.ts         quest dialogue (E), tracker, quest log (J)
+  party.ts           party frames, the party window (P), invites
   terrain.ts         chunk streamer + horizon mesh + groundTone
   scenery.ts         thin-instanced trees/rocks/grass per chunk
   rigs.ts            procedural animated bodies (Animator)

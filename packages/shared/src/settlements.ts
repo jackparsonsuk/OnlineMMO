@@ -266,7 +266,7 @@ export const DASO: SettlementDefinition = {
 
   villagers: [
     {
-      name: "Basan Log",
+      id: "basan", name: "Basan Log",
       // The vault's story: he finds an artifact in these woods and it speaks
       // to him. This is him before any of that happened.
       line: "There's a sound in the west woods. Like someone saying my name.",

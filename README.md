@@ -31,8 +31,9 @@ one.
 
 Controls: **WASD** move, **Shift** sprint (out of combat), **Space / 1–6**
 abilities, **Tab** or click to target, **Esc** to let go, **M** map, **I** (or **C**)
-character and pack, **E** talk to a villager, **J** quest log, drag to orbit,
-scroll to zoom, walk into a Gate ring to travel.
+character and pack, **E** talk to a villager, **J** quest log, **P** party (or
+click another player to invite them), drag to orbit, scroll to zoom, walk into
+a Gate ring to travel.
 
 In development, **`` ` ``** (backtick) opens the dev menu: teleport by clicking
 the world map (the hint shows the coordinates, region and creature level under
@@ -337,9 +338,9 @@ something above you (up to five), falling away linearly below you to nothing
 once it is **grey** — five levels down at the start, widening by one every ten
 levels. Without that, the fastest way to level 100 would be the rabbits by the
 Gate Circle. An elite pays eight times a kill. XP goes to **everyone who fought
-the creature** (anyone with threat on it), in full, the same rule quests use, so
-grouping never costs anyone; an elite's goes to everyone it credits (see Rare
-elites). A level-up restores your health and is seen by everyone nearby.
+the creature** (anyone with threat on it), and to their party close by (see
+Parties), in full, the same rule quests use, so grouping never costs anyone;
+an elite's goes to everyone it credits (see Rare elites). A level-up restores your health and is seen by everyone nearby.
 
 Creature levels share the scale, so the number over its head is a
 comparison, coloured WoW-style by `difficultyOf`: grey (beneath you, pays
@@ -704,6 +705,100 @@ fangs, the driver missing on the Westroad), a long delivery that walks you to
 Fanshona, and a Fanshona chain that ends with Old Caddo sending you after Mother
 Silt.
 
+## Parties
+
+Up to five players who have agreed to play together. **P** opens the party
+window: invite someone by name, or click them in the world and choose
+"Invite to party"; the leader (★) can remove members, and anyone can leave.
+Members get frames down the left of the screen — health for anyone in the
+same room as you, and where the rest are ("in The Hollow Barrow", "offline")
+— and show green on their nametags, the minimap and the world map, with
+their names readable from much further off. A party of two that loses one is
+disbanded.
+
+A party changes three things:
+
+- **Kills are shared.** Anyone in the party within 60 m of a kill, alive,
+  counts as having fought it — XP and quest objectives both — so nobody has
+  to tag every creature to keep up. The same goes for an elite's credit: a
+  party member standing in the fight shares it without having to reach the
+  damage share that strangers need.
+- **Dungeons are entered together** (below).
+- **Loot is not shared.** Pickup is by walking over, so a shared claim goes to
+  whoever runs through first. Drops stay the killer's for their claim, as
+  before; a party already shares the XP.
+
+The party lives on the server at module level (`packages/server/src/parties.ts`),
+not on a room, for the same reason elite timers do: its members walk through
+Gates, go down into a dungeon while the others are still on the road, and log
+out and back in. Rooms tell it who is online and where (`arrive` / `depart`)
+and give each presence a `send`, so an invitation reaches someone in whatever
+room they are standing in. A Gate joins the new room before it leaves the old
+one, so a departure from a connection that is no longer the character's is
+ignored. Someone who drops out stays in the party for three minutes, so a
+reload does not cost them their group; a server restart disbands every party.
+
+## Dungeons
+
+Instanced places for a party, built as small Ostras (`OstraDefinition.dungeon`,
+and `dungeons.ts`), so they get everything a Gate and a room already do — the
+transfer, camps, elites and loot. The first is **the Hollow Barrow**, entered
+through a Gate in the gap of a barrow in the west woods, a few minutes past
+the last house in Daso. It is pitched at levels 7–10, and Basan Log's quest
+sends you down into it.
+
+**One copy per party.** Dungeons are defined as a second room name
+(`DUNGEON_ROOM_NAME`) matched on `instance` as well as `ostraId`. Stepping into
+its Gate sends you to whichever copy a party member is already in, even if they
+went in before the party formed, or a fresh one (`dungeonInstanceFor`). There
+is no stored instance: a copy lasts exactly as long as its room, which is
+disposed — and so reset — when the last player in it leaves. Matchmaking for
+that room name is open to any client, so the Gate leaves a **grant** naming the
+instance, and the room refuses anyone without one.
+
+**Nobody is saved inside a dungeon.** Stepping in saves you *outside* its Gate
+on Terra, and the grant carries where you stand inside; logging out, or the
+server stopping, leaves you in front of the barrow rather than in an instance
+that no longer exists. That is also why a dungeon's `onJoin` reads position
+from the grant rather than the store.
+
+**What is killed stays dead** until the instance resets: bodies are cleared
+away instead of standing back up after 12 s. The boss is an elite
+(`elites.ts`, with a fixed `level`, since a dungeon has no regions to read one
+from) whose timer is the instance's own and never runs out. It drops from the
+dungeon table (`SOURCE_ODDS.dungeon`: rare, mythic, legendary), two items for
+each player it credits, and its fall tells the instance the dungeon is cleared.
+
+**It is rock, not a ruin.** The layout is a run of rooms and passages along one
+straight spine (`carve`), and everything outside them is solid: a block either
+side of each space, reaching to the edge, and a cap at each end — so a narrow
+passage's blocks are the end walls of the rooms either side, and nothing has to
+be worked out where they meet. The blocks are ordinary box colliders in
+`buildingColliders`, so a passage predicts exactly like walking round a house in
+Daso. One straight spine because creatures have no pathfinding: they walk
+straight at their quarry and slide along walls, and a line of doorways is what
+lets a pull come to you rather than wedge itself in a corner. Passages are
+fourteen metres, so a camp in one room cannot see into the next.
+
+It is darker (`OstraPalette.light`) and foggier than anywhere else, lit by
+torches: an unlit flame and an additive halo each, flickering, because the
+standard material lights a mesh by four lights at most and there are twenty
+torches. The map paints the rock, so it shows the rooms.
+
+Tuning, first pass: creature damage is Terra's (×0.6) with a little more health
+(×1.15) — nobody can heal yet, so what makes it a party's fight is how much
+there is and how the King fights, not blows that take half a bar. The Hollow
+King has about 10,000 health: about 75 seconds for two ungeared level-8
+Warriors, 50 for three. He summons his court at 70% and 40%, slams a 6 m ring
+every eleven seconds, and enrages at 20%. He is 1.7 times a Risen and no
+bigger: a Risen swings from `attackRange`, which grows with scale faster than a
+Strike's reach to its surface, and at 1.9 he stood just out of reach of every
+blow aimed at him.
+
+The barrow, its King and Basan's quest were invented for the game, like
+Fanshona; the vault's story of the voice Basan hears is left where it was — the
+King is what is in the barrow, not what is calling.
+
 ## Vendors
 
 Loot drops far faster than it can be worn, and thirty slots fill in a few
@@ -1013,6 +1108,9 @@ build next live in [TODO.md](TODO.md).
 - **Docks are scenery.** You wade beside Fanshona's dock, not along it.
 - **No taunt, no group threat tools.** Threat is damage-based; there is no way
   to deliberately hold a creature off a friend.
+- **No chat.** Parties exist, but nothing lets anyone talk in game.
+- **Dungeons have no lockout.** Leaving empties an instance and the next trip
+  down is a fresh one, boss and all, as often as a party likes.
 - **Abilities are learned by levelling, not found.** The lore says spells come
   from scrolls and books and that the Library Ostracon holds them all; a caster
   class should probably learn that way rather than at set levels.

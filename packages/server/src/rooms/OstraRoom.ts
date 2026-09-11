@@ -101,6 +101,8 @@ import {
   type OstraId,
   PATCH_RATE_MS,
   Player,
+  DUNGEON_ROOM_NAME,
+  PARTY_SIZE,
   ROOM_NAME,
   TICK_RATE,
   type BoxCollider,
@@ -122,11 +124,15 @@ import {
 import { issueTransferToken, verifyToken } from "../auth.js";
 import { getServerContext } from "../context.js";
 import { isCharacterId } from "../identity.js";
+import * as parties from "../parties.js";
 import type { CharacterStore } from "../store/CharacterStore.js";
 
 export interface OstraRoomOptions {
   /** Which Ostra this room is. Rooms are matched on it, so it is required. */
   ostraId: OstraId;
+  /** Which copy of a dungeon — see `parties.dungeonInstanceFor`. Required
+   *  for a dungeon, and meaningless anywhere else. */
+  instance?: string;
   /**
    * Which of the account's characters to play. Not a credential — the join is
    * authorised by the session token, and this only selects among the
@@ -258,6 +264,46 @@ const ELITE_CORPSE_MS = 15_000;
  */
 const eliteTimers = new Map<string, number>();
 
+/**
+ * Who may walk into which dungeon instance, and where they stand when they
+ * do. Written by the room whose Gate they stepped into, read once by the
+ * dungeon's `onJoin`.
+ *
+ * A dungeon's matchmaking is open to any client that names an instance, so
+ * this is what stops someone joining a stranger's by guessing — and it is
+ * also what carries the arrival point, because a character is never saved
+ * inside a dungeon (see `beginTransfer`).
+ */
+const dungeonGrants = new Map<string, { instance: string; x: number; z: number; yaw: number }>();
+
+/** A kill is shared with party members this close to it, even if they never
+ *  touched it — the one healing a friend is part of the fight too, and there
+ *  will be healers. */
+const PARTY_SHARE_RANGE = 60;
+
+/** Where you step out of a Gate: in front of it, facing away. */
+function gateArrival(gate: GateDefinition): { x: number; z: number; yaw: number } {
+  return {
+    x: gate.x + Math.sin(gate.exitYaw) * GATE_ARRIVAL_OFFSET,
+    z: gate.z + Math.cos(gate.exitYaw) * GATE_ARRIVAL_OFFSET,
+    yaw: gate.exitYaw,
+  };
+}
+
+/**
+ * Where a character in a dungeon is saved: outside the Gate they came in by,
+ * on the Ostra it stands in. An instance ends when its last player leaves, so
+ * logging out inside, or the server stopping, must leave you somewhere that
+ * will still exist.
+ */
+function dungeonExit(dungeon: OstraDefinition): { ostraId: OstraId; x: number; z: number; yaw: number } {
+  const inside = dungeon.gates.find((gate) => gate.targetGate === dungeon.dungeon?.entrance) ?? dungeon.gates[0]!;
+  const outside = getOstra(inside.target);
+  const gate = findGate(outside, inside.targetGate);
+  if (!gate) return { ostraId: outside.id, ...outside.spawn, yaw: 0 };
+  return { ostraId: outside.id, ...gateArrival(gate) };
+}
+
 export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   /**
    * Declaring the input here is what turns this into a timed room: clients get
@@ -303,6 +349,11 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   /** Creatures an elite summoned, by enemy id, and whose they are. */
   private readonly addOf = new Map<string, string>();
   private nextGroundId = 0;
+  /** Which copy of a dungeon this is; undefined anywhere else. */
+  private instance: string | undefined;
+  /** A dungeon's elite timers. Its boss is its own and never comes back, so
+   *  it does not share the realm-wide `eliteTimers`. */
+  private readonly instanceEliteTimers = new Map<string, number>();
 
   onCreate(options: OstraRoomOptions): void {
     if (!isOstraId(options.ostraId)) {
@@ -316,9 +367,20 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     this.boxes = buildingColliders(this.ostra);
     this.camps = campsIn(this.ostra);
 
+    // A dungeon is only ever reached through `beginTransfer`, which names the
+    // instance; one without it would be a copy nobody can be granted into.
+    if (this.ostra.dungeon) {
+      if (typeof options.instance !== "string" || options.instance.length === 0) {
+        throw new ServerError(400, "A dungeon needs an instance.");
+      }
+      this.instance = options.instance;
+    }
+
     this.state = new WorldState({ ostraId: this.ostra.id });
-    this.maxClients = 64;
+    // A dungeon instance holds one party.
+    this.maxClients = this.ostra.dungeon ? PARTY_SIZE : 64;
     this.patchRate = PATCH_RATE_MS;
+    void this.setMetadata({ ostraId: this.ostra.id, instance: this.instance });
 
     // Lag compensation. A client renders creatures INTERP_DELAY_MS in the past,
     // so a spider closing at 7.2 m/s is nearly a metre from where it is drawn by
@@ -351,6 +413,29 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       this.onVendorSell(client, message?.vendor, undefined));
     this.onMessage("vendorBuy", (client, message: { vendor?: unknown; index?: unknown }) =>
       this.onVendorBuy(client, message?.vendor, message?.index));
+    // Parties live outside any one room (see parties.ts); the room only says
+    // who is asking.
+    this.onMessage("partyInvite", (client, message: { name?: unknown; sessionId?: unknown }) => {
+      const session = this.sessions.get(client.sessionId);
+      if (!session) return;
+      const name = typeof message?.name === "string" ? message.name.slice(0, 40) : undefined;
+      const other = typeof message?.sessionId === "string" ? this.sessions.get(message.sessionId) : undefined;
+      if (name === undefined && !other) return;
+      const text = parties.invite(session.characterId, other ? { characterId: other.characterId } : { name });
+      client.send("partyNote", { text });
+    });
+    this.onMessage("partyRespond", (client, message: { accept?: unknown }) => {
+      const session = this.sessions.get(client.sessionId);
+      if (session) parties.respond(session.characterId, message?.accept === true);
+    });
+    this.onMessage("partyLeave", (client) => {
+      const session = this.sessions.get(client.sessionId);
+      if (session) parties.leave(session.characterId);
+    });
+    this.onMessage("partyKick", (client, message: { id?: unknown }) => {
+      const session = this.sessions.get(client.sessionId);
+      if (session && typeof message?.id === "string") parties.kick(session.characterId, message.id);
+    });
     // Cheats for testing. Registered at all only outside production, so no
     // amount of crafting a message reaches them on a real server.
     if (context.devTools) {
@@ -462,16 +547,24 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       }
     }
 
-    // A character saved in another Ostra should never have been routed here.
-    // Trust the store over the request and say where they actually are.
-    if (character.ostraId !== this.ostra.id) {
+    let saved = { x: character.x, z: character.z, yaw: character.yaw };
+    if (this.ostra.dungeon) {
+      // Nobody is ever saved inside a dungeon, so the store cannot say who
+      // belongs here; the Gate that sent them left a grant saying so.
+      const grant = dungeonGrants.get(character.id);
+      if (!grant || grant.instance !== this.instance) throw new ServerError(403, "That way is shut.");
+      dungeonGrants.delete(character.id);
+      saved = { x: grant.x, z: grant.z, yaw: grant.yaw };
+    } else if (character.ostraId !== this.ostra.id) {
+      // A character saved in another Ostra should never have been routed
+      // here. Trust the store over the request and say where they actually are.
       throw new ServerError(409, `That character is on ${getOstra(character.ostraId).name}.`);
     }
 
     // A save from before an Ostra shrank could sit outside it now.
     const limit = this.ostra.size / 2 - PLAYER_RADIUS;
-    const x = Math.max(-limit, Math.min(limit, character.x));
-    const z = Math.max(-limit, Math.min(limit, character.z));
+    const x = Math.max(-limit, Math.min(limit, saved.x));
+    const z = Math.max(-limit, Math.min(limit, saved.z));
 
     this.state.players.set(client.sessionId, new Player({
       name: character.name,
@@ -481,7 +574,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       // since they logged out, and a saved height would bury or float them.
       y: groundHeight(this.ostra, x, z),
       z,
-      yaw: character.yaw,
+      yaw: saved.yaw,
       level: character.level,
       // A character stored at 0 HP died as the process went down; wake them
       // whole rather than dead on arrival with no respawn timer running.
@@ -527,10 +620,44 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       quests: { active: { ...character.quests.active }, done: [...character.quests.done] },
       gold: character.gold,
     });
+    this.announcePresence(client.sessionId);
 
     // Wake the camps around them now rather than up to half a second later,
     // so arriving somewhere never shows an empty field filling up.
     this.updateCamps(Date.now());
+  }
+
+  /** Tell the party registry this character is here, as they now are. */
+  private announcePresence(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    const player = this.state.players.get(sessionId);
+    if (!session || !player) return;
+    parties.arrive({
+      characterId: session.characterId,
+      name: player.name,
+      level: session.level,
+      ostraId: this.ostra.id,
+      instance: this.instance,
+      sessionId,
+      send: (type, payload) => this.clients.getById(sessionId)?.send(type, payload),
+    });
+  }
+
+  /** Party members of this player who are in this room, alive, and within
+   *  `range` of a point — the ones who share a kill there. */
+  private partyNear(sessionId: string, x: number, z: number, range: number): string[] {
+    const session = this.sessions.get(sessionId);
+    if (!session) return [];
+    const mates = parties.partyMates(session.characterId);
+    if (mates.length === 0) return [];
+    const near: string[] = [];
+    for (const [otherId, other] of this.sessions) {
+      if (!mates.includes(other.characterId) || other.transferring) continue;
+      const player = this.state.players.get(otherId);
+      if (!player || player.health === 0) continue;
+      if (Math.hypot(player.x - x, player.z - z) <= range) near.push(otherId);
+    }
+    return near;
   }
 
   /**
@@ -544,7 +671,11 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   private onRequestProfile(client: Client): void {
     const session = this.sessions.get(client.sessionId);
     const player = this.state.players.get(client.sessionId);
-    if (session && player) this.sendProfile(client.sessionId, session);
+    if (!session || !player) return;
+    this.sendProfile(client.sessionId, session);
+    // The same race as the profile: a party message sent from onJoin would
+    // arrive before the client is listening.
+    parties.greet(session.characterId);
   }
 
   onLeave(client: Client): void {
@@ -554,12 +685,15 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     // A transferring player was already saved at their arrival point. Saving
     // again here would write the position they left from and undo the trip.
     if (session && player && !session.transferring) {
+      // Out of a dungeon by any door but its Gate, you are saved outside it.
+      const exit = this.ostra.dungeon ? dungeonExit(this.ostra) : undefined;
+      const at = exit ?? { ostraId: this.ostra.id, x: player.x, z: player.z, yaw: player.yaw };
       this.store.savePosition(this.realmId, session.characterId, {
-        ostraId: this.ostra.id,
-        x: player.x,
-        y: player.y,
-        z: player.z,
-        yaw: player.yaw,
+        ostraId: at.ostraId,
+        x: at.x,
+        y: exit ? groundHeight(getOstra(exit.ostraId), exit.x, exit.z) : player.y,
+        z: at.z,
+        yaw: at.yaw,
         health: player.health,
         level: session.level,
         xp: session.xp,
@@ -570,6 +704,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       });
     }
 
+    if (session) parties.depart(session.characterId, client.sessionId);
     this.sessions.delete(client.sessionId);
     this.state.players.delete(client.sessionId);
     for (const brain of this.brains.values()) {
@@ -991,6 +1126,12 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     // who fought it counts, not only the killing blow — a group should never
     // have to take turns at the last hit.
     const fighters = new Set<string>([killerSessionId, ...(brain?.threat.keys() ?? [])]);
+    // ...and a party shares its kills: anyone in it close by counts as having
+    // fought, for XP and for quests, so nobody in a group has to tag
+    // everything to keep up.
+    for (const sessionId of [...fighters]) {
+      for (const mate of this.partyNear(sessionId, enemy.x, enemy.z, PARTY_SHARE_RANGE)) fighters.add(mate);
+    }
     this.questKill(enemy, fighters, fight?.elite.id);
     if (fight) {
       this.eliteFell(id, fight, enemy, killerSessionId, now);
@@ -1005,6 +1146,12 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       brain.returning = false;
       brain.respawnAt = now + (fight ? ELITE_CORPSE_MS : ENEMY_RESPAWN_MS);
     }
+  }
+
+  /** Nothing killed in a dungeon gets back up: a cleared room stays cleared
+   *  until the instance resets. */
+  private get staysDead(): boolean {
+    return this.ostra.dungeon !== undefined;
   }
 
   /** How much harder than its kind this creature hits: an elite's multiplier,
@@ -1089,6 +1236,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       // and a level-up is not a resurrection.
       if (player.health > 0) player.health = player.maxHealth;
       this.broadcastNear(player.x, player.z, "levelUp", { id: sessionId, level: result.level });
+      parties.levelChanged(session.characterId, result.level);
     }
     this.clients.getById(sessionId)?.send("xp", { level: session.level, xp: session.xp, gained: amount });
   }
@@ -1385,6 +1533,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         player.level = session.level;
         this.refreshStats(session, player);
         client.send("xp", { level: session.level, xp: session.xp, gained: 0 });
+        parties.levelChanged(session.characterId, session.level);
         break;
       }
       case "xp":
@@ -1395,7 +1544,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         client.send("eliteStatus", elitesIn(this.ostra.id).map((elite) => {
           const enemyId = this.liveElites.get(elite.id);
           const enemy = enemyId !== undefined ? this.state.enemies.get(enemyId) : undefined;
-          const timer = eliteTimers.get(this.eliteKey(elite)) ?? 0;
+          const timer = this.timers.get(this.eliteKey(elite)) ?? 0;
           const alive = enemy !== undefined && enemy.state !== EnemyState.Dead;
           return {
             id: elite.id,
@@ -1427,7 +1576,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         // Timers set to now, so the next check wakes them — with the
         // announcement, which is the point of testing it.
         for (const elite of elitesIn(this.ostra.id)) {
-          if (eliteTimers.has(this.eliteKey(elite))) eliteTimers.set(this.eliteKey(elite), now);
+          if (this.timers.has(this.eliteKey(elite))) this.timers.set(this.eliteKey(elite), now);
         }
         break;
       case "killNear": {
@@ -1499,7 +1648,9 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         const session = this.sessions.get(sessionId);
         if (!session || session.transferring) continue;
         if (Math.hypot(player.x - dropped.x, player.z - dropped.z) > PICKUP_RADIUS) continue;
-        // Still someone else's.
+        // Still someone else's. A party does not share claims: pickup is by
+        // walking over, so a shared claim goes to whoever runs through first.
+        // It shares the kill's XP and quest credit instead (see killEnemy).
         if (dropped.claimedBy !== "" && dropped.claimedBy !== sessionId) continue;
 
         // A full bag leaves it lying there rather than silently eating it.
@@ -1706,9 +1857,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       if (!brain || now < brain.respawnAt) continue;
 
       // An elite does not get back up; it comes back, much later, as a new
-      // spawn (see `updateElites`). What it summoned never comes back at all.
+      // spawn (see `updateElites`). What it summoned never comes back at all,
+      // and nor does anything in a dungeon: the body is cleared away instead.
       const fight = this.eliteOf.get(enemyId);
-      if (fight || this.addOf.has(enemyId)) {
+      if (fight || this.addOf.has(enemyId) || this.staysDead) {
         this.state.enemies.delete(enemyId);
         this.brains.delete(enemyId);
         this.eliteOf.delete(enemyId);
@@ -1774,7 +1926,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   private updateElites(now: number): void {
     for (const elite of elitesIn(this.ostra.id)) {
       if (this.liveElites.has(elite.id)) continue;
-      const timer = eliteTimers.get(this.eliteKey(elite));
+      const timer = this.timers.get(this.eliteKey(elite));
       if (timer !== undefined && now < timer) continue;
       // Only a return is news. The first spawn of a fresh room is just the
       // world being as it is — announcing eight at once would be noise.
@@ -1784,6 +1936,11 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
   private eliteKey(elite: EliteDefinition): string {
     return `${this.realmId}:${elite.id}`;
+  }
+
+  /** The realm's elite timers, or this dungeon instance's own. */
+  private get timers(): Map<string, number> {
+    return this.ostra.dungeon ? this.instanceEliteTimers : eliteTimers;
   }
 
   private spawnElite(elite: EliteDefinition, announce: boolean): void {
@@ -1842,7 +1999,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   private eliteFell(enemyId: string, fight: EliteFight, enemy: Enemy, killerSessionId: string, now: number): void {
     const elite = fight.elite;
     const [low, high] = elite.respawnMinutes;
-    eliteTimers.set(this.eliteKey(elite), now + (low + Math.random() * (high - low)) * 60_000);
+    // A dungeon's boss is gone for the life of the instance.
+    this.timers.set(this.eliteKey(elite), this.staysDead
+      ? Infinity
+      : now + (low + Math.random() * (high - low)) * 60_000);
     this.removeAdds(fight);
 
     const threat = this.brains.get(enemyId)?.threat;
@@ -1857,6 +2017,14 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     // Nobody reached a share — a dev kill, or one blow finishing something no
     // one else fought. Whoever finished it still gets something.
     if (credited.length === 0) credited.push(killerSessionId);
+    // A party earns together: anyone in a credited player's party who was
+    // there, alive, shares it — the share rule is for strangers who happened
+    // by, not for friends who came down together.
+    for (const sessionId of [...credited]) {
+      for (const mate of this.partyNear(sessionId, enemy.x, enemy.z, PARTY_SHARE_RANGE)) {
+        if (!credited.includes(mate)) credited.push(mate);
+      }
+    }
 
     credited.forEach((sessionId, who) => {
       // The same credit rule as the loot: a share of the fight, not a touch.
@@ -1866,7 +2034,9 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
           creatureLevel: enemy.level,
           ostraDanger: this.ostra.difficulty.health,
           danger: dropDanger(this.ostra.difficulty.health, enemy.level),
-          source: "elite",
+          // A dungeon's boss pays from the dungeon table: the first place
+          // mythic is the usual rather than the lucky.
+          source: this.ostra.dungeon ? "dungeon" : "elite",
           // Each credited player's drops are for their own class.
           classId: this.sessions.get(sessionId)?.classId ?? DEFAULT_CLASS,
         });
@@ -1879,6 +2049,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
           GROUND_ITEM_TTL_MS);
       }
     });
+
+    if (this.staysDead) {
+      this.broadcast("dungeonCleared", { name: this.ostra.name, boss: elite.name });
+    }
 
     const names = credited.map((sessionId) => this.state.players.get(sessionId)?.name ?? "someone");
     this.broadcast("elite", {
@@ -2070,16 +2244,24 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     session.transferring = true;
 
     // Step out of the far Gate rather than on top of it.
-    const x = arrivalGate.x + Math.sin(arrivalGate.exitYaw) * GATE_ARRIVAL_OFFSET;
-    const z = arrivalGate.z + Math.cos(arrivalGate.exitYaw) * GATE_ARRIVAL_OFFSET;
+    const arrival = gateArrival(arrivalGate);
+
+    // Going down into a dungeon: the copy your party is in, or a new one.
+    // You are saved OUTSIDE it (see `dungeonExit`), and the grant carries
+    // where you stand inside, and that you are allowed to.
+    const instance = destination.dungeon
+      ? parties.dungeonInstanceFor(session.characterId, destination.id)
+      : undefined;
+    const saveAt = destination.dungeon ? dungeonExit(destination) : { ostraId: destination.id, ...arrival };
+    if (instance !== undefined) dungeonGrants.set(session.characterId, { instance, ...arrival });
 
     try {
       this.store.savePosition(this.realmId, session.characterId, {
-        ostraId: destination.id,
-        x,
-        y: groundHeight(destination, x, z),
-        z,
-        yaw: arrivalGate.exitYaw,
+        ostraId: saveAt.ostraId,
+        x: saveAt.x,
+        y: groundHeight(getOstra(saveAt.ostraId), saveAt.x, saveAt.z),
+        z: saveAt.z,
+        yaw: saveAt.yaw,
         health: player.health,
         level: session.level,
         xp: session.xp,
@@ -2091,9 +2273,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
       // With an auth context, so the reserved seat carries the account — see
       // `issueTransferToken`.
-      const reservation = await matchMaker.joinOrCreate(ROOM_NAME, {
+      const reservation = await matchMaker.joinOrCreate(instance !== undefined ? DUNGEON_ROOM_NAME : ROOM_NAME, {
         ostraId: destination.id,
         characterId: session.characterId,
+        ...(instance !== undefined ? { instance } : {}),
       }, { token: await issueTransferToken(session.accountId), ip: "", headers: new Headers() });
 
       client.send("gate", {
@@ -2110,6 +2293,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     } catch (error) {
       // Put the player back under their own control rather than freezing them.
       session.transferring = false;
+      dungeonGrants.delete(session.characterId);
       console.error(`[${this.ostra.id}] transfer failed`, error);
       client.send("gateFailed", { message: "The Gate would not hold." });
     }

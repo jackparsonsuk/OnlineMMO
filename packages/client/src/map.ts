@@ -531,7 +531,8 @@ export class Cartographer {
     const region = regionOf(this.ostra, x, z);
     if (!(nearest && best < 900)) place = region?.name ?? place;
 
-    const danger = region && this.ostra.wilds ? ` · levels ${region.levels[0]}–${region.levels[1]}` : "";
+    const band = this.ostra.dungeon?.levels ?? (this.ostra.wilds ? region?.levels : undefined);
+    const danger = band ? ` · levels ${band[0]}–${band[1]}` : "";
     const info = `${place}${danger}`;
     if (info !== this.lastInfo) {
       this.lastInfo = info;

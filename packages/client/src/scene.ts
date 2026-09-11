@@ -8,6 +8,7 @@ import "@babylonjs/core/Shaders/default.vertex.js";
 import "@babylonjs/core/Shaders/default.fragment.js";
 
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera.js";
+import { Constants } from "@babylonjs/core/Engines/constants.js";
 import { Engine } from "@babylonjs/core/Engines/engine.js";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight.js";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight.js";
@@ -73,7 +74,12 @@ export interface World {
   scenery: SceneryStreamer | undefined;
   ostra: OstraDefinition | undefined;
   sky: Mesh;
+  /** Dimmed per Ostra (`OstraPalette.light`) along with the ambient. */
+  sun: DirectionalLight;
 }
+
+const AMBIENT_INTENSITY = 0.85;
+const SUN_INTENSITY = 0.8;
 
 export function createWorld(canvas: HTMLCanvasElement): World {
   const engine = new Engine(canvas, true, { stencil: true }, true);
@@ -108,10 +114,10 @@ export function createWorld(canvas: HTMLCanvasElement): World {
   const ambient = new HemisphericLight("ambient", new Vector3(0, 1, 0), scene);
   // Lifted from 0.65: faceted low-poly geometry loses its shape in shadow,
   // and the whole point of the facets is that you can read the form.
-  ambient.intensity = 0.85;
+  ambient.intensity = AMBIENT_INTENSITY;
 
   const sun = new DirectionalLight("sun", new Vector3(-0.55, -0.85, -0.4), scene);
-  sun.intensity = 0.8;
+  sun.intensity = SUN_INTENSITY;
   // Warm, so the light has a direction and a time of day rather than being
   // a neutral wash.
   sun.diffuse = new Color3(1, 0.96, 0.87);
@@ -130,6 +136,7 @@ export function createWorld(canvas: HTMLCanvasElement): World {
     scenery: undefined,
     ostra: undefined,
     sky: buildSky(scene),
+    sun,
   };
 }
 
@@ -193,6 +200,8 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
   const sky = Color3.FromHexString(palette.sky);
   scene.clearColor = Color4.FromColor3(sky, 1);
   world.ambient.groundColor = Color3.FromHexString(palette.bounce);
+  world.ambient.intensity = AMBIENT_INTENSITY * (palette.light ?? 1);
+  world.sun.intensity = SUN_INTENSITY * (palette.light ?? 1);
   paintSky(world.sky, sky, sky.scale(ostra.wilds ? 0.62 : 0.5));
 
   // Haze. On a big Ostra it is what gives distance its depth, and it hides the
@@ -203,15 +212,19 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
   // the edge of the world soft.
   scene.fogMode = Scene.FOGMODE_EXP2;
   scene.fogColor = sky;
-  scene.fogDensity = ostra.size > 1000 ? 0.0018 : 0.012;
+  // A dungeon closer still: the next room should be a shape in the dark, not
+  // something you can read from the door.
+  scene.fogDensity = ostra.dungeon ? 0.026 : ostra.size > 1000 ? 0.0018 : 0.012;
 
   // The ground is built from the same height function the simulation walks on,
   // so what you see and what you stand on cannot drift apart.
   world.scenery = new SceneryStreamer(scene, ostra);
   world.terrain = new TerrainStreamer(scene, ostra, world.scenery);
 
-  // A rim of mountains is boundary enough; the low wall is for small Ostras.
-  if (!ostra.terrain.rim) addWorldEdges(scene, root, ostra);
+  // A rim of mountains is boundary enough, and a dungeon's rock more than
+  // enough; the low wall is for the small open Ostras.
+  if (ostra.dungeon) addDungeon(scene, root, ostra);
+  else if (!ostra.terrain.rim) addWorldEdges(scene, root, ostra);
   addObstacles(scene, root, ostra);
   for (const gate of ostra.gates) addGate(scene, root, ostra, gate.x, gate.z, gate.target);
   for (const stone of ostra.waystones) addWaystone(scene, root, ostra, stone);
@@ -280,6 +293,86 @@ function addWorldEdges(scene: Scene, root: TransformNode, ostra: OstraDefinition
       wall.parent = root;
     }
   }
+}
+
+/**
+ * A dungeon: the rock its rooms are cut from, exactly where the shared box
+ * colliders are, and torches along the walls of every room.
+ *
+ * No point lights — the standard material lights a mesh by four at most, and
+ * a barrow has dozens of torches. Each is a flame that ignores lighting and a
+ * faint halo round it, flickering, which reads as firelight in the dark
+ * without asking the renderer for any.
+ */
+function addDungeon(scene: Scene, root: TransformNode, ostra: OstraDefinition): void {
+  const dungeon = ostra.dungeon;
+  if (!dungeon) return;
+
+  const rock = flatMaterial(scene, "dungeonRock", Color3.FromHexString(ostra.palette.edge));
+  for (const wall of dungeon.walls) {
+    const block = MeshBuilder.CreateBox("dungeonRock", { width: wall.width, height: wall.height, depth: wall.depth }, scene);
+    block.position.set(wall.x, heightAt(wall.x, wall.z, ostra.terrain) + wall.height / 2 - 0.3, wall.z);
+    block.material = rock;
+    block.metadata = { blocksCamera: true };
+    block.parent = root;
+  }
+
+  const iron = flatMaterial(scene, "torchIron", 0x2e2a26);
+  const wood = flatMaterial(scene, "torchWood", 0x5a3f28);
+  const flame = new StandardMaterial("torchFlame", scene);
+  flame.disableLighting = true;
+  flame.emissiveColor = Color3.FromHexString("#ffb347");
+  // Added to what is behind it rather than painted over it, so it brightens
+  // the wall like light instead of hanging in front of it like a disc.
+  const halo = new StandardMaterial("torchHalo", scene);
+  halo.disableLighting = true;
+  halo.emissiveColor = Color3.FromHexString("#ff8a2a");
+  halo.alpha = 0.3;
+  halo.alphaMode = Constants.ALPHA_ADD;
+  halo.backFaceCulling = false;
+
+  const flames: Mesh[] = [];
+  for (const torch of dungeon.torches) {
+    const pivot = new TransformNode("torch", scene);
+    pivot.position.set(torch.x, heightAt(torch.x, torch.z, ostra.terrain), torch.z);
+    // Local +z points away from the wall, into the room.
+    pivot.rotation.y = torch.yaw;
+    pivot.parent = root;
+
+    const bracket = MeshBuilder.CreateBox("torchBracket", { width: 0.16, height: 0.5, depth: 0.22 }, scene);
+    bracket.position.set(0, 2.3, 0.08);
+    bracket.material = iron;
+    bracket.parent = pivot;
+
+    const stick = MeshBuilder.CreateCylinder("torchStick", { height: 0.75, diameter: 0.11, tessellation: 5 }, scene);
+    stick.position.set(0, 2.5, 0.3);
+    stick.rotation.x = 0.45;
+    stick.material = wood;
+    stick.parent = pivot;
+
+    const fire = MeshBuilder.CreatePolyhedron("torchFlame", { type: 1, size: 0.15 }, scene);
+    fire.position.set(0, 2.92, 0.46);
+    fire.material = flame;
+    fire.isPickable = false;
+    fire.parent = pivot;
+    flames.push(fire);
+
+    const glow = MeshBuilder.CreateSphere("torchHalo", { diameter: 1.4, segments: 6 }, scene);
+    glow.position.copyFrom(fire.position);
+    glow.material = halo;
+    glow.isPickable = false;
+    glow.parent = pivot;
+  }
+
+  const flicker = scene.onBeforeRenderObservable.add(() => {
+    const t = performance.now() / 1000;
+    flames.forEach((fire, i) => {
+      const s = 1 + Math.sin(t * 9 + i * 1.7) * 0.12 + Math.sin(t * 23 + i) * 0.06;
+      fire.scaling.set(s * 0.9, s * 1.25, s * 0.9);
+      fire.rotation.y = t * 2 + i;
+    });
+  });
+  root.onDisposeObservable.add(() => scene.onBeforeRenderObservable.remove(flicker));
 }
 
 /**
