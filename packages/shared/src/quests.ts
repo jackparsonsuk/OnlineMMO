@@ -20,16 +20,18 @@
  * Collected things are counted, not carried. A pack full of wolf fangs would
  * be thirty slots of clutter the loot system has no use for.
  *
- * Rewards are gold, one item of the player's choosing from a few, and XP they
- * put into whichever skill they like — capped, so a quest from the Gate Circle
- * cannot teach what only the edge of the world can (see `questXp`).
+ * Rewards are gold, one item of the player's choosing from a few, and XP. A
+ * quest is pitched at a level: it is offered from a few levels below it, its
+ * items are of that level, and its XP is a share of that level's worth —
+ * falling away, like a kill's, once you have outgrown it (see `questXp`).
  */
 
+import type { ClassId } from "./classes.js";
 import type { EnemyKind } from "./enemies.js";
 import { basesFor, encodeItem, type ItemKey, type Rarity } from "./items.js";
+import { LEVEL_SCALE, levelXpScale, MAX_LEVEL, xpToNext } from "./levels.js";
 import { hash2 } from "./noise.js";
 import { SETTLEMENTS, type SettlementDefinition, type VillagerDefinition } from "./settlements.js";
-import { LEVEL_SCALE, MAX_PROFICIENCY, trainingCeiling, XP_PER_LEVEL } from "./skills.js";
 
 export type QuestObjective =
   | { kind: "kill"; creature: EnemyKind; count: number; label: string }
@@ -39,8 +41,13 @@ export type QuestObjective =
 
 export interface QuestRewards {
   gold: number;
-  /** XP the player puts into a skill of their choosing, at turn-in. */
-  xp: number;
+  /**
+   * XP, as a share of a whole level at the quest's own level: 0.5 pays half
+   * of what it takes to get from that level to the next. A share rather than
+   * a number so re-tuning the curve (`levels.ts`) cannot leave every quest
+   * paying too much or nothing.
+   */
+  xpShare: number;
   /** How many items to choose between, and how good they are. */
   choices: number;
   rarity: Rarity;
@@ -52,7 +59,8 @@ export interface QuestDefinition {
   /** Villager ids (see `VillagerDefinition.id`). */
   giver: string;
   turnIn: string;
-  /** Creature level it is pitched at: sets reward item level and XP cap. */
+  /** Level it is pitched at: when it is offered, its reward items' level,
+   *  and what its XP is a share of. */
   level: number;
   /** Quests that must be done first. */
   requires: string[];
@@ -81,10 +89,16 @@ export const TALK_RANGE = 5;
 /** More quests under way than this and you should finish some first. */
 export const MAX_ACTIVE_QUESTS = 12;
 
+/** A quest is offered to anyone within this many levels below it. Any
+ *  further and the villager can tell you are not ready. */
+export const QUEST_LEVEL_LEAD = 3;
+
 // --- the quests ---------------------------------------------------------------
 
-const DASO_LEVEL = 4;
-const FANSHONA_LEVEL = 8;
+/** Daso is where everyone starts, in the Westwood (levels 1-5). */
+const DASO_LEVEL = 3;
+/** Fanshona sits in the Brightwater, at the far end of Terra from Daso. */
+const FANSHONA_LEVEL = 23;
 
 export const QUESTS: Record<string, QuestDefinition> = {
   // --- Daso -------------------------------------------------------------------------
@@ -97,7 +111,7 @@ export const QUESTS: Record<string, QuestDefinition> = {
     progress: "Still hearing howling. Not five yet, then.",
     complete: "Five. I heard every one of them go quiet. Sit down — the first one's on the house.",
     objectives: [{ kind: "kill", creature: "wolf", count: 5, label: "Greywood Wolves killed" }],
-    rewards: { gold: 12, xp: 150, choices: 2, rarity: "common" },
+    rewards: { gold: 12, xpShare: 0.5, choices: 2, rarity: "common" },
   },
   "osk-webs": {
     id: "osk-webs", title: "Webs in the Timber", giver: "osk", turnIn: "osk", level: DASO_LEVEL,
@@ -108,7 +122,7 @@ export const QUESTS: Record<string, QuestDefinition> = {
     progress: "Found another nest this morning. Keep at it.",
     complete: "Good. I'll burn the worst of the stack, but the rest'll season. You've saved me a year.",
     objectives: [{ kind: "kill", creature: "spider", count: 6, label: "Void Spiders killed" }],
-    rewards: { gold: 12, xp: 150, choices: 2, rarity: "common" },
+    rewards: { gold: 12, xpShare: 0.5, choices: 2, rarity: "common" },
   },
   "wen-fangs": {
     id: "wen-fangs", title: "Teeth for the Saw", giver: "wen", turnIn: "wen", level: DASO_LEVEL,
@@ -119,7 +133,7 @@ export const QUESTS: Record<string, QuestDefinition> = {
     progress: "Those are chipped. Good ones, I said.",
     complete: "Now that's a set. Hear that? That's a blade that'll go through ash like it's butter.",
     objectives: [{ kind: "collect", from: "wolf", count: 4, chance: 0.5, label: "Good wolf fangs" }],
-    rewards: { gold: 15, xp: 200, choices: 3, rarity: "uncommon" },
+    rewards: { gold: 15, xpShare: 0.6, choices: 3, rarity: "uncommon" },
   },
   "ilda-westroad": {
     id: "ilda-westroad", title: "The Empty Cart", giver: "ilda", turnIn: "ilda", level: DASO_LEVEL,
@@ -130,10 +144,10 @@ export const QUESTS: Record<string, QuestDefinition> = {
     progress: "Well? The stone's east of here, on the road. You can't miss it.",
     complete: "Nothing at all? No blood, no cart-tracks off the road? ...Somehow that's worse. Thank you for looking.",
     objectives: [{ kind: "visit", x: -700, z: -62, radius: 14, label: "Reach the Westroad Stone" }],
-    rewards: { gold: 10, xp: 150, choices: 2, rarity: "common" },
+    rewards: { gold: 10, xpShare: 0.4, choices: 2, rarity: "common" },
   },
   "ilda-haul": {
-    id: "ilda-haul", title: "The Long Haul", giver: "ilda", turnIn: "ysolde", level: DASO_LEVEL + 2,
+    id: "ilda-haul", title: "The Long Haul", giver: "ilda", turnIn: "ysolde", level: 18,
     requires: ["ilda-westroad"],
     summary: "Carry Daso's tally to Ysolde at the Weighhouse in Fanshona, far to the north-east.",
     offer: "I can't spare a driver now, not after this. Ysolde at the Weighhouse in Fanshona owes Daso for "
@@ -142,7 +156,7 @@ export const QUESTS: Record<string, QuestDefinition> = {
     complete: "Daso's tally. Of course they sent it with a stranger. Tell Ilda it's settled — and stay a while. "
       + "Fanshona could use someone who walks that far for other people.",
     objectives: [],
-    rewards: { gold: 30, xp: 300, choices: 3, rarity: "uncommon" },
+    rewards: { gold: 30, xpShare: 0.8, choices: 3, rarity: "uncommon" },
   },
 
   // --- Fanshona -------------------------------------------------------------------
@@ -155,7 +169,7 @@ export const QUESTS: Record<string, QuestDefinition> = {
     progress: "Lost another one last night. Hear that gurgling? That's them laughing.",
     complete: "Quiet on the water tonight. That's a sound I'd forgotten.",
     objectives: [{ kind: "kill", creature: "wretch", count: 6, label: "Fen Wretches killed" }],
-    rewards: { gold: 20, xp: 250, choices: 2, rarity: "uncommon" },
+    rewards: { gold: 20, xpShare: 0.5, choices: 2, rarity: "uncommon" },
   },
   "pell-hides": {
     id: "pell-hides", title: "Thornback Hide", giver: "pell", turnIn: "pell", level: FANSHONA_LEVEL,
@@ -166,7 +180,7 @@ export const QUESTS: Record<string, QuestDefinition> = {
     progress: "That one's more hole than hide. Four good ones.",
     complete: "Thick as a door and twice as stubborn. The Brightwater won't get through these.",
     objectives: [{ kind: "collect", from: "boar", count: 4, chance: 0.5, label: "Usable Thornback hides" }],
-    rewards: { gold: 20, xp: 250, choices: 3, rarity: "uncommon" },
+    rewards: { gold: 20, xpShare: 0.5, choices: 3, rarity: "uncommon" },
   },
   "maera-stone": {
     id: "maera-stone", title: "The Brightwater Stone", giver: "maera", turnIn: "maera", level: FANSHONA_LEVEL,
@@ -177,10 +191,10 @@ export const QUESTS: Record<string, QuestDefinition> = {
     progress: "The stone's east along the shore. Mind the shallows.",
     complete: "Something in the water, watching. That's what the fishers say too. I'd hoped you'd tell me they were wrong.",
     objectives: [{ kind: "visit", x: 2450, z: 2300, radius: 14, label: "Reach the Brightwater Stone" }],
-    rewards: { gold: 15, xp: 200, choices: 2, rarity: "common" },
+    rewards: { gold: 15, xpShare: 0.4, choices: 2, rarity: "common" },
   },
   "caddo-silt": {
-    id: "caddo-silt", title: "What Waits in the Shallows", giver: "caddo", turnIn: "caddo", level: 13,
+    id: "caddo-silt", title: "What Waits in the Shallows", giver: "caddo", turnIn: "caddo", level: 29,
     requires: ["tobin-wretches", "maera-stone"],
     summary: "Slay Mother Silt, who waits in the Brightwater shallows north-east of Fanshona.",
     offer: "Came through the Gate the day it opened, and she was in the lake then too. Mother Silt. "
@@ -190,7 +204,7 @@ export const QUESTS: Record<string, QuestDefinition> = {
     complete: "Fifty years I've watched that water. It looks different already. Take this — you've earned more, "
       + "but it's what an old man has.",
     objectives: [{ kind: "slay", elite: "silt", label: "Mother Silt slain" }],
-    rewards: { gold: 60, xp: 500, choices: 3, rarity: "rare" },
+    rewards: { gold: 60, xpShare: 1, choices: 3, rarity: "rare" },
   },
 };
 
@@ -212,7 +226,7 @@ export function questReady(quest: QuestDefinition, progress: readonly number[] |
 }
 
 /** What a villager has for this player right now. */
-export function questsAt(npc: string, log: QuestLog): {
+export function questsAt(npc: string, log: QuestLog, level: number): {
   offers: QuestDefinition[];
   ready: QuestDefinition[];
   underway: QuestDefinition[];
@@ -225,24 +239,30 @@ export function questsAt(npc: string, log: QuestLog): {
     if (progress) {
       if (quest.turnIn === npc && questReady(quest, progress)) ready.push(quest);
       else if (quest.giver === npc || quest.turnIn === npc) underway.push(quest);
-    } else if (quest.giver === npc && canTake(quest, log)) {
+    } else if (quest.giver === npc && canTake(quest, log, level)) {
       offers.push(quest);
     }
   }
   return { offers, ready, underway };
 }
 
-export function canTake(quest: QuestDefinition, log: QuestLog): boolean {
+/** The lowest level a quest is offered at. */
+export function questMinLevel(quest: QuestDefinition): number {
+  return Math.max(1, quest.level - QUEST_LEVEL_LEAD);
+}
+
+export function canTake(quest: QuestDefinition, log: QuestLog, level: number): boolean {
   return !log.done.includes(quest.id)
     && log.active[quest.id] === undefined
+    && level >= questMinLevel(quest)
     && quest.requires.every((id) => log.done.includes(id))
     && Object.keys(log.active).length < MAX_ACTIVE_QUESTS;
 }
 
 /** The mark over a villager's head: something to hand in beats something to
  *  take, which beats something under way. */
-export function questMarker(npc: string, log: QuestLog): "?" | "!" | "…" | "" {
-  const here = questsAt(npc, log);
+export function questMarker(npc: string, log: QuestLog, level: number): "?" | "!" | "…" | "" {
+  const here = questsAt(npc, log, level);
   if (here.ready.length > 0) return "?";
   if (here.offers.length > 0) return "!";
   if (here.underway.length > 0) return "…";
@@ -256,12 +276,14 @@ export function questMarker(npc: string, log: QuestLog): "?" | "!" | "…" | "" 
  * only, like everything else that must match across the wire; one of each kind
  * of piece where it can, so a choice is a real choice.
  */
-export function questRewardItems(quest: QuestDefinition, characterId: string): ItemKey[] {
+export function questRewardItems(quest: QuestDefinition, characterId: string, classId: ClassId): ItemKey[] {
   let h = 0x811c9dc5;
   for (const text of [characterId, quest.id]) {
     for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
   }
-  const pool = basesFor(quest.rewards.rarity).filter((base) => base.name === undefined);
+  // Only what this character's class can use: a reward you cannot wear is
+  // no choice at all.
+  const pool = basesFor(quest.rewards.rarity, classId).filter((base) => base.name === undefined);
   const items: ItemKey[] = [];
   const usedGear = new Set<string>();
   for (let n = 0; n < quest.rewards.choices && pool.length > 0; n++) {
@@ -275,20 +297,21 @@ export function questRewardItems(quest: QuestDefinition, characterId: string): I
       level: Math.max(1, quest.level * LEVEL_SCALE),
       rarity: quest.rewards.rarity,
       seed: hash2(h, n, 0x51ed),
+      classId,
     }));
   }
   return items;
 }
 
 /**
- * A skill after a quest's XP is put into it: the XP as a fraction of a level
- * each 100, capped at what the quest's level could teach in the field — a
- * reward should speed you up, not skip the world. Never lowers a skill.
+ * What handing a quest in pays a character of `level`: its share of a level
+ * at the quest's own level, scaled the way a kill of that level would be. A
+ * Daso errand done at level 20 is grey, and pays nothing — it was never meant
+ * to be the way to level 20.
  */
-export function questXp(current: number, quest: QuestDefinition): number {
-  const gained = current + quest.rewards.xp / XP_PER_LEVEL;
-  const cap = Math.max(current, Math.min(MAX_PROFICIENCY, trainingCeiling(quest.level)));
-  return Math.min(gained, cap);
+export function questXp(quest: QuestDefinition, level: number): number {
+  if (level >= MAX_LEVEL) return 0;
+  return Math.round(xpToNext(quest.level) * quest.rewards.xpShare * levelXpScale(quest.level, level));
 }
 
 /** Where a villager is, by id. */

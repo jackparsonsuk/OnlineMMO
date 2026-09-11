@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+  DEFAULT_CLASS,
   getOstra,
   PLAYER_MAX_HEALTH,
   STARTING_OSTRA,
@@ -53,13 +54,15 @@ export function createCharacter(
     accountId,
     name: sanitiseName(requestedName, `Traveller ${index + 1}`),
     colour: PALETTE[index % PALETTE.length]!,
+    classId: DEFAULT_CLASS,
     ostraId: STARTING_OSTRA,
     x: spawn.x,
     y: 0,
     z: spawn.z,
     yaw: 0,
     health: PLAYER_MAX_HEALTH,
-    skills: {},
+    level: 1,
+    xp: 0,
     quests: { active: {}, done: [] },
     gold: 0,
     inventory: [],

@@ -5,7 +5,11 @@
  * step* — not how many OS key-repeat events happened to fire in between.
  */
 
-type Action = "forward" | "back" | "left" | "right" | "spell1" | "spell2" | "spell3" | "sprint";
+type Action = "forward" | "back" | "left" | "right" | "sprint"
+  | "spell1" | "spell2" | "spell3" | "spell4" | "spell5" | "spell6";
+
+/** How many slots the ability bar has keys for. */
+export const ABILITY_KEYS = 6;
 
 const BINDINGS: Record<string, Action> = {
   KeyW: "forward", ArrowUp: "forward",
@@ -14,11 +18,14 @@ const BINDINGS: Record<string, Action> = {
   KeyD: "right", ArrowRight: "right",
   // Space rather than a mouse button: left-drag already orbits the camera,
   // and a click-vs-drag distinction is a bad way to start a fight. Space
-  // doubles as the Aequum 0 spell so the free option is always under a
-  // thumb, with 1/2/3 for the bar.
+  // doubles as the first slot, Strike, so the free option is always under a
+  // thumb, with 1-6 for the bar.
   Space: "spell1", Digit1: "spell1",
   Digit2: "spell2",
   Digit3: "spell3",
+  Digit4: "spell4",
+  Digit5: "spell5",
+  Digit6: "spell6",
   // Out of combat only — the server decides, the client predicts the same.
   ShiftLeft: "sprint", ShiftRight: "sprint",
 };
@@ -70,17 +77,17 @@ export class KeyboardInput {
   }
 
   /**
-   * Which spell slot is held, 1-based; 0 for none. Held rather than
-   * edge-triggered — the server gates each spell on its own cooldown and
-   * mana, so holding a key auto-repeats and spamming it gains nothing.
+   * Which ability slot is held, 1-based; 0 for none. Held rather than
+   * edge-triggered — the server gates each ability on its own cooldown and
+   * cost, so holding a key auto-repeats and spamming it gains nothing.
    *
    * A higher slot wins when several are held: reaching for Sunder while
    * still leaning on Space should cast Sunder.
    */
   castSlot(): number {
-    if (this.held.has("spell3")) return 3;
-    if (this.held.has("spell2")) return 2;
-    if (this.held.has("spell1")) return 1;
+    for (let slot = ABILITY_KEYS; slot >= 1; slot--) {
+      if (this.held.has(`spell${slot}` as Action)) return slot;
+    }
     return 0;
   }
 

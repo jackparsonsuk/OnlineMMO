@@ -1,3 +1,4 @@
+import { CLASSES, getOstra, isClassId } from "@mmo/shared";
 import { AccountClient, ApiError, type CharacterSummary } from "./account.js";
 
 /**
@@ -114,9 +115,11 @@ function characterStep(root: HTMLElement, account: AccountClient): Promise<Chara
       for (const character of characters) {
         const entry = document.createElement("button");
         entry.className = "roster-entry";
+        const what = isClassId(character.classId) ? CLASSES[character.classId].name : "";
         entry.innerHTML =
           `<span class="who">${escapeHtml(character.name)}</span>` +
-          `<span class="where">${character.ostraId}</span>`;
+          `<span class="where">${character.level !== undefined ? `Level ${character.level} ${what} · ` : ""}` +
+          `${escapeHtml(getOstra(character.ostraId).name)}</span>`;
         entry.onclick = () => resolve(character);
         list.appendChild(entry);
       }

@@ -2,20 +2,21 @@ import { Matrix, Vector3, Viewport } from "@babylonjs/core/Maths/math.js";
 import type { Scene } from "@babylonjs/core/scene.js";
 import {
   armourReduction,
+  canWear,
   characterStats,
+  classCanUse,
+  CLASSES,
   critChanceFor,
+  DEFAULT_CLASS,
   describeItem,
   EQUIP_SLOTS,
+  FAMILY_NAMES,
+  FERVOUR_DAMAGE_BONUS,
   GEAR_NAMES,
-  GEAR_SKILL_IDS,
-  GEAR_SKILLS,
   INVENTORY_SIZE,
-  itemEffectiveness,
   leechFraction,
-  LEVEL_SCALE,
-  MAX_PROFICIENCY,
   maxHealthFor,
-  maxManaFor,
+  maxResourceFor,
   percent,
   preferredSlot,
   RARITY,
@@ -23,20 +24,19 @@ import {
   recoveryMultiplier,
   SLOT_NAMES,
   slotsFor,
-  SPELL_IDS,
   SPELLS,
   STAT_ORDER,
   STATS,
   wear,
+  type ClassId,
   type EquipSlot,
   type Equipment,
-  type GearSkill,
   type GearSlot,
   type Item,
+  type ItemFamily,
   type ItemKey,
-  type Proficiency,
-  type SkillId,
   type StatTotals,
+  type Wearer,
 } from "@mmo/shared";
 import type { Rig } from "./rigs.js";
 
@@ -56,7 +56,8 @@ import type { Rig } from "./rigs.js";
  */
 
 export interface CharacterProfile {
-  skills: Proficiency;
+  classId: ClassId;
+  level: number;
   inventory: ItemKey[];
   equipment: Equipment;
 }
@@ -136,8 +137,8 @@ const GLYPHS: Record<string, string> = {
   soul: "M12 3c3 4 6 6 6 10.5a6 6 0 0 1-12 0c0-3 2-4.5 3-6.5 0 2 1 3 2 3.2C11 7 11.5 5 12 3z",
 };
 
-function glyphFor(gear: GearSlot, skill: GearSkill | undefined): string {
-  if ((gear === "weapon" || gear === "offhand") && skill && GLYPHS[skill]) return GLYPHS[skill]!;
+function glyphFor(gear: GearSlot, family: ItemFamily | undefined): string {
+  if ((gear === "weapon" || gear === "offhand") && family && GLYPHS[family]) return GLYPHS[family]!;
   return GLYPHS[gear] ?? GLYPHS.sigil!;
 }
 
@@ -164,13 +165,6 @@ function easeInCubic(t: number): number {
   return t * t * t;
 }
 
-/** "Heavy Armour", "Swords", or the spell's own name. */
-function skillName(skill: SkillId): string {
-  return (GEAR_SKILLS as Record<string, { name: string }>)[skill]?.name
-    ?? SPELLS[skill as keyof typeof SPELLS]?.name
-    ?? skill;
-}
-
 interface SlotView {
   placement: SlotPlacement;
   el: HTMLElement;
@@ -194,7 +188,7 @@ export class CharacterScreen {
   private readonly panel: HTMLElement;
   private readonly packGrid: HTMLElement;
   private readonly packCount: HTMLElement;
-  private readonly skillsList: HTMLElement;
+  private readonly abilityList: HTMLElement;
   private readonly heading: HTMLElement;
   private readonly summary: HTMLElement;
   private readonly tooltip: HTMLElement;
@@ -202,7 +196,7 @@ export class CharacterScreen {
   private readonly tabs: HTMLElement[];
   private readonly slotViews = new Map<EquipSlot, SlotView>();
 
-  private profile: CharacterProfile = { skills: {}, inventory: [], equipment: {} };
+  private profile: CharacterProfile = { classId: DEFAULT_CLASS, level: 1, inventory: [], equipment: {} };
   private name = "";
   private open = false;
   private openedAt = 0;
@@ -229,14 +223,14 @@ export class CharacterScreen {
         <div class="char-summary"></div>
         <header>
           <button type="button" class="char-tab active" data-tab="pack">Pack</button>
-          <button type="button" class="char-tab" data-tab="skills">Skills</button>
+          <button type="button" class="char-tab" data-tab="abilities">Abilities</button>
           <button type="button" class="char-close" title="Close (I or Esc)">×</button>
         </header>
         <section class="char-pack" data-page="pack">
           <div class="pack-grid"></div>
           <footer><span class="pack-count"></span><span class="pack-hint">Click to wear · drag onto a slot · right-click for more</span></footer>
         </section>
-        <section class="char-skills" data-page="skills" hidden></section>
+        <section class="char-abilities" data-page="abilities" hidden></section>
       </aside>
       <div class="char-tooltip" hidden></div>
       <div class="char-menu" hidden></div>
@@ -246,7 +240,7 @@ export class CharacterScreen {
     this.panel = this.root.querySelector(".char-panel") as HTMLElement;
     this.packGrid = this.root.querySelector(".pack-grid") as HTMLElement;
     this.packCount = this.root.querySelector(".pack-count") as HTMLElement;
-    this.skillsList = this.root.querySelector(".char-skills") as HTMLElement;
+    this.abilityList = this.root.querySelector(".char-abilities") as HTMLElement;
     this.heading = this.root.querySelector(".char-heading") as HTMLElement;
     this.summary = this.root.querySelector(".char-summary") as HTMLElement;
     this.tooltip = this.root.querySelector(".char-tooltip") as HTMLElement;
@@ -336,14 +330,19 @@ export class CharacterScreen {
     this.renderAll();
   }
 
-  setSkills(skills: Proficiency): void {
-    this.profile = { ...this.profile, skills };
+  setLevel(level: number): void {
+    if (level === this.profile.level) return;
+    this.profile = { ...this.profile, level };
     this.renderAll();
   }
 
-  /** Total power of what is worn, for this character. */
+  /** Total power of what is worn. */
   get power(): number {
-    return characterStats(this.profile.equipment, this.profile.skills).power;
+    return characterStats(this.profile.equipment, this.wearer).power;
+  }
+
+  private get wearer(): Wearer {
+    return { classId: this.profile.classId, level: this.profile.level };
   }
 
   /**
@@ -503,7 +502,16 @@ export class CharacterScreen {
   }
 
   private buildPack(): void {
-    for (let i = 0; i < INVENTORY_SIZE; i++) {
+    this.ensureCells(INVENTORY_SIZE);
+  }
+
+  /**
+   * At least `count` cells. A bag can be over its size — gear the rules
+   * stopped you wearing goes into it rather than vanishing — and every item
+   * in it must be reachable, or the overflow could never be worn or thrown out.
+   */
+  private ensureCells(count: number): void {
+    for (let i = this.packGrid.children.length; i < count; i++) {
       const cell = document.createElement("div");
       cell.className = "pack-cell empty";
       cell.dataset["index"] = String(i);
@@ -578,7 +586,7 @@ export class CharacterScreen {
   private renderAll(): void {
     this.renderSlots();
     this.renderPack();
-    this.renderSkills();
+    this.renderAbilities();
     this.renderHeading();
     this.renderSummary();
     // A tooltip open over something that just changed would be describing
@@ -598,13 +606,10 @@ export class CharacterScreen {
       view.el.className = `char-slot ${side}${item ? ` filled ${item.rarity}` : " empty"}`;
       view.el.draggable = item !== undefined;
       view.el.style.setProperty("--rarity", item ? rarityHex(item.rarity) : "");
-      view.glyph.innerHTML = glyphSvg(item ? glyphFor(item.gear, item.skill) : glyphFor(gearOf(slot), undefined));
-      view.level.textContent = item ? String(item.level) : "";
-
-      const effective = item ? itemEffectiveness(item, this.profile.skills) : 1;
-      view.el.classList.toggle("undertrained", effective < 1);
+      view.glyph.innerHTML = glyphSvg(item ? glyphFor(item.gear, item.family) : glyphFor(gearOf(slot), undefined));
+      view.level.textContent = item ? String(item.requiredLevel) : "";
       view.label.innerHTML = item
-        ? `<b>${escapeHtml(item.name)}</b><small>${SLOT_NAMES[slot]}${effective < 1 ? ` · ${Math.round(effective * 100)}%` : ""}</small>`
+        ? `<b>${escapeHtml(item.name)}</b><small>${SLOT_NAMES[slot]}</small>`
         : `<small>${SLOT_NAMES[slot]}</small>`;
 
       view.line.style.stroke = item ? rarityHex(item.rarity) : "";
@@ -613,8 +618,12 @@ export class CharacterScreen {
   }
 
   private renderPack(): void {
+    // Grow for an overfull bag, and shrink back as it empties.
+    const wanted = Math.max(INVENTORY_SIZE, this.profile.inventory.length);
+    this.ensureCells(wanted);
+    while (this.packGrid.children.length > wanted) this.packGrid.lastElementChild?.remove();
     const cells = this.packGrid.children;
-    for (let i = 0; i < INVENTORY_SIZE; i++) {
+    for (let i = 0; i < cells.length; i++) {
       const cell = cells[i] as HTMLElement;
       const key = this.profile.inventory[i];
       const item = key !== undefined ? describeItem(key) : undefined;
@@ -625,11 +634,13 @@ export class CharacterScreen {
         cell.style.removeProperty("--rarity");
         continue;
       }
-      const effective = itemEffectiveness(item, this.profile.skills);
-      cell.className = `pack-cell ${item.rarity}${this.fresh.has(item.key) ? " fresh" : ""}${effective < 1 ? " undertrained" : ""}`;
+      // Too high to wear yet, or another class's: kept, dimmed, with its level
+      // in red — something to grow into, or to sell.
+      const tooHigh = !canWear(item, this.wearer);
+      cell.className = `pack-cell ${item.rarity}${this.fresh.has(item.key) ? " fresh" : ""}${tooHigh ? " too-high" : ""}`;
       cell.draggable = true;
       cell.style.setProperty("--rarity", rarityHex(item.rarity));
-      cell.innerHTML = `${glyphSvg(glyphFor(item.gear, item.skill))}<span class="lvl">${item.level}</span>`;
+      cell.innerHTML = `${glyphSvg(glyphFor(item.gear, item.family))}<span class="lvl">${item.requiredLevel}</span>`;
     }
     this.packCount.textContent = `${this.profile.inventory.length} / ${INVENTORY_SIZE}`;
     this.packCount.classList.toggle("full", this.profile.inventory.length >= INVENTORY_SIZE);
@@ -637,68 +648,64 @@ export class CharacterScreen {
 
   private renderHeading(): void {
     const power = this.power;
+    const { level, classId } = this.profile;
     this.heading.innerHTML =
       `<div class="char-name">${escapeHtml(this.name)}</div>` +
+      `<div class="char-class">Level ${level} ${escapeHtml(CLASSES[classId].name)}</div>` +
       `<div class="char-power"><span>Power</span> ${power}</div>`;
   }
 
-  /** The numbers the gear adds up to, and what they are actually worth. */
+  /** What the character adds up to — class and level, and gear — and what
+   *  it is actually worth. */
   private renderSummary(): void {
-    const { totals, heavyPieces } = characterStats(this.profile.equipment, this.profile.skills);
-    const reference = this.referenceLevel();
-    const rows: Array<[string, string, string?]> = [
+    const { totals, heavyPieces } = characterStats(this.profile.equipment, this.wearer);
+    const level = this.profile.level;
+    const resource = CLASSES[this.profile.classId].resource;
+    // Only the attributes this class gets anything from: its gear rolls
+    // nothing else, so a row of zeros would only ask a question.
+    const uses = CLASSES[this.profile.classId].stats;
+    const rows: Array<[string, string, string?] | false> = [
       ["Health", String(maxHealthFor(totals))],
-      ["Mana", String(maxManaFor(totals))],
+      resource === "fervour"
+        ? ["Fervour", String(maxResourceFor(resource, totals)), `Up to +${Math.round(FERVOUR_DAMAGE_BONUS * 100)}% damage when full`]
+        : ["Mana", String(maxResourceFor(resource, totals))],
       ["Might", String(totals.might), "Adds to weapon blows"],
-      ["Focus", String(totals.focus), "Adds to spells that cost mana"],
-      ["Vigour", String(totals.vigour)],
-      ["Spirit", String(totals.spirit)],
+      uses.includes("focus") && ["Focus", String(totals.focus), "Adds to spells that cost mana"],
+      ["Vigour", String(totals.vigour), "Health, three per point"],
+      uses.includes("spirit") && ["Spirit", String(totals.spirit), "Mana, and how fast it returns"],
       ["Critical", `${percent(critChanceFor(totals))}%`],
-      ["Armour", `${totals.armour}`, `Stops ${percent(armourReduction(totals.armour, reference))}% of a level-${reference} blow`],
+      ["Armour", `${totals.armour}`, `Stops ${percent(armourReduction(totals.armour, level))}% of a blow from a level-${level} creature`],
       ["Recovery", `+${percent(recoveryMultiplier(totals.recovery) - 1)}%`],
       ["Leech", `${percent(leechFraction(totals.leech))}%`],
     ];
     this.summary.innerHTML =
-      rows.map(([label, value, note]) =>
+      rows.filter((row): row is [string, string, string?] => row !== false).map(([label, value, note]) =>
         `<div class="row"${note ? ` title="${escapeHtml(note)}"` : ""}><span>${label}</span><b>${value}</b></div>`).join("") +
-      (heavyPieces > 0 ? `<div class="warn">${heavyPieces} heavy · mana −${heavyPieces * 5}%</div>` : "");
+      (heavyPieces > 0 && resource === "mana" ? `<div class="warn">${heavyPieces} heavy · mana −${heavyPieces * 5}%</div>` : "");
   }
 
-  /** What armour is measured against on the sheet: a creature of about the
-   *  level your gear is from. */
-  private referenceLevel(): number {
-    let sum = 0;
-    let count = 0;
-    for (const key of Object.values(this.profile.equipment)) {
-      const item = key !== undefined ? describeItem(key) : undefined;
-      if (!item) continue;
-      sum += item.level;
-      count++;
-    }
-    return count === 0 ? 1 : Math.max(1, Math.round(sum / count / LEVEL_SCALE));
-  }
-
-  private renderSkills(): void {
-    const groups: Array<{ title: string; ids: SkillId[] }> = [
-      { title: "Spells", ids: SPELL_IDS },
-      { title: "Armour", ids: GEAR_SKILL_IDS.filter((id) => GEAR_SKILLS[id].group === "armour") },
-      { title: "Weapons", ids: GEAR_SKILL_IDS.filter((id) => GEAR_SKILLS[id].group === "weapons") },
-      { title: "Trinkets", ids: GEAR_SKILL_IDS.filter((id) => GEAR_SKILLS[id].group === "trinkets") },
-    ];
-    this.skillsList.innerHTML = groups.map((group) =>
-      `<h3>${group.title}</h3>` +
-      group.ids.map((id) => {
-        const value = this.profile.skills[id] ?? 0;
-        const how = (GEAR_SKILLS as Record<string, { trainedBy: string }>)[id]?.trainedBy
-          ?? "Landing it on something.";
-        return `<div class="skill" title="${escapeHtml(how)}">` +
-          `<span class="name">${escapeHtml(skillName(id))}</span>` +
-          `<span class="value">${Math.floor(value)}<small> / ${MAX_PROFICIENCY}</small></span>` +
-          `<i style="--fill:${(value / MAX_PROFICIENCY * 100).toFixed(2)}%"></i>` +
-          `</div>`;
-      }).join("")).join("") +
-      `<p class="skills-note">Skills rise only through use, and only as far as what you are fighting can teach. ` +
-      `An item wants its level in its skill; below that it gives less.</p>`;
+  /**
+   * The spellbook: every ability the class has, in bar order, and when each
+   * is learned. The road ahead as much as what you have.
+   */
+  private renderAbilities(): void {
+    const { classId, level } = this.profile;
+    const definition = CLASSES[classId];
+    const resource = definition.resource === "fervour" ? "Fervour" : "mana";
+    this.abilityList.innerHTML =
+      `<p class="abilities-note">${escapeHtml(definition.description)}</p>` +
+      definition.abilities.map(({ spell: id, level: at }, index) => {
+        const spell = SPELLS[id];
+        const known = level >= at;
+        const cost = spell.cost > 0 ? `${spell.cost} ${resource}` : "Free";
+        const cooldown = (spell.castMs > 0 ? ` · ${spell.castMs / 1000}s, standing` : " · instant")
+          + (spell.cooldownMs >= 1000 ? ` · ${spell.cooldownMs / 1000}s cooldown` : "");
+        return `<div class="ability-row${known ? "" : " locked"}">` +
+          `<span class="key">${index + 1}</span>` +
+          `<div><b>${escapeHtml(spell.name)}</b>` +
+          `<small>${known ? `${cost}${cooldown}` : `Learned at level ${at}`}</small>` +
+          `<p>${escapeHtml(spell.description)}</p></div></div>`;
+      }).join("");
   }
 
   private showTab(tab: string): void {
@@ -842,38 +849,34 @@ export class CharacterScreen {
   }
 
   /**
-   * The tooltip: what it is, what it gives YOU (after your training), what it
-   * asks of you, and what wearing it would change. An item you cannot compare
-   * is an item you cannot choose between.
+   * The tooltip: what it is, what it gives, what level it asks, and what
+   * wearing it would change. An item you cannot compare is an item you
+   * cannot choose between.
    */
   private tooltipHtml(item: Item, from: "pack" | EquipSlot): string {
-    const skills = this.profile.skills;
-    const effective = itemEffectiveness(item, skills);
     const tier = RARITY[item.rarity];
-    const kind = item.skill ? GEAR_SKILLS[item.skill].name : "";
+    const kind = item.family ? FAMILY_NAMES[item.family] : "";
     const where = GEAR_NAMES[item.gear] + (item.twoHanded ? ", two-handed" : "");
 
     const lines: string[] = [];
     lines.push(`<div class="tt-name">${escapeHtml(item.name)}</div>`);
     lines.push(`<div class="tt-kind">${tier.name} ${escapeHtml(kind)} · ${where}</div>`);
-    lines.push(`<div class="tt-level"><span>Item level ${item.level}</span><span>Power ${Math.round(item.power * effective)}${effective < 1 ? `<small> / ${item.power}</small>` : ""}</span></div>`);
+    lines.push(`<div class="tt-level"><span>Item level ${item.level}</span><span>Power ${item.power}</span></div>`);
 
     const stats = STAT_ORDER.filter((stat) => item.stats[stat]);
     if (stats.length > 0) {
       lines.push(`<div class="tt-stats">${stats.map((stat) => {
-        const full = item.stats[stat]!;
-        const got = Math.round(full * effective);
         const secondary = stat === "crit" || stat === "recovery" || stat === "leech";
-        return `<div class="${secondary ? "secondary" : ""}">+${got} ${STATS[stat].name}` +
-          `${got !== full ? `<small> (${full})</small>` : ""}</div>`;
+        return `<div class="${secondary ? "secondary" : ""}">+${item.stats[stat]} ${STATS[stat].name}</div>`;
       }).join("")}</div>`);
     }
 
-    if (item.skill) {
-      const have = Math.floor(skills[item.skill] ?? 0);
-      const short = have < item.level;
-      lines.push(`<div class="tt-req${short ? " short" : ""}">Requires ${GEAR_SKILLS[item.skill].name} ${item.level}` +
-        (short ? ` — you have ${have}, so ${Math.round(effective * 100)}% effective` : "") + `</div>`);
+    const short = !canWear(item, this.wearer);
+    const low = this.profile.level < item.requiredLevel;
+    lines.push(`<div class="tt-req${low ? " short" : ""}">Requires level ${item.requiredLevel}` +
+      (low ? ` — you are ${this.profile.level}` : "") + `</div>`);
+    if (!classCanUse(this.profile.classId, item)) {
+      lines.push(`<div class="tt-req short">${escapeHtml(CLASSES[this.profile.classId].name)}s cannot use this</div>`);
     }
 
     lines.push(`<div class="tt-lore">“${escapeHtml(item.lore)}”</div>`);
@@ -883,7 +886,7 @@ export class CharacterScreen {
 
     if (from === "pack") {
       lines.push(this.comparisonHtml(item));
-      lines.push(`<div class="tt-hint">Click to wear · right-click for more</div>`);
+      lines.push(`<div class="tt-hint">${short ? "Cannot wear" : "Click to wear"} · right-click for more</div>`);
     } else {
       lines.push(`<div class="tt-hint">Click to take off</div>`);
     }
@@ -893,13 +896,13 @@ export class CharacterScreen {
   /** What wearing this would change, computed through the same `wear` and
    *  `characterStats` the server uses — including anything it would displace. */
   private comparisonHtml(item: Item): string {
-    const { equipment, skills } = this.profile;
+    const { equipment } = this.profile;
     const slot = preferredSlot(equipment, item);
     const result = wear(equipment, item, slot);
     if (!result) return "";
 
-    const before = characterStats(equipment, skills);
-    const after = characterStats(result.next, skills);
+    const before = characterStats(equipment, this.wearer);
+    const after = characterStats(result.next, this.wearer);
     const changes: string[] = [];
     const push = (label: string, delta: number) => {
       if (delta === 0) return;
@@ -907,7 +910,6 @@ export class CharacterScreen {
     };
     push("Power", after.power - before.power);
     push("Health", maxHealthFor(after.totals) - maxHealthFor(before.totals));
-    push("Mana", maxManaFor(after.totals) - maxManaFor(before.totals));
     for (const stat of STAT_ORDER) {
       push(STATS[stat].name, (after.totals as StatTotals)[stat] - (before.totals as StatTotals)[stat]);
     }

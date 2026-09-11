@@ -396,18 +396,31 @@ export interface SpawnGroup {
 /**
  * How dangerous one particular creature is, on top of its Ostra's difficulty.
  *
- * There is no XP in this game — proficiency grows by use — so a level here is
- * not a gate, it is a WARNING: it tells you, before you swing, how far out of
- * your depth you are. On an eight-kilometre Terra it rises with distance from
- * the Gate Circle, which is what gives the map a shape: the further you go,
- * the more it costs and the better it pays.
+ * On the same scale as a character's level (`levels.ts`), so the number over
+ * its head is a comparison: a creature your own level is a fair fight, and
+ * pays full XP. On Terra it comes from the region it lives in and how far that
+ * is from Daso, where everyone starts (`levelAt`) — which is what gives the map
+ * a shape: the further you go, the more it costs and the better it pays.
+ *
+ * Health grows by 30% of a level-1 creature's each level and damage by 20%;
+ * a Warrior's per-level Might and Vigour (`classes.ts`) and gear of the same
+ * level are tuned to keep pace, so the fight at 50 feels like the fight at 5.
  */
-export const MAX_ENEMY_LEVEL = 12;
+export const MAX_ENEMY_LEVEL = 100;
+
+/**
+ * Every creature, everywhere, on top of its archetype, Ostra and level. The
+ * first tuning made three creatures of your own level an easy fight; three
+ * should be one you might lose. Folded into the level scales below so nothing
+ * that reads a creature's health or damage can miss it.
+ */
+export const CREATURE_HEALTH_SCALE = 1.8;
+export const CREATURE_DAMAGE_SCALE = 3;
 
 export function levelHealthScale(level: number): number {
-  return 1 + 0.3 * (level - 1);
+  return CREATURE_HEALTH_SCALE * (1 + 0.3 * (level - 1));
 }
 
 export function levelDamageScale(level: number): number {
-  return 1 + 0.2 * (level - 1);
+  return CREATURE_DAMAGE_SCALE * (1 + 0.2 * (level - 1));
 }

@@ -331,8 +331,9 @@ export class Effects {
   }
 
   /**
-   * A Voidbolt in flight. Drawn from the hand to wherever it is going; the
-   * damage was already decided — this is how you see where.
+   * Something in flight: a thrown weapon, by default a bolt of light. Drawn
+   * from the hand to wherever it is going; the damage was already decided —
+   * this is how you see where.
    */
   bolt(
     now: number, from: Vector3, to: Vector3, onArrive: () => void,

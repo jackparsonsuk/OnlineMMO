@@ -154,6 +154,17 @@ kbd {
 
 .nametag .label { display: inline-block; }
 
+/* The level: plain for players, tinted by difficulty for creatures. */
+.nametag .level {
+  display: inline-block;
+  margin-left: 5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #c6d2de;
+}
+
+.nametag.dead .level { color: inherit !important; }
+
 /* Health bar under the name. Sized in the label rather than floating
    separately so the two can never drift apart on screen. */
 .nametag .bar {
@@ -248,9 +259,40 @@ kbd {
    fine because nothing else sets display. */
 #death[hidden] { display: none; }
 
-/* --- mana and the ability bar -------------------------------------------- */
+/* A cast under way: fills as it runs, red and "Interrupted" if you moved. */
+#castbar {
+  position: relative;
+  height: 14px;
+  margin-bottom: 6px;
+  border-radius: 4px;
+  border: 1px solid rgb(240 208 96 / 45%);
+  background: rgb(13 17 23 / 82%);
+  overflow: hidden;
+}
 
-#mana-bar {
+#castbar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #8a6a1c, #f0d060);
+}
+
+#castbar span {
+  position: absolute;
+  inset: 0;
+  font-size: 10.5px;
+  line-height: 14px;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 2px #000;
+}
+
+#castbar.interrupted { border-color: rgb(240 90 74 / 60%); }
+#castbar.interrupted i { background: #8f2f1c; }
+
+/* --- the class's resource, and the ability bar ----------------------------- */
+
+#resource-bar {
   height: 6px;
   margin-top: 4px;
   border-radius: 4px;
@@ -259,7 +301,7 @@ kbd {
   overflow: hidden;
 }
 
-#mana-bar i {
+#resource-bar i {
   display: block;
   height: 100%;
   width: 100%;
@@ -267,7 +309,10 @@ kbd {
   transition: width 140ms ease-out;
 }
 
-#mana-text {
+/* Fervour burns: embers at the bottom, white-hot at the top. */
+#resource-bar[data-kind="fervour"] i { background: linear-gradient(90deg, #8f2f1c, #e06a2c 60%, #ffc46b); }
+
+#resource-text {
   margin-top: 2px;
   font-size: 11px;
   color: #7f8f9f;
@@ -275,19 +320,27 @@ kbd {
   text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
 }
 
-#abilities {
+/* The ability bar with the XP bar across its top: your kit, and how far you
+   are from the next thing in it. */
+#actionbar {
   position: fixed;
   bottom: 58px;
   right: 12px;
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 5px;
   pointer-events: none;
+}
+
+#abilities {
+  display: flex;
+  gap: 6px;
 }
 
 .ability {
   position: relative;
-  width: 92px;
-  padding: 6px 8px 7px;
+  width: 80px;
+  padding: 6px 7px 7px;
   border-radius: 8px;
   border: 1px solid rgb(230 237 243 / 14%);
   background: rgb(13 17 23 / 78%);
@@ -309,8 +362,9 @@ kbd {
 
 .ability .name {
   display: block;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
+  line-height: 1.2;
   color: #e6edf3;
 }
 
@@ -319,18 +373,6 @@ kbd {
   font-size: 10px;
   color: #8b98a5;
 }
-
-/* The bonus training has actually bought, not a raw number. */
-.ability .prof {
-  position: absolute;
-  top: 6px;
-  right: 8px;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: #6dcf7e;
-}
-
-.ability.maxed .prof { color: #e8c23f; }
 
 /* Sweeps up from the bottom as the cooldown runs. */
 .ability .cool {
@@ -344,9 +386,14 @@ kbd {
   transition: height 60ms linear;
 }
 
-/* Not enough mana: the answer to "why did nothing happen?" */
+/* Can't pay for it yet: the answer to "why did nothing happen?" */
 .ability.unaffordable { opacity: 0.42; }
 .ability.unaffordable .name { color: #9aa7b4; }
+
+/* Not learned yet: there, so you know it is coming, but plainly not yours. */
+.ability.locked { opacity: 0.32; border-style: dashed; }
+.ability.locked .name { color: #8b98a5; }
+.ability.locked .meta { color: #f0d98a; }
 
 #power {
   position: fixed;
@@ -359,34 +406,6 @@ kbd {
   pointer-events: none;
 }
 
-/* Skill-ups: small, quiet, and gone in a few seconds. */
-#notes {
-  position: fixed;
-  bottom: 60px;
-  right: 12px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  pointer-events: none;
-  z-index: 6;
-}
-
-.note {
-  font-size: 11px;
-  color: #9fd8a8;
-  text-shadow: 0 1px 2px rgb(0 0 0 / 85%);
-  animation: note-rise 3.2s ease-out forwards;
-}
-
-.note::before { content: "▲ "; font-size: 8px; vertical-align: 1px; }
-
-@keyframes note-rise {
-  0% { opacity: 0; transform: translateY(6px); }
-  10% { opacity: 1; transform: none; }
-  75% { opacity: 1; }
-  100% { opacity: 0; transform: translateY(-4px); }
-}
 
 /* --- loot ---------------------------------------------------------------- */
 
@@ -479,6 +498,12 @@ kbd {
   font-size: 24px;
   font-weight: 600;
   letter-spacing: 0.04em;
+}
+
+.char-class {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: #c6d2de;
 }
 
 .char-power {
@@ -580,7 +605,6 @@ kbd {
   text-shadow: 0 1px 2px #000;
 }
 
-.char-slot.undertrained .lvl { color: #ff8f7a; }
 
 .char-slot .label {
   position: absolute;
@@ -680,13 +704,13 @@ kbd {
 
 .char-close:hover { color: #fff; border-color: rgb(230 237 243 / 40%); }
 
-.char-pack, .char-skills {
+.char-pack, .char-abilities {
   flex: 1;
   overflow-y: auto;
   padding: 14px;
 }
 
-.char-pack[hidden], .char-skills[hidden] { display: none; }
+.char-pack[hidden], .char-abilities[hidden] { display: none; }
 
 .pack-grid {
   display: grid;
@@ -739,7 +763,9 @@ kbd {
   text-shadow: 0 1px 2px #000;
 }
 
-.pack-cell.undertrained .lvl { color: #ff8f7a; }
+/* Too high to wear yet: something to grow into. */
+.pack-cell.too-high { opacity: 0.55; }
+.pack-cell.too-high .lvl { color: #ff8f7a; }
 
 /* Picked up since you last looked. */
 .pack-cell.fresh::after {
@@ -777,45 +803,32 @@ kbd {
 .pack-count { color: #9aa7b4; font-variant-numeric: tabular-nums; }
 .pack-count.full { color: #ff8f7a; }
 
-.char-skills h3 {
-  margin: 14px 0 6px;
-  font-size: 10.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #8b98a5;
-}
+.abilities-note { margin: 0 0 12px; font-size: 12px; line-height: 1.5; font-style: italic; color: #9aa7b4; }
 
-.char-skills h3:first-child { margin-top: 0; }
-
-.skill {
+.ability-row {
   display: grid;
-  grid-template-columns: 1fr auto;
-  row-gap: 3px;
-  padding: 5px 0;
+  grid-template-columns: 22px 1fr;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid rgb(230 237 243 / 7%);
   font-size: 12.5px;
 }
 
-.skill .value { font-weight: 600; font-variant-numeric: tabular-nums; }
-.skill .value small { font-weight: 400; color: #5d6873; }
-
-.skill i {
-  grid-column: 1 / -1;
-  height: 3px;
-  border-radius: 2px;
-  background: rgb(230 237 243 / 8%);
-  overflow: hidden;
+.ability-row .key {
+  height: 20px;
+  border-radius: 4px;
+  background: rgb(230 237 243 / 12%);
+  font-size: 11px;
+  line-height: 20px;
+  text-align: center;
+  color: #c6d2de;
 }
 
-.skill i::before {
-  content: "";
-  display: block;
-  width: var(--fill);
-  min-width: 2px;
-  height: 100%;
-  background: linear-gradient(90deg, #6f8fbf, #9fd8ff);
-}
-
-.skills-note { margin: 16px 0 0; font-size: 11px; line-height: 1.5; color: #6b7682; }
+.ability-row b { color: #e6edf3; }
+.ability-row small { margin-left: 8px; font-size: 11px; color: #e8a05c; }
+.ability-row p { margin: 2px 0 0; font-size: 11.5px; color: #8b98a5; }
+.ability-row.locked { opacity: 0.5; }
+.ability-row.locked small { color: #f0d98a; }
 
 /* --- tooltip and menu --- */
 
@@ -911,12 +924,12 @@ kbd {
 .char-menu button.danger:hover { background: rgb(255 123 114 / 12%); }
 
 /* While the screen has the camera, the rest of the HUD steps back. */
-#hud, #hint, #compass, #minimap, #abilities, #power, #target-frame,
+#hud, #hint, #compass, #minimap, #actionbar, #power, #target-frame,
 #nametags, #gate-prompt, #speech, #vitals, #sound-toggle {
   transition: opacity 300ms ease;
 }
 
-body.portrait :is(#hud, #hint, #compass, #minimap, #abilities, #power, #target-frame,
+body.portrait :is(#hud, #hint, #compass, #minimap, #actionbar, #power, #target-frame,
   #nametags, #gate-prompt, #speech, #vitals, #sound-toggle) {
   opacity: 0;
   pointer-events: none;
@@ -1159,6 +1172,7 @@ body.portrait :is(#hud, #hint, #compass, #minimap, #abilities, #power, #target-f
 .floater.taken { color: #ff6b5a; font-size: 19px; }
 .floater.other { color: #c6d2de; font-size: 13px; font-weight: 700; opacity: 0.85; }
 .floater.note { color: #9fd8ff; font-size: 14px; font-weight: 700; letter-spacing: 0.04em; }
+.floater.level { color: #f0d060; font-size: 20px; font-weight: 800; letter-spacing: 0.04em; }
 
 #combat-flag {
   margin-bottom: 4px;
@@ -1470,55 +1484,52 @@ body.portrait :is(#hud, #hint, #compass, #minimap, #abilities, #power, #target-f
 #worldmap.picking .worldmap-hint { color: #ffd79a; }
 
 /* Screenshots without the furniture. */
-body.no-hud :is(#hud, #hint, #compass, #minimap, #abilities, #power, #target-frame,
-  #nametags, #gate-prompt, #speech, #vitals, #sound-toggle, #notes) {
+body.no-hud :is(#hud, #hint, #compass, #minimap, #actionbar, #power, #target-frame,
+  #nametags, #gate-prompt, #speech, #vitals, #sound-toggle) {
   display: none;
 }
 
 /* --- xp and levels ------------------------------------------------------- */
 
-/* Middle of the right edge: every skill you are training, each filling to its next level. */
-#xp-tracker {
-  position: fixed;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 220px;
-  pointer-events: none;
+/* One bar, over the abilities: the whole of your progress. */
+#xp {
+  position: relative;
+  padding: 0 2px;
 }
 
-.xp-row {
-  position: relative;
-  padding: 7px 10px 8px;
-  border-radius: 8px;
+#xp-bar {
+  height: 7px;
+  border-radius: 4px;
   border: 1px solid rgb(232 194 63 / 35%);
   background: rgb(13 17 23 / 82%);
-  font-size: 12px;
-  animation: xp-row-in 220ms ease-out;
-  transition: opacity 400ms ease;
+  overflow: hidden;
 }
 
-.xp-row.leaving { opacity: 0; }
-
-@keyframes xp-row-in {
-  from { opacity: 0; transform: translateX(12px); }
-  to { opacity: 1; transform: none; }
+#xp-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #8a6a1c, #e8c23f 70%, #f7e39a);
+  transition: width 300ms ease-out;
 }
 
-.xp-head { display: flex; justify-content: space-between; margin-bottom: 4px; }
-.xp-name { font-weight: 600; color: #f0d98a; }
-.xp-next { color: #8b98a5; font-variant-numeric: tabular-nums; }
-.xp-bar { height: 6px; border-radius: 3px; background: rgb(230 237 243 / 10%); overflow: hidden; }
-.xp-bar i { display: block; height: 100%; background: linear-gradient(90deg, #b8912a, #f0d98a); transition: width 250ms ease-out; }
+#xp-text {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  font-size: 11px;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 85%);
+}
+
+#xp-text b { font-weight: 600; color: #f0d98a; }
+#xp-text span { color: #9aa7b4; font-variant-numeric: tabular-nums; }
 
 .xp-drop {
   position: absolute;
-  right: 10px;
-  top: -4px;
+  right: 2px;
+  bottom: 22px;
   font-weight: 700;
+  font-size: 13px;
   color: #f0d98a;
   text-shadow: 0 1px 3px #000;
   animation: xp-float 1.4s ease-out forwards;
@@ -1553,8 +1564,8 @@ body.no-hud :is(#hud, #hint, #compass, #minimap, #abilities, #power, #target-fra
 }
 
 .level-up small { font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase; color: #f0d98a; }
-.level-up b { font-size: 30px; color: #fff; }
-.level-up span { font-size: 44px; font-weight: 700; color: #e8c23f; line-height: 1; }
+.level-up span { font-size: 52px; font-weight: 700; color: #e8c23f; line-height: 1.05; }
+.level-up b { margin-top: 4px; font-size: 16px; font-weight: 600; color: #fff; }
 
 @keyframes level-up {
   0% { opacity: 0; transform: scale(0.7); }
@@ -1564,7 +1575,6 @@ body.no-hud :is(#hud, #hint, #compass, #minimap, #abilities, #power, #target-fra
   100% { opacity: 0; transform: translateY(-16px); }
 }
 
-body.portrait #xp-tracker, body.no-hud #xp-tracker { display: none; }
 
 /* --- rare elites ------------------------------------------------------------ */
 
@@ -1644,7 +1654,7 @@ body.portrait #xp-tracker, body.no-hud #xp-tracker { display: none; }
 #quest-tracker li.done { color: #6b7682; text-decoration: line-through; }
 #quest-tracker li.ready { color: #6dcf7e; list-style: "» "; }
 
-#quest-dialog, #quest-log {
+#quest-dialog, #quest-log, #vendor {
   position: fixed;
   top: 50%;
   left: 50%;
@@ -1663,9 +1673,9 @@ body.portrait #xp-tracker, body.no-hud #xp-tracker { display: none; }
   pointer-events: auto;
 }
 
-#quest-dialog[hidden], #quest-log[hidden] { display: none; }
+#quest-dialog[hidden], #quest-log[hidden], #vendor[hidden] { display: none; }
 
-#quest-dialog header, #quest-log header {
+#quest-dialog header, #quest-log header, #vendor header {
   position: sticky;
   top: 0;
   display: flex;
@@ -1677,9 +1687,10 @@ body.portrait #xp-tracker, body.no-hud #xp-tracker { display: none; }
   background: rgb(20 18 14 / 98%);
 }
 
-#quest-dialog header b, #quest-log header b { font-size: 15px; color: #f0d98a; }
+#quest-dialog header b, #quest-log header b, #vendor header b { font-size: 15px; color: #f0d98a; }
 #quest-log header span { font-size: 11px; color: #8b98a5; }
-#quest-dialog header button, #quest-log header button {
+#vendor header .gold { font-size: 12px; font-weight: 600; color: #f0c83c; }
+#quest-dialog header button, #quest-log header button, #vendor header button {
   margin-left: auto; width: 26px; height: 26px; border-radius: 6px;
   border: 1px solid rgb(230 237 243 / 14%); background: none; color: #9aa7b4; font-size: 17px; cursor: pointer;
 }
@@ -1698,18 +1709,15 @@ body.portrait #xp-tracker, body.no-hud #xp-tracker { display: none; }
 .quest-row:hover { border-color: rgb(240 200 60 / 50%); }
 .quest-row i { width: 14px; font-style: normal; font-weight: 800; color: #f0c83c; text-align: center; }
 .quest-row.underway i { color: #9aa7b4; }
+.quest-level { margin-left: auto; padding-left: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+h3 .quest-level { margin-left: 10px; padding-left: 0; }
 
 .quest-objectives { margin: 4px 0 10px; padding-left: 18px; color: #c6d2de; }
 .quest-objectives li.done { color: #6dcf7e; }
 
 .quest-rewards h4 { margin: 12px 0 6px; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #8b98a5; }
 .quest-purse { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; color: #c6d2de; }
-.quest-purse label { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.quest-purse select {
-  padding: 3px 6px; border-radius: 6px; border: 1px solid rgb(230 237 243 / 18%);
-  background: rgb(230 237 243 / 6%); color: #e6edf3; font: inherit; font-size: 12px;
-}
-.quest-purse small { color: #8b98a5; }
+.quest-purse .grey { color: #8b98a5; font-style: italic; }
 
 .quest-items { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; margin-top: 8px; }
 .quest-item {
@@ -1722,6 +1730,7 @@ body.portrait #xp-tracker, body.no-hud #xp-tracker { display: none; }
 .quest-item b { color: var(--rarity); font-size: 12.5px; line-height: 1.3; }
 .quest-item small { font-size: 10.5px; color: #8b98a5; }
 .quest-item small.stats { color: #6dcf7e; }
+.quest-item small .short { color: #ff8f7a; }
 .quest-item.picked { border-color: var(--rarity); box-shadow: 0 0 0 1px var(--rarity), 0 0 14px color-mix(in srgb, var(--rarity) 40%, transparent); }
 
 #quest-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
@@ -1730,6 +1739,37 @@ body.portrait #xp-tracker, body.no-hud #xp-tracker { display: none; }
   background: rgb(230 237 243 / 5%); color: #e6edf3; font: inherit; cursor: pointer;
 }
 #quest-dialog footer button.primary { border-color: rgb(240 200 60 / 60%); background: rgb(240 200 60 / 16%); color: #f7e3a0; font-weight: 600; }
+
+/* --- vendors ---------------------------------------------------------------- */
+
+#vendor h4 { margin: 12px 0 6px; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #8b98a5; }
+#vendor h4 small { margin-left: 6px; letter-spacing: 0; text-transform: none; }
+.vendor-stock { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; }
+.vendor-item {
+  display: flex; flex-direction: column; gap: 1px; padding: 8px; border-radius: 8px; text-align: left;
+  border: 1px solid color-mix(in srgb, var(--rarity) 45%, transparent);
+  background: color-mix(in srgb, var(--rarity) 7%, transparent);
+  color: #e6edf3; font: inherit; cursor: pointer;
+}
+.vendor-item:hover:not(:disabled) { border-color: var(--rarity); }
+.vendor-item:disabled { opacity: 0.45; cursor: default; }
+.vendor-item b { color: var(--rarity); font-size: 12.5px; line-height: 1.3; }
+.vendor-item small { font-size: 10.5px; color: #6dcf7e; }
+.vendor-item .price { margin-top: 3px; font-size: 11.5px; font-weight: 600; color: #f0c83c; }
+.vendor-pack { display: flex; flex-direction: column; }
+.vendor-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 5px 0; border-top: 1px solid rgb(230 237 243 / 7%);
+}
+.vendor-row b { display: block; color: var(--rarity); font-size: 12.5px; }
+.vendor-row small { font-size: 10.5px; color: #8b98a5; }
+.vendor-row button, #vendor footer button {
+  padding: 4px 10px; border-radius: 6px; border: 1px solid rgb(230 237 243 / 18%);
+  background: rgb(230 237 243 / 5%); color: #f0c83c; font: inherit; font-size: 11.5px; white-space: nowrap; cursor: pointer;
+}
+#vendor footer { position: sticky; bottom: -16px; display: flex; justify-content: flex-end; margin: 12px -18px -16px; padding: 10px 18px 14px; background: rgb(12 13 16 / 98%); }
+#vendor footer button { padding: 7px 14px; font-size: 13px; font-weight: 600; border-color: rgb(240 200 60 / 60%); background: rgb(240 200 60 / 16%); }
+#vendor footer button.confirm { border-color: #ff7b72; background: rgb(255 123 114 / 14%); color: #ffb3a8; }
 
 #quest-log section { padding: 8px 0 12px; border-bottom: 1px solid rgb(230 237 243 / 8%); }
 #quest-log section p { margin: 0 0 4px; color: #c6d2de; }

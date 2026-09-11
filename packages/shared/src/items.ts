@@ -13,21 +13,15 @@
  * never been told anything about but the key. The server is still the only one
  * that ROLLS items (see `loot.ts`); the client only ever describes them.
  *
- * Gear is the FAST axis of progression and proficiency the slow one: a lucky
- * drop changes your numbers today, while training is what lets you have all of
- * them (see `effectiveness` in skills.ts).
+ * Every item asks a character level of whoever would wear it (see
+ * `requiredLevel`): a lucky drop from something tougher than you is one you
+ * carry until you have grown into it.
  */
 
+import { baseStats, CLASSES, classUsesFamily, isClassId, type ClassId } from "./classes.js";
 import { hashUnit } from "./noise.js";
 import { itemLore, itemName } from "./itemNames.js";
-import {
-  effectiveness,
-  GEAR_SKILLS,
-  LEVEL_SCALE,
-  MAX_PROFICIENCY,
-  type GearSkill,
-  type Proficiency,
-} from "./skills.js";
+import { LEVEL_SCALE, MAX_LEVEL } from "./levels.js";
 import {
   emptyTotals,
   STATS,
@@ -145,18 +139,34 @@ export function rarityHex(rarity: Rarity): string {
   return `#${RARITY[rarity].colour.toString(16).padStart(6, "0")}`;
 }
 
+// --- families -------------------------------------------------------------------
+
+/**
+ * What sort of thing an item is within its slot: the weight of a piece of
+ * armour, the family of a weapon. Used for names, glyphs, and the rules that
+ * care about weight — heavy armour slowing mana.
+ */
+export type ArmourWeight = "cloth" | "light" | "heavy";
+export type WeaponFamily = "swords" | "axes" | "maces" | "daggers" | "staves" | "wands";
+export type ItemFamily = ArmourWeight | WeaponFamily | "shields" | "foci" | "jewellery";
+
+export const FAMILY_NAMES: Record<ItemFamily, string> = {
+  cloth: "Cloth Armour", light: "Light Armour", heavy: "Heavy Armour",
+  swords: "Sword", axes: "Axe", maces: "Mace", daggers: "Dagger", staves: "Staff", wands: "Wand",
+  shields: "Shield", foci: "Focus", jewellery: "Jewellery",
+};
+
 // --- bases ----------------------------------------------------------------------
 
 /**
- * A kind of item: what it is, what it trains, what it tends to roll. Each
- * generated item picks its nouns and stats from its base.
+ * A kind of item: what it is, what family it belongs to, what it tends to
+ * roll. Each generated item picks its nouns and stats from its base.
  */
 export interface ItemBase {
   id: string;
   gear: GearSlot;
-  /** What wearing or holding it trains, and what its effectiveness reads.
-   *  Undefined for a Soul, which answers to nothing but you. */
-  skill: GearSkill | undefined;
+  /** Undefined for a Soul, which belongs to nothing but you. */
+  family: ItemFamily | undefined;
   /** A one-handed weapon that can go in the off hand as well. */
   offhand?: boolean;
   /** Takes both hands: nothing may be worn in the off hand beside it. */
@@ -181,15 +191,15 @@ export interface ItemBase {
   rarity?: Rarity;
 }
 
-const CLOTH = { skill: "cloth", armour: 0.3, budget: 1.15,
+const CLOTH = { family: "cloth", armour: 0.3, budget: 1.15,
   primaries: ["focus", "focus", "spirit", "spirit", "vigour"],
   secondaries: ["recovery", "recovery", "crit", "leech"],
   materials: ["Linen", "Woollen", "Silken", "Felt", "Spun", "Embroidered", "Lakeweave"] } as const;
-const LIGHT = { skill: "light", armour: 0.6, budget: 1.05,
+const LIGHT = { family: "light", armour: 0.6, budget: 1.05,
   primaries: ["might", "might", "focus", "vigour", "vigour"],
   secondaries: ["crit", "crit", "leech", "leech", "recovery"],
   materials: ["Leather", "Hide", "Wolfhide", "Boarhide", "Studded", "Oiled", "Webbed"] } as const;
-const HEAVY = { skill: "heavy", armour: 1, budget: 0.95,
+const HEAVY = { family: "heavy", armour: 1, budget: 0.95,
   // Leans Might: heavy already rolls the most armour, and a suit that also
   // rolled mostly Vigour would be a wall that never kills anything.
   primaries: ["might", "might", "might", "vigour", "vigour"],
@@ -227,76 +237,76 @@ export const ITEM_BASES: Record<string, ItemBase> = {
 
   // --- weapons ----------------------------------------------------------------------
   sword: {
-    id: "sword", gear: "weapon", skill: "swords",
+    id: "sword", gear: "weapon", family: "swords",
     primaries: ["might", "might", "vigour"], secondaries: ["crit", "leech"],
     nouns: ["Sword", "Blade", "Longsword", "Sabre", "Falchion"], materials: METALS,
   },
   greatsword: {
-    id: "greatsword", gear: "weapon", skill: "swords", twoHanded: true,
+    id: "greatsword", gear: "weapon", family: "swords", twoHanded: true,
     primaries: ["might", "might", "vigour"], secondaries: ["crit", "leech"],
     nouns: ["Greatsword", "Warblade", "Claymore"], materials: METALS,
   },
   axe: {
-    id: "axe", gear: "weapon", skill: "axes",
+    id: "axe", gear: "weapon", family: "axes",
     primaries: ["might"], secondaries: ["crit", "crit", "leech"],
     nouns: ["Axe", "Hatchet", "Cleaver", "Bearded Axe"], materials: METALS,
   },
   greataxe: {
-    id: "greataxe", gear: "weapon", skill: "axes", twoHanded: true,
+    id: "greataxe", gear: "weapon", family: "axes", twoHanded: true,
     primaries: ["might", "might", "vigour"], secondaries: ["crit", "leech"],
     nouns: ["Greataxe", "Poleaxe", "Felling Axe"], materials: METALS,
   },
   mace: {
-    id: "mace", gear: "weapon", skill: "maces",
+    id: "mace", gear: "weapon", family: "maces",
     primaries: ["might", "vigour"], secondaries: ["crit", "armour"],
     nouns: ["Mace", "Hammer", "Club", "Morningstar", "Flail"], materials: METALS,
   },
   maul: {
-    id: "maul", gear: "weapon", skill: "maces", twoHanded: true,
+    id: "maul", gear: "weapon", family: "maces", twoHanded: true,
     primaries: ["might", "vigour"], secondaries: ["crit", "armour"],
     nouns: ["Maul", "Warhammer", "Great Club"], materials: METALS,
   },
   dagger: {
-    id: "dagger", gear: "weapon", skill: "daggers", offhand: true,
+    id: "dagger", gear: "weapon", family: "daggers", offhand: true,
     primaries: ["might", "might", "focus"], secondaries: ["crit", "leech", "leech"],
     nouns: ["Dagger", "Knife", "Dirk", "Stiletto"], materials: METALS,
   },
   staff: {
-    id: "staff", gear: "weapon", skill: "staves", twoHanded: true,
+    id: "staff", gear: "weapon", family: "staves", twoHanded: true,
     primaries: ["focus", "focus", "spirit"], secondaries: ["crit", "recovery"],
     nouns: ["Staff", "Stave", "Crook", "Spire"], materials: WOODS,
   },
   wand: {
-    id: "wand", gear: "weapon", skill: "wands",
+    id: "wand", gear: "weapon", family: "wands",
     primaries: ["focus", "focus", "spirit"], secondaries: ["crit", "recovery"],
     nouns: ["Wand", "Rod", "Baton", "Switch"], materials: WOODS,
   },
 
   // --- off hand ---------------------------------------------------------------------
   shield: {
-    id: "shield", gear: "offhand", skill: "shields", armour: 1.2,
+    id: "shield", gear: "offhand", family: "shields", armour: 1.2,
     primaries: ["vigour", "vigour", "might"], secondaries: ["armour", "recovery"],
     nouns: ["Shield", "Buckler", "Kite Shield", "Targe", "Heater"], materials: METALS,
   },
   focus: {
-    id: "focus", gear: "offhand", skill: "foci",
+    id: "focus", gear: "offhand", family: "foci",
     primaries: ["focus", "spirit"], secondaries: ["recovery", "crit"],
     nouns: ["Orb", "Tome", "Lantern", "Codex", "Prism"], materials: JEWELS,
   },
 
   // --- trinkets -----------------------------------------------------------------------
   neck: {
-    id: "neck", gear: "neck", skill: "attunement",
+    id: "neck", gear: "neck", family: "jewellery",
     primaries: TRINKET_PRIMARIES, secondaries: TRINKET_SECONDARIES,
     nouns: ["Amulet", "Pendant", "Torc", "Locket", "Chain"], materials: JEWELS,
   },
   ring: {
-    id: "ring", gear: "ring", skill: "attunement",
+    id: "ring", gear: "ring", family: "jewellery",
     primaries: TRINKET_PRIMARIES, secondaries: TRINKET_SECONDARIES,
     nouns: ["Ring", "Band", "Signet", "Loop", "Seal"], materials: JEWELS,
   },
   sigil: {
-    id: "sigil", gear: "sigil", skill: "attunement",
+    id: "sigil", gear: "sigil", family: "jewellery",
     primaries: TRINKET_PRIMARIES, secondaries: TRINKET_SECONDARIES,
     nouns: ["Sigil", "Glyph", "Rune", "Mark", "Emblem", "Token"], materials: JEWELS,
   },
@@ -306,13 +316,13 @@ export const ITEM_BASES: Record<string, ItemBase> = {
   // is worth finding in a way a generated sword never quite is. They roll level
   // and exact numbers like anything else; the name and story are fixed.
   gatecutter: {
-    id: "gatecutter", gear: "weapon", skill: "swords",
+    id: "gatecutter", gear: "weapon", family: "swords",
     primaries: ["might", "focus"], secondaries: ["crit", "leech", "recovery"],
     nouns: ["Sword"], materials: METALS,
     name: "Gatecutter", lore: "Older than the shutting of the Gates. It remembers.", rarity: "legendary",
   },
   phaseLordsTear: {
-    id: "phaseLordsTear", gear: "sigil", skill: "attunement",
+    id: "phaseLordsTear", gear: "sigil", family: "jewellery",
     primaries: ["focus", "vigour"], secondaries: ["crit", "recovery", "leech"],
     nouns: ["Tear"], materials: JEWELS,
     name: "Phase Lord's Tear", lore: "Dronas and Solnajar have been fighting since Y0. Something fell.",
@@ -332,25 +342,25 @@ export const ITEM_BASES: Record<string, ItemBase> = {
     signature: true, rarity: "uncommon",
   },
   tuskCharm: {
-    id: "tuskCharm", gear: "neck", skill: "attunement", primaries: ["might", "vigour"],
+    id: "tuskCharm", gear: "neck", family: "jewellery", primaries: ["might", "vigour"],
     secondaries: ["crit"], nouns: ["Charm"], materials: JEWELS,
     name: "Tusk Charm", lore: "Whittled from a Thornback that did not stop in time.",
     signature: true, rarity: "uncommon",
   },
   fenwaterPhial: {
-    id: "fenwaterPhial", gear: "sigil", skill: "attunement", primaries: ["spirit", "focus"],
+    id: "fenwaterPhial", gear: "sigil", family: "jewellery", primaries: ["spirit", "focus"],
     secondaries: ["recovery"], nouns: ["Phial"], materials: JEWELS,
     name: "Fenwater Phial", lore: "Murky, faintly warm, and it hums when you cast.",
     signature: true, rarity: "uncommon",
   },
   emberheart: {
-    id: "emberheart", gear: "sigil", skill: "attunement", primaries: ["focus", "might"],
+    id: "emberheart", gear: "sigil", family: "jewellery", primaries: ["focus", "might"],
     secondaries: ["crit", "leech"], nouns: ["Heart"], materials: JEWELS,
     name: "Emberheart", lore: "What is left when a wisp stops burning. It has not stopped.",
     signature: true, rarity: "rare",
   },
   cairnstoneMaul: {
-    id: "cairnstoneMaul", gear: "weapon", skill: "maces", twoHanded: true,
+    id: "cairnstoneMaul", gear: "weapon", family: "maces", twoHanded: true,
     primaries: ["might", "vigour"], secondaries: ["armour", "crit"], nouns: ["Maul"], materials: METALS,
     name: "Cairnstone Maul", lore: "A golem's fist, more or less. Heavy in a reassuring way.",
     signature: true, rarity: "rare",
@@ -361,35 +371,47 @@ export function getBase(id: string): ItemBase | undefined {
   return Object.hasOwn(ITEM_BASES, id) ? ITEM_BASES[id] : undefined;
 }
 
-/** Bases a random drop may be, of a given rarity. Named items join the pool
- *  only at their own rarity; signatures never do. */
-export function basesFor(rarity: Rarity): ItemBase[] {
+/** Bases a random drop may be, of a given rarity — for a class, only what it
+ *  can use. Named items join the pool only at their own rarity; signatures
+ *  never do. */
+export function basesFor(rarity: Rarity, classId?: ClassId): ItemBase[] {
   return Object.values(ITEM_BASES).filter((base) =>
-    !base.signature && base.gear !== "soul" && (base.rarity === undefined || base.rarity === rarity));
+    !base.signature && base.gear !== "soul" && (base.rarity === undefined || base.rarity === rarity)
+    && (classId === undefined || classUsesFamily(classId, base.family)));
 }
 
 // --- instances ----------------------------------------------------------------------
 
-/** Item levels share the proficiency scale. */
-export const MAX_ITEM_LEVEL = MAX_PROFICIENCY;
+/** Ten item levels to a character level, all the way to the top. */
+export const MAX_ITEM_LEVEL = MAX_LEVEL * LEVEL_SCALE;
 
 export interface ItemInstance {
   base: string;
-  /** 1 to MAX_ITEM_LEVEL. What it takes to wear well. */
+  /** 1 to MAX_ITEM_LEVEL. Sets its stat budget, and the character level it
+   *  asks for (see `requiredLevel`). */
   level: number;
   rarity: Rarity;
   /** Everything else about it comes from here. */
   seed: number;
+  /**
+   * The class it was rolled for, which decides which primary stats it can
+   * roll (`ClassDefinition.stats`). Absent on items from before classes,
+   * which roll from their base's whole list as they always did.
+   */
+  classId?: ClassId;
 }
 
 /**
- * An item as a short string — `heavyHead.120.2.1k3j9a` — which is its identity
- * everywhere: in the bag, on the body, on the ground, in the save.
+ * An item as a short string — `heavyHead.120.2.1k3j9a.warrior` — which is its
+ * identity everywhere: in the bag, on the body, on the ground, in the save.
+ * The class is a fifth part, so every four-part key from before it still
+ * means exactly the item it always did.
  */
 export type ItemKey = string;
 
 export function encodeItem(item: ItemInstance): ItemKey {
-  return `${item.base}.${item.level}.${RARITIES.indexOf(item.rarity)}.${(item.seed >>> 0).toString(36)}`;
+  const key = `${item.base}.${item.level}.${RARITIES.indexOf(item.rarity)}.${(item.seed >>> 0).toString(36)}`;
+  return item.classId ? `${key}.${item.classId}` : key;
 }
 
 /** Anything that is not exactly a valid key is refused: keys come from the
@@ -397,20 +419,21 @@ export function encodeItem(item: ItemInstance): ItemKey {
 export function decodeItem(key: unknown): ItemInstance | undefined {
   if (typeof key !== "string" || key.length > 64) return undefined;
   const parts = key.split(".");
-  if (parts.length !== 4) return undefined;
-  const [baseId, levelText, rarityText, seedText] = parts as [string, string, string, string];
+  if (parts.length !== 4 && parts.length !== 5) return undefined;
+  const [baseId, levelText, rarityText, seedText, classText] = parts as [string, string, string, string, string?];
 
   const base = getBase(baseId);
   if (!base) return undefined;
   if (!/^\d{1,4}$/.test(levelText) || !/^\d$/.test(rarityText) || !/^[0-9a-z]{1,7}$/.test(seedText)) {
     return undefined;
   }
+  if (classText !== undefined && !isClassId(classText)) return undefined;
   const level = Number(levelText);
   const rarity = RARITIES[Number(rarityText)];
   const seed = parseInt(seedText, 36);
   if (level < 1 || level > MAX_ITEM_LEVEL || !rarity || seed > 0xffffffff) return undefined;
 
-  return { base: baseId, level, rarity, seed };
+  return classText === undefined ? { base: baseId, level, rarity, seed } : { base: baseId, level, rarity, seed, classId: classText };
 }
 
 export function isItemKey(value: unknown): value is ItemKey {
@@ -426,10 +449,11 @@ export interface Item extends ItemInstance {
   name: string;
   lore: string;
   gear: GearSlot;
-  skill: GearSkill | undefined;
+  family: ItemFamily | undefined;
   twoHanded: boolean;
-  /** At full effectiveness. See `effectiveStats` for what a given character
-   *  actually gets. Armour included. */
+  /** The character level it takes to wear it. */
+  requiredLevel: number;
+  /** Armour included. */
   stats: StatBlock;
   /** One number for "is this better": the budget it was rolled with. */
   power: number;
@@ -465,6 +489,21 @@ function drawDistinct<T extends string>(from: readonly T[], count: number, rng: 
   return chosen;
 }
 
+/**
+ * The primaries an item may roll: its base's, narrowed to what the class it
+ * was rolled for can use. Anything the class uses that the base does not list
+ * is added once at the end, so a base that has lost most of its list — a
+ * dagger without its Focus — can still roll two stats, and a named item keeps
+ * its own stats first.
+ */
+function primaryPool(def: ItemBase, classId: ClassId | undefined): readonly PrimaryStat[] {
+  if (!classId) return def.primaries;
+  const allowed = CLASSES[classId].stats;
+  const pool = def.primaries.filter((stat) => allowed.includes(stat));
+  for (const stat of allowed) if (!pool.includes(stat)) pool.push(stat);
+  return pool;
+}
+
 const cache = new Map<ItemKey, Item>();
 const CACHE_LIMIT = 4096;
 
@@ -492,7 +531,7 @@ export function describeItem(key: ItemKey): Item | undefined {
   const weight = def.twoHanded ? TWO_HANDED_WEIGHT : SLOT_WEIGHT[def.gear];
   const budget = itemBudget(instance.level) * weight * (def.budget ?? 1) * tier.budget;
 
-  const primaries = drawDistinct(def.primaries, tier.primaries, statRng, named);
+  const primaries = drawDistinct(primaryPool(def, instance.classId), tier.primaries, statRng, named);
   const secondaries = drawDistinct(def.secondaries, tier.secondaries, statRng, named);
 
   // Most of the budget is primaries; secondaries take a growing share the
@@ -535,8 +574,9 @@ export function describeItem(key: ItemKey): Item | undefined {
     name: itemName(def, rarity, primaries, nameRng),
     lore: itemLore(def, rarity, nameRng),
     gear: def.gear,
-    skill: def.skill,
+    family: def.family,
     twoHanded: def.twoHanded === true,
+    requiredLevel: requiredLevel(instance.level),
     stats,
     power: Math.round(5 * (budget + armour / 16)),
   };
@@ -546,26 +586,20 @@ export function describeItem(key: ItemKey): Item | undefined {
   return item;
 }
 
-/** A trained name for what an item asks of you: "Heavy Armour 120". */
-export function requirementLabel(item: Item): string | undefined {
-  return item.skill ? `${GEAR_SKILLS[item.skill].name} ${item.level}` : undefined;
+/**
+ * The character level an item of this item level asks for: its level on the
+ * creature scale, so a level-12 wolf's ordinary drops are wearable at 12 and
+ * the lucky one from the long tail (`rollItemLevel`) is something to grow into.
+ */
+export function requiredLevel(itemLevel: number): number {
+  return Math.max(1, Math.min(MAX_LEVEL, Math.round(itemLevel / LEVEL_SCALE)));
 }
 
-/** How much of this item a character with `proficiency` actually gets. */
-export function itemEffectiveness(item: Item, proficiency: Proficiency): number {
-  return item.skill ? effectiveness(proficiency[item.skill] ?? 0, item.level) : 1;
-}
-
-/** An item's stats as a given character would actually get them. */
-export function effectiveStats(item: Item, proficiency: Proficiency): StatBlock {
-  const scale = itemEffectiveness(item, proficiency);
-  if (scale >= 1) return item.stats;
-  const result: StatBlock = {};
-  for (const stat of STAT_ORDER) {
-    const value = item.stats[stat];
-    if (value) result[stat] = Math.round(value * scale);
-  }
-  return result;
+/** Whether a character may put it on: their class uses it, and they are
+ *  level enough. Checked by the server on every equip, and by the client to
+ *  say why before you try. */
+export function canWear(item: Item, wearer: Wearer): boolean {
+  return wearer.level >= item.requiredLevel && classUsesFamily(wearer.classId, item.family);
 }
 
 /** Which body slots an item can go in, best first. */
@@ -581,9 +615,10 @@ export function slotsFor(item: Item): EquipSlot[] {
 export type Equipment = Partial<Record<EquipSlot, ItemKey>>;
 
 export interface CharacterStats {
-  /** Everything worn, after effectiveness. */
+  /** The class's base attributes at this level, plus everything worn. */
   totals: StatTotals;
-  /** Sum of every worn item's power, after effectiveness. */
+  /** Sum of every worn item's power. Gear only: "is this better" is a
+   *  question about the item, not about your level. */
   power: number;
   /** Pieces of heavy armour worn. They slow mana. */
   heavyPieces: number;
@@ -592,29 +627,38 @@ export interface CharacterStats {
 /** Armour slots: what "how much of each weight are you wearing" counts. */
 export const ARMOUR_SLOTS: EquipSlot[] = ["head", "body", "legs", "feet", "hands", "cloak"];
 
+/** Who is wearing the gear: what they start from before it. */
+export interface Wearer {
+  classId: ClassId;
+  level: number;
+}
+
 /**
- * Everything the worn set adds up to, for this character's training.
+ * Everything a character adds up to: their class's base attributes at their
+ * level, and the worn set on top.
  *
  * Shared because both sides need it: the server to resolve a fight and cap
  * health, the client to show you what a piece would do before you wear it.
  */
-export function characterStats(equipment: Equipment, proficiency: Proficiency): CharacterStats {
+export function characterStats(equipment: Equipment, wearer: Wearer): CharacterStats {
   const totals = emptyTotals();
   let power = 0;
   let heavyPieces = 0;
+
+  const base = baseStats(wearer.classId, wearer.level);
+  for (const stat of STAT_ORDER) totals[stat] += base[stat] ?? 0;
 
   for (const slot of EQUIP_SLOTS) {
     const key = equipment[slot];
     if (key === undefined) continue;
     const item = describeItem(key);
     if (!item) continue;
-    const scale = itemEffectiveness(item, proficiency);
     for (const stat of STAT_ORDER) {
       const value = item.stats[stat];
-      if (value) totals[stat] += Math.round(value * scale);
+      if (value) totals[stat] += value;
     }
-    power += Math.round(item.power * scale);
-    if (item.skill === "heavy") heavyPieces++;
+    power += item.power;
+    if (item.family === "heavy") heavyPieces++;
   }
 
   return { totals, power, heavyPieces };

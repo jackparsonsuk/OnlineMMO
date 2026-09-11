@@ -1,29 +1,33 @@
 import type { Room, SeatReservation } from "@colyseus/sdk";
 import { Client } from "@colyseus/sdk";
 import {
+  CLASSES,
+  classUsesFamily,
+  type ItemFamily,
+  type ClassId,
+  DEFAULT_CLASS,
   describeItem,
   type Equipment,
-  GEAR_SKILLS,
   getOstra,
   getQuest,
   type QuestLog,
   questMarker,
+  isClassId,
   isOstraId,
   type ItemKey,
-  type Proficiency,
   rarityHex,
   ROOM_NAME,
   type OstraDefinition,
-  type SkillId,
   SPELLS,
+  spellsLearnedAt,
   WorldState,
-  XP_PER_LEVEL,
 } from "@mmo/shared";
 import { AccountClient } from "./account.js";
 import { SoundBoard } from "./audio.js";
 import { CharacterScreen } from "./character.js";
 import { DevMenu, type EliteStatus } from "./devtools.js";
 import { QuestUI } from "./questUI.js";
+import { VendorUI } from "./vendorUI.js";
 import { showTitleScreen } from "./titleScreen.js";
 import { Hud } from "./hud.js";
 import { KeyboardInput } from "./input.js";
@@ -72,15 +76,44 @@ const characterScreen = new CharacterScreen(document.getElementById("character")
 const questUI = new QuestUI({
   accept: (quest) => sendToRoom?.("questAccept", { quest }),
   abandon: (quest) => sendToRoom?.("questAbandon", { quest }),
-  complete: (quest, choice, skill) => sendToRoom?.("questComplete", { quest, choice, skill }),
+  complete: (quest, choice) => sendToRoom?.("questComplete", { quest, choice }),
   notify: (text) => hud.flash(text, "#f0d98a"),
 });
 
-/** Put the right mark over every villager, and the right hint in the bubble. */
+const vendorUI = new VendorUI({
+  buy: (vendor, index) => sendToRoom?.("vendorBuy", { vendor, index }),
+  sell: (vendor, item) => sendToRoom?.("vendorSell", { vendor, item }),
+  sellAll: (vendor) => sendToRoom?.("vendorSellAll", { vendor }),
+});
+
+/** Your class and where you are on the curve, as the server last said. */
+let classId: ClassId = DEFAULT_CLASS;
+let level = 1;
+
+/** Put the right mark over every villager, and the right hint in the bubble.
+ *  Level matters: a quest you are too low for is no "!" yet. */
 function refreshQuestMarkers(): void {
   const log = questUI.currentLog;
-  session?.setQuestMarkers((id) => questMarker(id, log));
+  session?.setQuestMarkers((id) => questMarker(id, log, level));
   hud.refreshSpeech();
+}
+
+/** Level and XP from the server: the bar, and everything a level unlocks. */
+function applyProgress(nextLevel: number, xp: number, gained: number): void {
+  const before = level;
+  level = nextLevel;
+  hud.setXp(level, xp);
+  hud.xpGain(gained);
+  characterScreen.setLevel(level);
+  questUI.setLevel(level);
+  vendorUI.setLevel(level);
+  if (level === before) return;
+  refreshQuestMarkers();
+  // One banner per level crossed, each with what it taught.
+  for (let reached = before + 1; reached <= level && gained > 0; reached++) {
+    hud.levelUp(reached, spellsLearnedAt(classId, reached).map((id) => SPELLS[id].name));
+  }
+  if (gained > 0) audio.play("levelUp", 1);
 }
 
 function applyQuests(log: QuestLog | undefined, gold: number | undefined): void {
@@ -116,7 +149,13 @@ window.addEventListener("keydown", (event) => {
       break;
     case "KeyE": {
       const villager = session?.nearestVillager();
-      if (villager) questUI.talkTo(villager);
+      if (villager?.vendor) {
+        questUI.close();
+        vendorUI.open(villager);
+      } else if (villager) {
+        vendorUI.close();
+        questUI.talkTo(villager);
+      }
       break;
     }
     case "KeyJ":
@@ -133,6 +172,7 @@ window.addEventListener("keydown", (event) => {
     case "Escape":
       // Close whatever is open first; only then drop the target.
       if (session?.mapOpen) session.toggleMap();
+      else if (vendorUI.close()) break;
       else if (questUI.close()) break;
       else if (characterScreen.isOpen) characterScreen.setOpen(false);
       else session?.clearTarget();
@@ -153,38 +193,15 @@ function cameraYaw(): number {
   return Math.atan2(-Math.cos(alpha), -Math.sin(alpha));
 }
 
-/** Your own training, bag and gear. Nobody else's business, so not in state. */
+/** Your own class, XP, bag and gear. Nobody else's business, so not in state. */
 interface ProfileMessage {
-  skills: Proficiency;
+  classId: string;
+  level: number;
+  xp: number;
   inventory: ItemKey[];
   equipment: Equipment;
   quests?: QuestLog;
   gold?: number;
-  manaNow: number;
-}
-
-/** The last skills we heard, to spot whole-point rises worth a note. */
-let knownSkills: Proficiency | undefined;
-
-function skillLabel(skill: SkillId): string {
-  return (GEAR_SKILLS as Record<string, { name: string }>)[skill]?.name
-    ?? SPELLS[skill as keyof typeof SPELLS]?.name
-    ?? skill;
-}
-
-function applySkills(skills: Proficiency): void {
-  if (knownSkills) {
-    for (const [skill, value] of Object.entries(skills) as [SkillId, number][]) {
-      const before = knownSkills[skill] ?? 0;
-      const gained = Math.round((value - before) * XP_PER_LEVEL);
-      if (gained <= 0) continue;
-      const level = Math.floor(value);
-      hud.xpDrop(skillLabel(skill), level, value - level, gained);
-      if (level > Math.floor(before)) hud.levelUp(skillLabel(skill), level);
-    }
-  }
-  knownSkills = { ...skills };
-  hud.setSkills(skills);
 }
 
 /** What the server sends when a player steps into a Gate. */
@@ -210,8 +227,12 @@ async function main(): Promise<void> {
   const account = new AccountClient(HTTP_ENDPOINT, health.realmId);
   const character = await showTitleScreen(account);
   characterScreen.setName(character.name);
-  // Quest rewards are derived from the character's id; the server does the same.
-  questUI.setCharacter(character.id);
+  // Known before the room is, so the ability bar is right on the first frame.
+  classId = isClassId(character.classId) ? character.classId : DEFAULT_CLASS;
+  level = character.level ?? 1;
+  // Quest rewards are derived from the character's id and class; the server
+  // does the same.
+  questUI.setCharacter(character.id, classId);
 
   const client = new Client(WS_ENDPOINT);
   // What actually authorises the join. The room's static onAuth verifies this
@@ -263,6 +284,7 @@ function frame(now: number): void {
   if (session) {
     const self = session.selfPosition();
     questUI.update(self.x, self.z);
+    vendorUI.update(self.x, self.z);
   }
 }
 
@@ -271,43 +293,62 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   room = next;
   currentOstra = ostra;
   applyOstra(world, ostra);
-  session = createSession(world, next, ostra, hud, keyboard, cameraYaw, audio);
+  session = createSession(world, next, ostra, hud, keyboard, cameraYaw, audio, classId);
 
   hud.setOstra(ostra);
   hud.setStatus("connected");
-  hud.buildAbilityBar();
+  hud.buildAbilityBar(classId);
   // A new Ostra is new villagers; mark them from what we already know.
   questUI.close();
+  vendorUI.close();
   refreshQuestMarkers();
 
-  // Training, bag and gear are private to this player, so they arrive as a
+  // Class, XP, bag and gear are private to this player, so they arrive as a
   // message rather than in replicated state. Asked for rather than pushed: a
   // send from the room's onJoin would race this handler being registered,
   // which is the same trap the character id fell into.
   next.onMessage("profile", (payload: ProfileMessage) => {
-    applySkills(payload.skills ?? {});
+    if (isClassId(payload.classId) && payload.classId !== classId) {
+      classId = payload.classId;
+      hud.buildAbilityBar(classId);
+    }
     characterScreen.setProfile({
-      skills: payload.skills ?? {},
+      classId,
+      level: payload.level ?? level,
       inventory: payload.inventory ?? [],
       equipment: payload.equipment ?? {},
     });
+    applyProgress(payload.level ?? level, payload.xp ?? 0, 0);
     hud.setPower(characterScreen.power);
-    questUI.setSkills(payload.skills ?? {});
     applyQuests(payload.quests, payload.gold);
+    vendorUI.setProfile(payload.inventory ?? [], payload.gold ?? 0, level, classId);
   });
-  next.onMessage("skills", (payload: { skills: Proficiency }) => {
-    applySkills(payload.skills ?? {});
-    characterScreen.setSkills(payload.skills ?? {});
-    questUI.setSkills(payload.skills ?? {});
-    hud.setPower(characterScreen.power);
+  next.onMessage("sold", (payload: { count: number; gold: number }) => {
+    hud.flash(`Sold ${payload.count} item${payload.count === 1 ? "" : "s"} for ${payload.gold} gold`, "#f0c83c");
+    audio.play("pickup");
+  });
+  next.onMessage("bought", (payload: { item: ItemKey; price: number }) => {
+    const item = describeItem(payload.item);
+    hud.flash(`Bought ${item?.name ?? "something"} for ${payload.price} gold`, item ? rarityHex(item.rarity) : undefined);
+    audio.play("pickup");
+  });
+  next.onMessage("tooPoor", (payload: { price: number }) => hud.flash(`That costs ${payload.price} gold.`));
+  next.onMessage("xp", (payload: { level: number; xp: number; gained: number }) => {
+    applyProgress(payload.level, payload.xp, payload.gained);
+  });
+  next.onMessage("cannotWear", (payload: { level: number; family?: ItemFamily }) => {
+    hud.flash(classUsesFamily(classId, payload.family)
+      ? `You must be level ${payload.level} to wear that.`
+      : `${CLASSES[classId].name}s cannot use that.`);
   });
   next.onMessage("quests", (payload: { quests: QuestLog; gold: number }) => applyQuests(payload.quests, payload.gold));
-  next.onMessage("questDone", (payload: { quest: string; item?: ItemKey }) => {
+  next.onMessage("questDone", (payload: { quest: string; item?: ItemKey; xp?: number }) => {
     const quest = getQuest(payload.quest);
     if (!quest) return;
     const item = payload.item !== undefined ? describeItem(payload.item) : undefined;
+    const xp = payload.xp ? ` · +${payload.xp.toLocaleString()} XP` : "";
     hud.announce("Quest complete", quest.title,
-      `+${quest.rewards.gold} gold${item ? ` · ${item.name}` : ""}`, true);
+      `+${quest.rewards.gold} gold${xp}${item ? ` · ${item.name}` : ""}`, true);
     audio.play("pickup");
   });
   next.onMessage("picked", (payload: { item: ItemKey }) => {
@@ -381,7 +422,7 @@ async function travel(client: Client, payload: GateMessage): Promise<void> {
     // Rebuild the session we tore down so the player isn't left frozen. They
     // never left, so this is the Ostra they were already standing in.
     if (previous && room === previous && currentOstra) {
-      session = createSession(world, previous, currentOstra, hud, keyboard, cameraYaw, audio);
+      session = createSession(world, previous, currentOstra, hud, keyboard, cameraYaw, audio, classId);
     }
   } finally {
     travelling = false;

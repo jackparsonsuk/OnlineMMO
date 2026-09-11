@@ -431,16 +431,26 @@ function keys(t: number, frames: ReadonlyArray<readonly [number, number]>): numb
 /** How long each cast's body motion lasts, in ms. Also how long the body
  *  faces the aim rather than the camera. */
 export function castDuration(spell: SpellId, combo: number): number {
-  if (spell === "sunder") return 520;
-  if (spell === "voidbolt") return 360;
-  return combo === 3 ? 440 : 330;
+  switch (spell) {
+    case "sunder": return 520;
+    case "throw": return 380;
+    case "cleave": return 420;
+    case "bash": return 300;
+    case "battleCry": return 700;
+    default: return combo === 3 ? 440 : 330;
+  }
 }
 
 /** When the blow of a cast visibly connects, ms after it starts. */
 export function castContact(spell: SpellId, combo: number): number {
-  if (spell === "sunder") return 190;
-  if (spell === "voidbolt") return 85;
-  return combo === 3 ? 150 : 95;
+  switch (spell) {
+    case "sunder": return 190;
+    case "throw": return 110;
+    case "cleave": return 150;
+    case "bash": return 90;
+    case "battleCry": return 160;
+    default: return combo === 3 ? 150 : 95;
+  }
 }
 
 /**
@@ -635,12 +645,36 @@ export class Animator {
       this.rig.body.position.y += keys(t, [[0, 0], [110, 0.12], [165, -0.1], [440, 0]]);
       legL.rotation.x = keys(t, [[0, 0], [165, -0.45], [440, 0]]);
       legR.rotation.x = keys(t, [[0, 0], [165, 0.35], [440, 0]]);
-    } else if (action.spell === "voidbolt") {
-      // Punch the arm straight out; the bolt leaves from the fist.
-      armR.rotation.x = keys(t, [[0, 0], [80, -1.62], [220, -1.55], [360, 0]]);
-      armL.rotation.x = keys(t, [[0, 0], [80, -0.5], [360, 0]]);
-      chest.rotation.y = keys(t, [[0, 0], [80, 0.35], [360, 0]]);
-      chest.rotation.x = keys(t, [[0, 0], [80, -0.12], [360, 0]]);
+    } else if (action.spell === "throw") {
+      // Wind the arm back over the shoulder and hurl: the weapon leaves from
+      // the hand at the top of the arc.
+      armR.rotation.x = keys(t, [[0, 0], [70, -2.7], [120, -1.4], [240, -0.9], [380, 0]]);
+      armL.rotation.x = keys(t, [[0, 0], [70, -0.9], [380, 0]]);
+      chest.rotation.y = keys(t, [[0, 0], [70, -0.45], [120, 0.4], [380, 0]]);
+      chest.rotation.x = keys(t, [[0, 0], [70, -0.15], [130, 0.18], [380, 0]]);
+      legL.rotation.x = keys(t, [[0, swing], [120, -0.4], [380, 0]]);
+    } else if (action.spell === "cleave") {
+      // One huge sweep across the whole front, turning the body with it.
+      chest.rotation.y = keys(t, [[0, 0], [90, 1.15], [170, -1.25], [420, 0]]);
+      armR.rotation.x = keys(t, [[0, swing * 0.5], [90, -1.4], [170, -1.45], [420, 0]]);
+      armR.rotation.z = keys(t, [[0, 0], [90, -0.8], [170, 0.6], [420, 0]]);
+      armL.rotation.x = keys(t, [[0, 0], [90, -0.7], [170, -0.4], [420, 0]]);
+      legL.rotation.x = keys(t, [[0, swing], [150, -0.45], [420, 0]]);
+      legR.rotation.x = keys(t, [[0, -swing], [150, 0.25], [420, 0]]);
+    } else if (action.spell === "bash") {
+      // A short shove with the off hand, shoulder behind it.
+      armL.rotation.x = keys(t, [[0, 0], [50, -0.4], [95, -1.55], [300, 0]]);
+      chest.rotation.y = keys(t, [[0, 0], [50, 0.3], [95, -0.35], [300, 0]]);
+      chest.rotation.x = keys(t, [[0, 0], [95, 0.25], [300, 0]]);
+      legL.rotation.x = keys(t, [[0, swing], [95, -0.5], [300, 0]]);
+    } else if (action.spell === "battleCry") {
+      // Chest out, head back, arms flung wide.
+      armR.rotation.z = keys(t, [[0, 0], [160, -1.3], [520, -1.1], [700, 0]]);
+      armL.rotation.z = keys(t, [[0, 0], [160, 1.3], [520, 1.1], [700, 0]]);
+      armR.rotation.x = keys(t, [[0, 0], [160, -0.9], [700, 0]]);
+      armL.rotation.x = keys(t, [[0, 0], [160, -0.9], [700, 0]]);
+      chest.rotation.x = keys(t, [[0, 0], [160, -0.35], [520, -0.3], [700, 0]]);
+      head.rotation.x = keys(t, [[0, 0], [160, -0.4], [520, -0.35], [700, 0]]);
     } else {
       // Sunder: hop, arms up, and slam both fists into the ground.
       armR.rotation.x = keys(t, [[0, 0], [140, -2.9], [200, -0.5], [520, 0]]);

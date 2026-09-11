@@ -27,9 +27,11 @@ smaller entries below; those are the first step towards them.
 - **The main story: reopening the Gates.** The lore says the Gates were shut;
   the story is unlocking them, one at a time, each opening a new Ostra. Locked
   Gates stand in the world as the goal you can see and cannot yet take.
-- **More quests.** The system is in (`quests.ts`) with nine starter quests in
-  Daso and Fanshona. Next: quests for the Heartland and the far regions, a
-  quest to each elite, repeatable bounties, and the Gate story as a chain.
+- **More quests.** The system is in (`quests.ts`) with nine quests in Daso
+  (level 3) and Fanshona (23). Levels 5–22 have none at all: quests for the
+  Heartland and every region between the two towns are the biggest hole in
+  levelling now, then a quest to each elite, repeatable bounties, and the Gate
+  story as a chain.
   The system still lacks talk-to objectives, escorts, quest items you carry
   and use, and shared progress within a party (once there are parties).
 - **Dungeons.** Instanced, for a party; the first real source of mythic loot.
@@ -37,11 +39,14 @@ smaller entries below; those are the first step towards them.
 - **Player houses.** Also the answer to "somewhere to store more than thirty
   items".
 - **The other Ostras.** Ascendant and Barals are small hand-built maps next to
-  eight-kilometre Terra; they need regions, roads and camps of their own.
+  eight-kilometre Terra; they need regions, roads and camps of their own. They
+  are where levels 30–65 and 65–100 are meant to be earned, so until they are
+  built the curve stops at 30.
 - **Weather** (and day/night, below).
 - **Fishing** — Fanshona is a fishing town on a lake nobody can fish.
 - **Life skills.** Gathering and crafting (logging for Daso, mining, cooking,
-  smithing), on the same 0–1000 proficiency scale as everything else.
+  smithing), each with its own level — the one place use-based training might
+  still belong, now that combat has one character level.
 - **Mounts.** Terra takes fourteen minutes to cross at a sprint.
 - **Pets.**
 - **Graphics redo.**
@@ -50,16 +55,17 @@ smaller entries below; those are the first step towards them.
 - **Trading, vendors and gold.** A currency, vendors in Daso and Fanshona, and
   player-to-player trade — until then the only thing to do with loot you don't
   want is destroy it.
-- **Classes**, gating which armour and weapons you wear well and, with the
-  weapon, which abilities you have.
+- **More classes.** The Warrior exists (`classes.ts`); a caster is next —
+  mana, Focus and Spirit, cloth, staves, wands and foci all drop already with
+  nobody to use them. Then a class picker on the title screen, and a decision
+  on whether classes gate armour weights.
 - **World events.** The Black Tide breaking in; a camp spilling onto the road;
   a Cairn Golem walking between towns.
 - **Achievements and a lore journal.** Every place found and every item's story
   collected — the world is the point of the game, so exploring it should count.
 - **Guilds.**
 - **Player-vs-player**, eventually: duels and an opt-in arena first.
-- **Leaderboards per skill.** Everything already has a 0–1000 proficiency;
-  "best Swords in the realm" is nearly free.
+- **Leaderboards.** Highest level, first to 100, most elites felled.
 - **A death penalty.** Dying costs a walk from the nearest waystone and nothing
   else, so danger has no weight.
 - **Music and ambience** — a theme per Ostra, a sound per region.
@@ -72,7 +78,8 @@ smaller entries below; those are the first step towards them.
 - **Moderation and anti-cheat tools.** A report button, mute, admin commands.
   Needed the day chat exists.
 - **Server-side analytics.** Where players die, which items get destroyed, how
-  long each level takes — how loot and proficiency actually get balanced.
+  long each level actually takes against the curve's guess — how loot and
+  levelling actually get balanced.
 
 ### Lower tier / maybe
 
@@ -116,8 +123,7 @@ smaller entries below; those are the first step towards them.
   whatever they hit, which shows in the new forests. The road router's A* is a
   starting point.
 - **More from elites.** A unique named drop each; persist their timers (a
-  restart resets them); give Ascendant and Barals theirs; a map hint once one
-  wakes; an aura and a horn. Watch the tank rule for leeching — standing in the
+  restart resets them); give Ascendant and Barals theirs; an aura and a horn. Watch the tank rule for leeching — standing in the
   way of blows is enough for credit, which is right for a tank and cheap for
   someone who only wants the loot.
 - **World events.** A camp that spills over, a golem that walks the roads.
@@ -131,9 +137,9 @@ smaller entries below; those are the first step towards them.
 
 - **Weapons that change how you fight.** Each weapon family should reshape
   Strike (a dagger fast and short, a maul slow and wide) and, with classes,
-  bring its own abilities — Guild Wars-style, class × weapon. Weapon skills
-  already train separately; only the swing is missing. Needs the worn weapon
-  replicated so everyone draws the right swing.
+  bring its own abilities — Guild Wars-style, class × weapon. Shield Bash
+  should probably want a shield. Needs the worn weapon replicated so everyone
+  draws the right swing.
 - **More sources for mythic and up.** Elites drop mythic and legendary now;
   dungeons and raids are next, and the only way to World and Ostra rarity.
 - **World items that are really one in the realm.** Needs a realm-wide registry
@@ -143,17 +149,26 @@ smaller entries below; those are the first step towards them.
 - **Souls.** Very rare; one slot that affects everything else; grows with the
   player; replacing one costs what it had become. The slot is on the screen,
   empty.
-- **Classes** gating which weights and weapons you can wear well.
 - **Gear drawn on the body.** Helms, plate, the actual weapon in hand.
 - **Sort and filter the pack**, and compare a ring against the weaker of the two
   you wear rather than whichever slot is first.
-- **Balance pass.** Budgets, Vigour's health, armour's curve and the training
-  ceiling are first-pass numbers in `items.ts`, `stats.ts` and `skills.ts`.
+- **Balance pass.** Budgets, Vigour's health, armour's curve, the XP curve,
+  a Warrior's per-level growth and Fervour's numbers are all first-pass, in
+  `items.ts`, `stats.ts`, `levels.ts` and `classes.ts`. Levels 30–100 have
+  never been played at all; the creature and gear curves were only checked on
+  paper that far.
 
 ## Progression and economy
 
 - **Spells from scrolls and books.** The lore says the Library Ostracon holds
-  them all; here everyone starts with three.
+  them all; here abilities come with levels. A caster class could learn this way.
+- **Level-up could say what it gave.** The banner names new abilities, but
+  not the Might and Vigour, or the gear that just became wearable.
+- **Rested XP, or something like it**, if the curve past 30 turns out to feel
+  like a wall rather than a road.
+- **XP in a group.** Everyone who fights a creature gets its full XP. Kind to
+  grouping, and cheap to exploit by tagging; revisit when parties exist
+  (split, or full within a party only).
 - **An economy.** Vendors in Daso and Fanshona, a currency, trading between
   players, and somewhere to store more than thirty items.
 - **Gold has nowhere to go.** Quests pay it; nothing sells. Vendors first.

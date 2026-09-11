@@ -4,6 +4,7 @@
  * paints is the same arc the server tests against.
  */
 
+import { FERVOUR_MAX, type ResourceKind } from "./classes.js";
 import {
   critBonus,
   HEALTH_PER_VIGOUR,
@@ -48,7 +49,9 @@ export const CRIT_MULTIPLIER = 1.8;
  * A single repeating swing has no rhythm to it; a three-beat chain gives the
  * free spell a shape — and a reason to keep pressing rather than holding.
  */
-export const STRIKE_COMBO_WINDOW_MS = 1200;
+/** Longer than Strike's cooldown, with room for latency — or no chain could
+ *  ever reach its third link. */
+export const STRIKE_COMBO_WINDOW_MS = 2600;
 export const STRIKE_COMBO_LENGTH = 3;
 export const COMBO_FINISHER_MULTIPLIER = 1.5;
 export const COMBO_FINISHER_KNOCKBACK = 1.7;
@@ -89,6 +92,12 @@ export function maxHealthFor(totals: StatTotals): number {
 
 export function maxManaFor(totals: StatTotals): number {
   return PLAYER_MAX_MANA + totals.spirit * MANA_PER_SPIRIT;
+}
+
+/** The cap on a class's resource. Fervour is always out of a hundred; mana
+ *  grows with Spirit. */
+export function maxResourceFor(resource: ResourceKind, totals: StatTotals): number {
+  return resource === "fervour" ? FERVOUR_MAX : maxManaFor(totals);
 }
 
 /** Mana per second, for this set of stats. */

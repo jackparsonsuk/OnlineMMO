@@ -1,5 +1,5 @@
 import { schema, t, type SchemaType } from "@colyseus/schema";
-import { PLAYER_MAX_HEALTH, PLAYER_MAX_MANA } from "./combat.js";
+import { PLAYER_MAX_HEALTH } from "./combat.js";
 
 /**
  * One frame of player intent. The client never sends a position — only what
@@ -19,8 +19,8 @@ export const MoveInput = schema({
   /**
    * Which spell is being cast this tick, as a wire index; 0 for none. Held
    * rather than edge-triggered — the server gates each spell on its own
-   * cooldown and mana, so holding a key auto-repeats and a client that sets
-   * this every tick gains nothing.
+   * cooldown, its cost, and whether you have learned it, so holding a key
+   * auto-repeats and a client that sets this every tick gains nothing.
    */
   cast: t.uint8().default(0),
   /**
@@ -48,16 +48,23 @@ export const Player = schema({
   y: t.float32().default(0),
   z: t.float32().default(0),
   yaw: t.angle().default(0),
+  /** Public, like a creature's: over your head, and in the roster. */
+  level: t.uint8().default(1),
   /** Zero means dead and awaiting respawn. */
   health: t.uint16().default(PLAYER_MAX_HEALTH),
-  mana: t.uint16().default(PLAYER_MAX_MANA),
+  /**
+   * Whatever the class pays for abilities with (`ClassDefinition.resource`):
+   * Fervour for a Warrior. One pair of fields rather than one per resource,
+   * because a character only ever has the one.
+   */
+  resource: t.uint16().default(0),
   /**
    * Base plus whatever is worn. Replicated rather than derived client-side
    * because equipment is private — without these the client could not draw
    * its own bars, let alone anyone else's.
    */
   maxHealth: t.uint16().default(PLAYER_MAX_HEALTH),
-  maxMana: t.uint16().default(PLAYER_MAX_MANA),
+  maxResource: t.uint16().default(0),
   /**
    * Dealt or took damage recently. Replicated because the client's movement
    * prediction needs it — sprint is denied in combat, and predicting a sprint

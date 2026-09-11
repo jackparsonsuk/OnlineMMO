@@ -48,9 +48,11 @@ export interface PropDefinition {
 /** Someone standing at their work. Static: a logging town at work is people
  *  in fixed places, and it costs no bandwidth at all. */
 export interface VillagerDefinition {
-  /** Set on anyone quests refer to (see `quests.ts`). */
+  /** Set on anyone quests or trade refer to (see `quests.ts`, `vendors.ts`). */
   id?: string;
   name: string;
+  /** Buys anything and sells plain gear (see `vendors.ts`). Needs an `id`. */
+  vendor?: boolean;
   /** What they say when you stand near them. */
   line: string;
   x: number;
@@ -296,8 +298,8 @@ export const DASO: SettlementDefinition = {
       colour: 0x7a5a80,
     },
     {
-      name: "Mott, smith",
-      line: "Axe-heads, saw teeth, hinges. Nothing fancy, and nothing that breaks.",
+      id: "mott", name: "Mott, smith", vendor: true,
+      line: "Axe-heads, saw teeth, hinges. Nothing fancy, and nothing that breaks. I'll buy what you're carrying.",
       ...atDoor(DASO_SMITHY, 1.8, 0.6),
       colour: 0x5a5550,
     },
@@ -437,8 +439,8 @@ export const FANSHONA: SettlementDefinition = {
       colour: 0x8a6a3a,
     },
     {
-      name: "Corran, trader",
-      line: "Timber from Daso, fish from the lake, and me in the middle, taking a little of each.",
+      id: "corran", name: "Corran, trader", vendor: true,
+      line: "Timber from Daso, fish from the lake, and me in the middle, taking a little of each. Yours too.",
       ...atDoor(FANSHONA_TRADE, 1.6, 0),
       colour: 0x6a5a8a,
     },

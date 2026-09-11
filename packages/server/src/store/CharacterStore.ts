@@ -1,4 +1,4 @@
-import type { Equipment, ItemKey, OstraId, Proficiency, QuestLog } from "@mmo/shared";
+import type { ClassId, Equipment, ItemKey, OstraId, QuestLog } from "@mmo/shared";
 
 /**
  * A character as it survives between sessions. Position and Ostra live here
@@ -20,6 +20,8 @@ export interface CharacterRecord {
   accountId: string;
   name: string;
   colour: number;
+  /** Chosen at creation and never changed. */
+  classId: ClassId;
   ostraId: OstraId;
   x: number;
   y: number;
@@ -27,9 +29,9 @@ export interface CharacterRecord {
   yaw: number;
   /** Persisted so logging out at 3 HP and back in is not a full heal. */
   health: number;
-  /** Every trained number, keyed by SkillId — spells, armour, weapons,
-   *  attunement. Absent means untrained. */
-  skills: Proficiency;
+  level: number;
+  /** Towards the next level. */
+  xp: number;
   /** Carried item keys, in pickup order. */
   inventory: ItemKey[];
   /** Worn item keys, by slot. */
@@ -44,8 +46,9 @@ export interface CharacterRecord {
 /** Where a character is, and in which Ostra — the part that changes constantly. */
 export type CharacterPosition =
   Pick<CharacterRecord, "ostraId" | "x" | "y" | "z" | "yaw" | "health"> & {
-    /** Written on every save; all three change as you play. */
-    skills: Proficiency;
+    /** Written on every save; all of these change as you play. */
+    level: number;
+    xp: number;
     inventory: ItemKey[];
     equipment: Equipment;
     quests: QuestLog;

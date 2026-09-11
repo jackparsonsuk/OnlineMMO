@@ -14,7 +14,7 @@
  * `Enemy.scale` (see `scaledArchetype`); health and damage stay server-side.
  */
 
-import { scaledArchetype, type EnemyKind } from "./enemies.js";
+import { MAX_ENEMY_LEVEL, scaledArchetype, type EnemyKind } from "./enemies.js";
 import { getOstra, settlementsIn, type OstraDefinition, type OstraId } from "./ostras.js";
 import { levelAt, safePoints } from "./worldgen.js";
 
@@ -73,7 +73,6 @@ export const CREDIT_TAKEN_SHARE = 0.25;
 
 /** How much tougher than the ground it stands on an elite is. */
 const ELITE_LEVEL_BONUS = 3;
-export const MAX_ELITE_LEVEL = 15;
 
 export const ELITES: readonly EliteDefinition[] = [
   {
@@ -149,7 +148,7 @@ export function getElite(id: string): EliteDefinition | undefined {
 
 /** A few levels above the ground it stands on. */
 export function eliteLevel(ostra: OstraDefinition, elite: EliteDefinition): number {
-  return Math.min(MAX_ELITE_LEVEL, levelAt(ostra, elite.x, elite.z) + ELITE_LEVEL_BONUS);
+  return Math.min(MAX_ENEMY_LEVEL, levelAt(ostra, elite.x, elite.z) + ELITE_LEVEL_BONUS);
 }
 
 /**

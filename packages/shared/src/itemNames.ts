@@ -220,9 +220,9 @@ function origin(rng: Rng): string {
 }
 
 function commonLine(base: ItemBase, rng: Rng): string {
-  const own = base.skill === "cloth" || base.skill === "light" || base.skill === "heavy" || base.skill === "shields"
+  const own = base.family === "cloth" || base.family === "light" || base.family === "heavy" || base.family === "shields"
     ? COMMON_LINES.armour
-    : base.skill === "attunement" ? COMMON_LINES.trinket : COMMON_LINES.weapon;
+    : base.family === "jewellery" ? COMMON_LINES.trinket : COMMON_LINES.weapon;
   return rng() < 0.4 ? pick(own, rng) : pick(COMMON_LINES.any, rng);
 }
 

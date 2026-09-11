@@ -173,6 +173,8 @@ app.get("/characters", handle(async (req, res) => {
       name: character.name,
       ostraId: character.ostraId,
       colour: character.colour,
+      classId: character.classId,
+      level: character.level,
     }));
   res.json({ characters });
 }));
@@ -191,6 +193,8 @@ app.post("/characters", handle(async (req, res) => {
     id: character.id,
     name: character.name,
     ostraId: character.ostraId,
+    classId: character.classId,
+    level: character.level,
   });
 }));
 
@@ -205,7 +209,13 @@ app.get("/characters/:id", handle(async (req, res) => {
     // be used to discover which character ids are real.
     throw new AuthError(404, "No such character.");
   }
-  res.json({ id: character.id, name: character.name, ostraId: character.ostraId });
+  res.json({
+    id: character.id,
+    name: character.name,
+    ostraId: character.ostraId,
+    classId: character.classId,
+    level: character.level,
+  });
 }));
 
 /**

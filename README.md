@@ -29,15 +29,16 @@ one.
 | `npm run dev:server` / `npm run dev:client` | One side only |
 | `npm run typecheck` | Type-checks all three packages |
 
-Controls: **WASD** move, **Shift** sprint (out of combat), **Space / 1 / 2 / 3**
-cast, **Tab** or click to target, **Esc** to let go, **M** map, **I** (or **C**)
+Controls: **WASD** move, **Shift** sprint (out of combat), **Space / 1–6**
+abilities, **Tab** or click to target, **Esc** to let go, **M** map, **I** (or **C**)
 character and pack, **E** talk to a villager, **J** quest log, drag to orbit,
 scroll to zoom, walk into a Gate ring to travel.
 
 In development, **`` ` ``** (backtick) opens the dev menu: teleport by clicking
 the world map (the hint shows the coordinates, region and creature level under
 the cursor), to any named place, or through any Gate; heal, god mode (blows
-still land and train armour, but take nothing), set every skill at once; put an
+still land, but take nothing), set your level, give XP (as if earned, so it
+levels you with the banner); put an
 item of any rarity and level in the bag, scatter one of each, empty the bag;
 kill everything within 25 m (drops roll as normal); a far camera; hide the HUD
 for screenshots. `mmo.loot(level, spread)` in the console does the scatter.
@@ -150,7 +151,7 @@ long it warns you, and what the creature does around it (`style`):
 | **Void Spider** | woods, fens | fast bite, barely telegraphed | 7.2 m/s — you cannot outrun it; kill it |
 | **Greywood Wolf** | Westwood, Greywood | quick bite, in packs | A shade slower than you, but there are always several |
 | **Thornback Boar** | Sunward, Redstep | **charge**: winds up, then runs 8 m down a lane | Sidestep the painted lane |
-| **Fen Wretch** | Lowfen, Brightwater | **spit**: hangs back at 8 m, spits down a 12 m lane | Close the distance — it backs away — or dodge sideways |
+| **Fen Wretch** | Lowfen, Brightwater | **spit**: hangs back at 8 m, spits down a 12 m lane | Close the distance — it backs away, until you are within 3 m and it is caught, then it stands and fights — or dodge sideways |
 | **Cinder Wisp** | Ashfall | **pulse**: swells, then bursts in a ring | Two Strikes kill it; get out of the circle before it goes |
 | **Cairn Golem** | ruins, Redstep, Highmoor | **slam**: huge, slow, wide | Can't be staggered and barely shoved; read it and move |
 
@@ -197,8 +198,8 @@ creature.
 `MoveInput` carries an `aim` separate from `yaw`. Yaw follows the camera and
 steers movement; aim follows your target, so hitting something off to one side
 doesn't bend the direction you are walking. With a target selected (Tab, or
-click it) every cast turns to face it while in reach. Without one, Strike leans
-toward whatever is within ~75° of where you are looking, and Voidbolt toward
+click it) every cast turns to face it while in reach. Without one, a blow leans
+toward whatever is within ~75° of where you are looking, and Heroic Throw toward
 anything within ~17° — reach is its reward, accuracy its price. Aim is computed
 from the *drawn* positions, which are exactly what lag compensation rewinds to,
 so aiming at the picture is aiming at the truth.
@@ -211,8 +212,9 @@ deciding anything:
 
 - **Bodies animate** (`rigs.ts`). Every figure is built around shoulder, hip and
   waist pivots and posed procedurally each frame: walk cycles from measured
-  speed, a three-beat Strike chain, a Voidbolt punch, a Sunder slam, flinches,
-  falls, and creatures climbing out of the ground when a camp wakes.
+  speed, a three-beat Strike chain, an overarm throw, a Sunder slam, a Cleave
+  sweep, a shield shove, a war cry, flinches, falls, and creatures climbing out
+  of the ground when a camp wakes.
 - **Impact is predicted.** At the moment the blade connects (`castContact`) the
   client runs the same `isInArc` test the server will, and plays the flash,
   the shards, the thud and a small camera shake *then* — not a round trip
@@ -238,7 +240,7 @@ paints exactly that wedge on the ground, filling as the windup runs, so
 stepping out of the red is stepping out of the hit. The Risen is a slow
 overhead you should never take twice; the spider barely warns you at all.
 
-Heavy blows (every third Strike, and Sunder) **stagger**: the windup is
+Heavy blows (every third Strike, Sunder, Shield Bash) **stagger**: the windup is
 cancelled and the creature can't attack for 700 ms. Hitting a Risen's overhead
 with a finisher is a blow you never take. Hits also **knock back** — a
 decaying velocity spent through `moveBody`, so a shoved creature still stops at
@@ -252,7 +254,7 @@ rhythm instead of a metronome.
 Creatures chase whoever has hurt them most, not whoever is nearest, with a 10%
 edge to the current quarry so two players trading blows don't make it
 flip-flop. A player who has done damage is chased 4 m further than the aggro
-radius, so a Voidbolt from the edge of range is never free. Hitting one member
+radius, so a Heroic Throw from the edge of range is never free. Hitting one member
 of a camp brings camp-mates within 7 m. A creature that leashes home heals to
 full — otherwise it could be chipped down from the edge of its leash one pull
 at a time.
@@ -260,10 +262,28 @@ at a time.
 ### Recovering
 
 Health used to never regenerate; since it persists, the only way to heal was to
-die. Now, out of combat, you regain 5% of your cap per second, and mana comes
-back nearly three times faster. "In combat" means you dealt or took damage in
+die. Now, out of combat, you regain 5% of your cap per second, and Fervour
+drains away (see below). "In combat" means you dealt or took damage in
 the last 5 s, *or something is hunting you*. It is replicated on the player,
 because sprint is denied in combat and the client has to predict that.
+
+**Some attacks need you standing still.** Swinging while strafing made every
+telegraph trivial: you could keep hitting while walking out of each blow. Now,
+as in WoW, an ability has a **cast time** (`castMs`) or is instant. Strike
+(0.9 s), Sunder (0.5 s) and Cleave (0.7 s) take time and must be performed
+standing: they will not start on the move, and moving before one lands cancels
+it — nothing paid, cooldown given back, "Interrupted" on the cast bar. Heroic
+Throw, Shield Bash and Battle Cry are instant and work on the run. You are
+never rooted; getting out of the red just costs you the swing.
+
+A cast is counted in **input steps, not milliseconds** (`castSteps`). The
+server advances it once per input it applies (`stepCast`) and the client once
+per input it sends (`stepLocalCast`), so both land it — or cancel it, on the
+first input with movement — at the same input; wall-clock time would let
+latency decide. Cost is paid when it lands; aim follows the target throughout.
+A cancel is also sent as `castCancelled` in case the two ever disagree. Strike
+is a slow, heavy swing to match — one every 1.8 s, each worth three of the old
+0.6 s ones.
 
 Cooldowns are enforced server-side, so holding Space auto-attacks and spamming
 it gains nothing. The client mirrors the same constant purely so the swing draws
@@ -288,73 +308,134 @@ forever. Layout is hand-authored data, and hand-authored data drifts: the check
 caught a *second* instance on its first run, one introduced minutes earlier by
 widening a camp.
 
-## Spells and getting better at them
+## Levels, classes and abilities
 
-Three abilities, on **1 / 2 / 3** (Space also casts Strike, so the free option
-is always under a thumb):
+### Levels
 
-| | Aequum | Mana | Shape | Role |
-| --- | --- | --- | --- | --- |
-| **Strike** | 0 | free | 2.4 m wide cone | Best sustained damage, worst reach |
-| **Voidbolt** | 1 | 12 | 13 m narrow cone | Open before it closes |
-| **Sunder** | 2 | 32 | 4.6 m ring | The answer to being surrounded |
+**One bar, 1 to 100** (`levels.ts`). Killing things fills it, and so does
+helping people. The first few levels come in minutes; after that each costs a
+little more than the last, compounding, so the top is a long road rather than
+a wall. The curve is fitted against a rough pace of ninety kills an hour,
+counting travel and rest:
 
-Aequum is a **mana bracket, not a power ranking** — that's the lore's
-definition, and it's why Strike is Aequum 0 while still being the highest
-sustained damage in the kit. Every spell resolves through one `isInArc()` call;
-a ring is just an arc of 2π, so adding a spell is a table entry rather than a
-new code path.
+| Level | Kills that level takes | Time to reach it |
+| --- | --- | --- |
+| 2 | 5 | ~3 minutes |
+| 10 | ~18 | ~1 hour |
+| 30 | ~50 | ~9 hours |
+| 60 | ~140 | ~40 hours |
+| 100 | ~420 | ~150 hours |
 
-### Proficiency
+Quests pay on top, so the real numbers are kinder. `killsPerLevel` is a power
+of the level, for the early ramp, times a compounding 2.1% a level, which is
+what takes over later; `XP_TABLE` is built from it once and rounded to tens so
+the numbers on the bar are readable. A kill of your own level pays `40 + 10 ×
+level`.
 
-Progression is use-based, from the vault:
+**What a kill pays depends on the gap** (`levelXpScale`): +5% a level for
+something above you (up to five), falling away linearly below you to nothing
+once it is **grey** — five levels down at the start, widening by one every ten
+levels. Without that, the fastest way to level 100 would be the rabbits by the
+Gate Circle. An elite pays eight times a kill. XP goes to **everyone who fought
+the creature** (anyone with threat on it), in full, the same rule quests use, so
+grouping never costs anyone; an elite's goes to everyone it credits (see Rare
+elites). A level-up restores your health and is seen by everyone nearby.
 
-> Everyone has some amount of innate magical ability within them. **Like a
-> muscle the more you use magic the better you become, up to a set ceiling.**
+Creature levels share the scale, so the number over its head is a
+comparison, coloured WoW-style by `difficultyOf`: grey (beneath you, pays
+nothing), green, yellow (a fair fight), orange, red.
 
-So there is no XP bar. **Everything you can train has its own proficiency, on
-one scale from 0 to 1000** (`skills.ts`): each spell, each weight of armour,
-each family of weapon, shields, foci, and attunement for trinkets. Each rises
-only through use:
+This replaced **proficiency**: a separate 0–1000 scale for every spell, weapon
+family, armour weight and trinket, each rising only by use, and each item's
+stats falling away below its level in its skill. It was true to the vault's
+"like a muscle" line, but in play it asked you to keep a dozen bars in your
+head, made every new weapon a step backwards, and never produced the moment an
+MMO is built around. Characters from before it start again at level 1 in Daso,
+with their gear (see Old saves).
 
-| Skill | Rises when |
+### Classes
+
+A class decides which abilities sit on your bar and when each is learned, what
+they are paid with, and which attributes grow as you level (`classes.ts`).
+Everything else — gear, stats, the fight — is shared. Characters carry a
+`classId` from creation, so the second class is a table entry and a picker on
+the title screen, not a migration. There is one so far:
+
+**The Warrior.** +2 Might and +2 Vigour a level after the first. Level 1 gives
+nothing, so a new character is exactly what the game was tuned around; the
+rate is what keeps a Warrior of level N, in gear of level N, about as many
+blows from killing a creature of level N as a new one is from a Risen, since
+creatures grow too (`levelHealthScale`, +30% of base health a level).
+
+| Key | Ability | Learned | Fervour | Shape | Role |
+| --- | --- | --- | --- | --- | --- |
+| Space / 1 | **Strike** | 1 | builds | 2.4 m cone | Best sustained damage; every third blow staggers |
+| 2 | **Heroic Throw** | 3 | builds | 13 m narrow cone | Open before it closes |
+| 3 | **Sunder** | 6 | 35 | 4.6 m ring | The answer to being surrounded |
+| 4 | **Cleave** | 10 | 20 | 3.2 m half-circle | Everything in front of you |
+| 5 | **Shield Bash** | 15 | 15 | 2.6 m cone | The interrupt: staggers one foe |
+| 6 | **Battle Cry** | 22 | — | self | Fills Fervour, and it does not drain for 10 s |
+
+The whole kit is on the bar from the start; what you have not learned is shown
+locked, with the level that brings it, so the bar is also the road ahead. The
+server checks `knowsSpell` on every cast. Every ability still resolves through
+one `isInArc()` call; a ring is an arc of 2π, and a self-cast is a spell with
+`targeting: "self"`, so adding one is a table entry rather than a new code path.
+
+### Fervour
+
+Rage, rethought. It does not come from being hit or hitting so much as from
+**staying in the fight**: while you are in combat it rises on its own, 4 a
+second (full in 25), and a landed Strike or Throw stokes it by 4 more. **While
+it is high, everything you do hits harder** — up to +35% at full. Out of combat
+it drains at 20 a second, and on death it is gone.
+
+The big abilities **spend** it. That is the decision rage never asked of you:
+a spender hits with the Fervour it is cashing in, but every blow after it is
+weaker by what it cost, so the question is always whether to cash in now or
+keep it for the long fight. Battle Cry skips the ramp once a minute.
+
+It is the class's `resource`, replicated on the player as `resource` /
+`maxResource` — one pair of fields rather than one per resource, because a
+character only ever has the one. Mana is still there in `combat.ts` (fed by
+Spirit, slowed by heavy armour) for the first caster class; the Warrior's
+character sheet says it has no use for Focus or Spirit.
+
+### Where the levels are
+
+Everyone starts in **Daso**, in the Westwood, among people with work for them.
+Each Terra region has a **band of levels** (`RegionDefinition.levels`), and
+within it the level rises with distance from Daso — from the bottom of the band
+on the side nearest home to the top on the far side (`levelAt`, spread over
+`levelReach`). So the map gets harder the further you go, in steps you can see:
+crossing into the Greywood is a jump, as a new zone should be, and every region
+has an easy edge to arrive on and a hard heart. The minimap shows the band of
+wherever you stand.
+
+| Region | Levels |
 | --- | --- |
-| A spell | it lands |
-| Swords, axes, maces, daggers, staves, wands, foci | you land a blow with it in either hand |
-| Cloth, light, heavy armour | you are hit — each weight by the share of the six armour slots it covers |
-| Shields | you are hit with one raised |
-| Attunement | a spell that costs mana lands while you wear a neck, ring or sigil |
+| Westwood (Daso) | 1–5 |
+| The Heartland (the Gate Circle) | 5–10 |
+| Greywood | 10–15 |
+| Ashfall | 11–16 |
+| Lowfen | 13–18 |
+| Highmoor | 15–20 |
+| Sunward | 18–23 |
+| Brightwater (Fanshona) | 22–27 |
+| Redstep | 25–30 |
 
-Growth slows as it approaches **what the creature in front of you can teach**:
-`trainingCeiling` is its level × 10 + 25. A thousand points of Swords would
-otherwise be a thousand-odd blows against whatever lives by the Gate Circle;
-tying the ceiling to the creature means training climbs with the world, and 1000
-is only reachable against the highest levels. The last points against any one
-creature cost far more blows than the first — a muscle, not a progress bar.
-
-There used to be an innate `affinity`, rolled at creation between 55 and 100,
-that capped every spell. It went when the scale grew to 1000: a birth roll that
-caps every skill you will ever train reads as "this character is worse", not as
-flavour, and the creature ceiling already does the job of making the last
-points hard. Old spell proficiency (0–100) carries over as it was; under the new
-rules that is a few hours of training. Spell damage scales ×1 untrained to ×2.5
-at 1000.
-
-Proficiency is private, so it travels as a message rather than in replicated
-state — and the client **asks** for it once its handlers are up rather than
-being pushed it from `onJoin`, which is the same race the character id fell
-into. A small `skills` message follows every gain. The fraction of a level is
-shown as XP, RuneScape-style — 100 to a level, at most 50 from one blow — on a
-bar above the ability bar, and a level gained gets a banner mid-screen.
+Past Terra, the Gates: the Ascendant is meant for 30–65 and Barals for 65–100.
+Both are still courtyards; their camps sit at 35 and 68–72 as placeholders.
+Packs grow with level up to three extra creatures and no further.
 
 ### Difficulty by Ostra
 
-Creatures scale per Ostra, so travel is a difficulty choice rather than a change
-of palette. Creature **level** stacks on top (`levelHealthScale`,
-`levelDamageScale`): there is no XP in this game, so a level is a warning, not a
-gate. On Terra it rises by one every 380 m from the Gate Circle, to 12 at the
-edge. Item level, loot rarity, and how far a creature can train you all follow
-it.
+Creatures scale per Ostra too, so travel is a difficulty choice rather than a
+change of palette. Level stacks on top (`levelHealthScale`,
+`levelDamageScale`). Item level, loot rarity and XP all follow it. Under all of
+it, every creature has **×1.8 health and ×3 damage** (`CREATURE_HEALTH_SCALE`,
+`CREATURE_DAMAGE_SCALE`): the first tuning made three of your own level an easy
+fight, and three should be one you might lose.
 
 | Ostra | Creature damage | Creature health |
 | --- | --- | --- |
@@ -384,7 +465,7 @@ the integer hashes in `noise.ts`, so every engine agrees on every stat.
 A **base** is a kind of item: 18 armour pieces (three weights × head, body,
 legs, feet, hands, cloak), nine weapons (sword, greatsword, axe, greataxe, mace,
 maul, dagger, staff, wand), two off-hands (shield, focus), and neck, ring and
-sigil. Each says which skill it trains, which stats it tends to roll, and the
+sigil. Each says which family it belongs to, which stats it tends to roll, and the
 nouns and materials its names are built from. A handful are **named** — the
 pre-generation items, kept by name because "Gatecutter" is worth finding in a
 way a generated sword never quite is — and five are **signatures**, one per
@@ -435,6 +516,27 @@ Might, Critical and Leech; heavy rolls the most armour and Might, and **each
 heavy piece slows mana by 5%** — heavy armour has to cost something or everyone
 wears it.
 
+**Gear is class-specific.** Each class lists the families it uses
+(`ClassDefinition.families`): a Warrior wears plate and leather, swords, axes,
+maces, daggers, shields and jewellery — cloth, staves, wands and foci are a
+caster's. Nothing else drops for them (a drop is rolled for whoever earns it,
+so each credited player in an elite fight gets gear for their own class), is
+offered as a quest reward or by a vendor, or can be put on (`canWear` checks
+class as well as level). Worn gear a class cannot use goes back to the bag on
+load, where a vendor will take it. A wand dropping for a Warrior was not loot,
+it was litter.
+
+Stats are class-aware too. An item rolled for a player carries their class as
+a fifth part of its key (`heavyHead.120.2.1k3j9a.warrior`), and rolls its
+primaries only from what that class uses (`ClassDefinition.stats`) — a
+Warrior's gear is Might and Vigour, never Focus or Spirit, and a future
+caster's ring from the same base will be the other way round. A base that
+loses most of its list (a dagger without its Focus) is topped up with the
+class's own stats, so it can still roll two. Keys from before classes have
+four parts and roll from the base's whole list, as they always did, so no
+saved item changes. The character sheet only lists the attributes the class
+uses.
+
 **Power** is one number for "is this better": an item's stat budget, and the sum
 of what you wear (after effectiveness) for the character.
 
@@ -447,8 +549,9 @@ elite is its kind drawn and collided larger (`Enemy.scale`, read on both sides
 through `scaledArchetype`, so a bigger body is never a smaller hitbox), three
 levels above the ground it stands on, with several times the health and more
 damage. It is the **first source of mythic and legendary loot** (`source:
-"elite"`), always drops two or three items, and shows gold on nametags and the
-minimap.
+"elite"`), always drops two or three items, and shows gold on nametags, and on
+the minimap and world map at any range while it lives — it is announced to the
+whole Ostra, so hiding where it is would only make you search.
 
 Each has **signature moves**, data in its `abilities` list, resolved by the
 room's `stepElites`. There are three kinds:
@@ -468,8 +571,9 @@ and it walks home and heals, so it cannot be worn down in shifts.
 
 **Credit is earned, not touched.** Everyone who dealt at least 10% of its
 health, or who took at least 25% of their own health in its blows (holding its
-attention is work too), gets their own drops, reserved for them for as long as
-they lie there. One hit, or only the killing blow, earns nothing. Credit is read
+attention is work too), gets the elite's XP and their own drops, reserved for
+them for as long as they lie there. One hit, or only the killing blow, earns
+nothing. Summoned creatures pay no XP of their own; the elite's covers them. Credit is read
 from the creature's threat table, which is exactly the damage each player dealt
 it this fight, and that table clears on a reset.
 
@@ -481,27 +585,27 @@ died with it would let anyone kill an elite, log out, log back in and find it
 fresh. A server restart does still reset them. `unsafeElites()` holds them to
 the same "never near somewhere safe" rule as camps, at boot.
 
-### Item level and effectiveness
+### Item level and required level
 
-Item level is on the proficiency scale: **creature level × 10**, a nudge for a
-dangerous Ostra, ±4 of spread, and a long upward tail — one drop in twelve is
-10–30 levels better, one in a hundred 40–120. That tail is what makes a drop
-worth looking at.
+Item level is **creature level × 10**, a nudge for a dangerous Ostra, ±4 of
+spread, and a long upward tail — one drop in twelve is 10–30 levels better, one
+in a hundred 40–120. That tail is what makes a drop worth looking at. Item level
+sets the stat budget, and keeps a fine scale so two swords from the same wolf
+can still be told apart.
 
-An item wants **its level in its skill**. At or above it you get every point; below
-it the stats fall away linearly to 25% (`effectiveness` in `skills.ts`) — never
-nothing, or a lucky drop would be useless until you had trained for it. Nothing
-extra for being over-trained: a level-10 helm is simply weak next to level-300
-gear. So a lucky drop is better today, and training is what lets you have all
-of it.
+Every item asks for a **character level** (`requiredLevel`): its item level
+back on the creature scale, so a level-12 wolf's ordinary drops are wearable at
+12. Below that you cannot put it on — the server refuses the equip, and the pack
+shows it dimmed with its level in red. At or above it you get every point. The
+lucky one from the long tail is something you carry until you have grown into
+it. Item level stayed where it was, rather than moving to the 1–100 scale,
+because it is inside every item key in every save; required level is derived
+from it.
 
-**Gear is the fast axis, proficiency the slow one**, and they now meet rather
-than merely coexisting: you cannot loot your way to a trained skill, practice is
-no substitute for a better blade, and the better blade asks you to practise.
-
-Rarity odds are tilted by the Ostra's danger and the creature's level, so
-Barals pays better than Terra. Without that, a harder place is pure downside and
-nobody would go.
+Rarity odds are tilted by the Ostra's danger and the creature's level
+(`dropDanger` in `loot.ts`), so Barals pays better than Terra — up to level 30
+and no further, or everything past the Gates would drop nothing but rares.
+Without the tilt, a harder place is pure downside and nobody would go.
 
 ### The character screen
 
@@ -516,11 +620,12 @@ has moved, or looking at yourself would turn you round. While it is up, the
 near clip plane is pushed out and the grass at your feet is cut, because a low
 camera otherwise looks at your legs through a hedge.
 
-The tooltip shows what an item gives **you**, after your training, what it
-asks of you, and what wearing it would change — computed through the same
-`wear` and `characterStats` the server uses. Click to wear, drag onto a slot,
-right-click to choose a hand or destroy; click a worn item to take it off. The
-Skills tab lists every proficiency.
+The heading reads your level and class. The tooltip shows what an item gives,
+the level it asks of you, and what wearing it would change — computed through
+the same `wear` and `characterStats` the server uses, class base stats
+included. Click to wear, drag onto a slot, right-click to choose a hand or
+destroy; click a worn item to take it off. The Abilities tab is the spellbook:
+every ability of your class, what it costs, and the level each is learned at.
 
 ### Old saves
 
@@ -528,15 +633,24 @@ Characters from before gear was generated load with their fixed items converted
 (`migrateItem` in `loot.ts`): each old id becomes a generated item of a matching
 base and rarity at level 10–30, and the old weapon/armour/trinket slots become
 weapon/body/sigil. Worn gear is re-worn through `wear()` on load, so a save can
-never describe a body the rules would not allow; anything that does not fit
-goes back in the bag.
+never describe a body the rules would not allow; anything that does not fit —
+including anything above the character's level — goes back in the bag, **even
+past its size**. An overfull bag stops you picking things up until you make
+room, and can still wear things out of it; losing a worn item to a rules
+change would be worse. (The load used to trim the bag back to 30, which threw
+the overflow away the second time you logged in.)
+
+Characters from before levels start at **level 1, as Warriors, in Daso**, with
+everything they owned: the migration that adds the `level` column moves every
+character to Daso once, since level 1 among the Gate Circle's level-7 Risen is
+no start at all. The old `skills` column is left in place, unread.
 
 A drop belongs to whoever earned it for 25 seconds — drawn small until the claim
 lapses, so you can see something fell and that it is not yet yours. Without it,
 the first person to walk over a drop takes it whoever did the killing, which is
 fine alone and immediately unfair the moment two people fight the same camp.
 
-`maxHealth` and `maxMana` are replicated on the player rather than derived
+`maxHealth` and `maxResource` are replicated on the player rather than derived
 client-side, because equipment itself is private — without them the client
 could not draw its own bars. Taking armour off clamps current health to the new
 ceiling rather than scaling it: it should never kill you, and never leave you
@@ -565,13 +679,21 @@ clutter the loot system has no use for. A kill counts for **everyone who fought
 the creature** (anyone with threat on it), not just the killing blow, so a
 group never has to take turns at the last hit.
 
+A quest is **pitched at a level**. It is offered from three levels below it
+(`QUEST_LEVEL_LEAD`), so a "!" means something you are ready for, and its level
+is shown in the dialogue and the log in the same difficulty colours as a
+creature's.
+
 **Rewards** are gold (the first currency, and nothing sells yet), one item of
-your choosing from two or three, and XP you put into whichever skill you like.
-The item choices come from `questRewardItems`, which is a pure function of the
-quest and the character's id. The client shows exactly the choices the server
-will honour, and asking again cannot reroll them. The XP is capped at what the
-quest's level could teach in the field (`questXp`), so a Daso errand speeds up
-early training without skipping the world.
+your choosing from two or three, and XP. The item choices come from
+`questRewardItems`, which is a pure function of the quest and the character's
+id. The client shows exactly the choices the server will honour, and asking
+again cannot reroll them; they are of the quest's level. The XP is a **share of
+a whole level at the quest's level** (`xpShare` — half a level for most, a
+whole one for Mother Silt), scaled like a kill by how far you are from it
+(`questXp`), so a Daso errand done at 20 is grey and pays nothing. A share
+rather than a number, so re-tuning the curve cannot leave every quest paying
+too much or nothing.
 
 The client decides nothing. Accept, abandon and complete are requests the room
 checks against the same rules: whether you can take it, whether you are within
@@ -581,6 +703,24 @@ character. The first content is nine quests: a Daso chain (wolves, spiders,
 fangs, the driver missing on the Westroad), a long delivery that walks you to
 Fanshona, and a Fanshona chain that ends with Old Caddo sending you after Mother
 Silt.
+
+## Vendors
+
+Loot drops far faster than it can be worn, and thirty slots fill in a few
+camps. **Mott** the smith in Daso and **Corran** the trader in Fanshona
+(`vendor: true` on the villager) buy anything in your pack — one item at a
+time, or the whole bag with **Sell all**, which asks once because it empties
+it. Worn gear is never sold. They pay an item's power over eight, times its
+rarity's worth (a rare is 2.5 commons, a legendary 8), and never less than one
+gold (`sellPrice` in `vendors.ts`).
+
+They also sell plain gear: one common piece per slot, at your own level,
+weighted to what a Warrior wears — plate and leather, blades, a shield, a ring
+and an amulet — at four times what they would pay for it. Nothing a lucky drop
+will not beat, but always something, so a bad run of drops never leaves a slot
+empty. Rarer gear is found, never bought. Like quest rewards, the stock is a
+pure function of the vendor and your level (`vendorStock`): the client shows
+exactly what the server will sell, and it changes only when you level.
 
 ## Accounts
 
@@ -674,6 +814,11 @@ from the Gate Circle, deep in woodland: a logging town of fifty, a few houses an
 and nobody passing through except for work or by accident. That last detail
 shapes the layout — it is built around the timber yard, not a square.
 
+**Everyone starts here**, by the Daso stone (Terra's `spawn`), and creature
+levels are measured outward from it: the woods round the town are level 1, the
+Gate Circle 7. A new character wakes among people with work for them rather
+than alone in a ring of standing stones.
+
 Fourteen buildings round the yard — **The Felled Oak**, the timber shed, the saw
 pit, a smithy, a storehouse, a cart shed and the loggers' houses — with a ring
 of woodland that actually blocks you, opened where the roads come in. All three
@@ -736,7 +881,7 @@ Terra is 8000 m on a side — a hundred times the 80 it was. Crossing it on foot
 takes twenty-two minutes, fourteen sprinting. What makes that workable:
 
 **Most of it is generated, and none of it is sent.** `worldgen.ts` derives
-woodland, boulders and ~700 creature camps from `wilds.seed`, lazily, one 64 m
+woodland, boulders and ~5000 creature camps from `wilds.seed`, lazily, one 64 m
 cell at a time. The server asks a cell for its colliders; the client asks the
 same cell for things to draw. Same deterministic function, so the tree you see
 is the tree that stops you. What is placed by hand — the Gate Circle, two towns,
@@ -750,8 +895,9 @@ creatures: the green Heartland round the Gate Circle, Westwood (Daso's oak
 woods), Greywood (dark pine forest), Highmoor (lifted heath and peaks),
 Brightwater (lakes and birch), Sunward (golden plains), Redstep (red mesas cut
 into terraces), Ashfall (grey ash and dead trees) and Lowfen (sunken marsh and
-meres). A region is the nearest of nine centres, with borders warped by noise
-so they meander and blended over ~200 m so none is a line. The same
+meres). Each is also a band of creature levels, rising away from Daso (see
+Where the levels are). A region is the nearest of nine centres, with borders
+warped by noise so they meander and blended over ~200 m so none is a line. The same
 `TerrainRegion` data bends the height function — a moor is lifted, a fen
 pressed flat, mesas terraced — so the land and its look agree about borders.
 
@@ -780,7 +926,7 @@ every tick.
 
 **Camps sleep.** A camp's creatures only exist while a player is within 190 m
 of it, and are removed 20 s after nobody is within 280 m and nothing in it is
-fighting. Terra holds ~3000 creatures; the server simulates and replicates the
+fighting. Terra holds ~21000 creatures; the server simulates and replicates the
 dozens near someone.
 
 **The ground streams.** Detailed 64 m chunks (2 m quads) are built nearest-first
@@ -850,9 +996,14 @@ build next live in [TODO.md](TODO.md).
   World and Ostra rarity need a raid, and none exist yet. World items do not yet enforce
   "one in the realm", Ostra items are not yet bound to an Ostra, and there are
   no Souls to find.
-- **Gear does not change your body or your swing.** Weapon types train
-  separately but Strike is the same blade whatever you hold, and armour is not
-  drawn on the rig.
+- **Gear does not change your body or your swing.** Strike is the same blade
+  whatever you hold, Shield Bash needs no shield, and armour is not drawn on
+  the rig.
+- **Content stops at level 30.** Terra runs 1–30; the Ascendant and Barals are
+  still courtyards with a camp or two at 35 and ~70, so the curve to 100 has
+  nowhere to be climbed yet.
+- **One class.** The Warrior. Focus, Spirit, cloth, staves, wands and foci all
+  still drop, for a caster that does not exist yet.
 - **No interest management.** Camps only exist near players, which keeps state
   small, but every active creature is still replicated to everyone in the
   room. With players spread across Terra that grows with the player count;
@@ -862,8 +1013,9 @@ build next live in [TODO.md](TODO.md).
 - **Docks are scenery.** You wade beside Fanshona's dock, not along it.
 - **No taunt, no group threat tools.** Threat is damage-based; there is no way
   to deliberately hold a creature off a friend.
-- **Spells are found nowhere.** The lore says spells come from scrolls and books
-  and that the Library Ostracon holds them all; here you simply start with three.
+- **Abilities are learned by levelling, not found.** The lore says spells come
+  from scrolls and books and that the Library Ostracon holds them all; a caster
+  class should probably learn that way rather than at set levels.
 - **No fast travel.** Waystones are where you wake, not where you can go.
 - **Distant trees pop in** at ~330 m, where the detailed chunks end; the
   horizon mesh has darker ground under woods but no trees.
@@ -889,8 +1041,8 @@ build next live in [TODO.md](TODO.md).
 - **Terrain does not affect movement.** Slopes cost nothing to climb — including
   the rim's 120 m peaks — and there is no jumping; you simply follow the
   surface.
-- **Villagers are scenery.** They stand where they are put and say one line.
-  No trading, no quests, no schedule.
+- **Villagers are scenery.** They stand where they are put and say one line,
+  and some give quests. No trading, no schedule.
 
 ## Debugging
 

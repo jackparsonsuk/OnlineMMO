@@ -25,7 +25,9 @@ export type CombatTextStyle =
   /** Damage someone else dealt or took — quieter. */
   | "other"
   /** A word rather than a number: Evaded, Staggered. */
-  | "note";
+  | "note"
+  /** Somebody levelled. */
+  | "level";
 
 interface Floater {
   el: HTMLElement;

@@ -138,6 +138,13 @@ export interface RegionDefinition extends TerrainRegion {
   grass: "grass" | "dry" | "heather" | "reeds" | "ash";
   /** Relative odds of each creature for generated camps. */
   creatures: Partial<Record<EnemyKind, number>>;
+  /**
+   * The creature levels found here, lowest to highest — lowest on the side
+   * nearest the Ostra's spawn, rising across the region away from it (see
+   * `levelAt`). A region is a zone in the WoW sense: you know roughly what
+   * level it is before you go.
+   */
+  levels: [number, number];
 }
 
 /**
@@ -170,8 +177,13 @@ export interface WildsSettings {
   campSpacing: number;
   /** Chance a candidate becomes a camp (before the safety rules reject it). */
   campChance: number;
-  /** Creature level rises by one every this many metres from the spawn. */
-  metresPerLevel: number;
+  /**
+   * How far either side of a region's centre, measured outward from the
+   * spawn, its level band is spread across. About half the distance between
+   * region centres, so the bottom of one band meets the border it shares with
+   * the region nearer home.
+   */
+  levelReach: number;
 }
 
 export interface OstraDefinition {
@@ -182,7 +194,8 @@ export interface OstraDefinition {
   subtitle: string;
   /** The playable area is a size x size square centred on the origin. */
   size: number;
-  /** Where a brand-new character first opens their eyes. */
+  /** Where a brand-new character first opens their eyes, and what creature
+   *  levels are measured outward from. */
   spawn: { x: number; z: number };
   palette: OstraPalette;
   gates: GateDefinition[];
@@ -291,55 +304,61 @@ const TERRA_ROADS: RoadDefinition[] = [
 ];
 
 /**
- * Terra's regions. The heartland round the Gate Circle is gentle and green;
- * everything further out has a character of its own, and creatures to match.
- * Waystones sit roughly at each centre and are named for them.
+ * Terra's regions. The Westwood round Daso, where everyone starts, and the
+ * Heartland round the Gate Circle are gentle and green; everything further out
+ * has a character of its own, and creatures to match. Waystones sit roughly at
+ * each centre and are named for them.
+ *
+ * Levels climb with distance from Daso: the two home regions, then the
+ * Greywood and Ashfall on the western flank, the Lowfen and Highmoor, Sunward,
+ * and at the far end of Terra the Brightwater (and Fanshona in it) and
+ * Redstep, up to 30. Past that, the Gates: the Ascendant and Barals.
  */
 const TERRA_REGIONS: RegionDefinition[] = [
   {
     id: "heartland", name: "The Heartland", x: 0, z: 0,
     ground: "#41703f", crest: "#79a355", woods: 0.7, trees: ["oak", "oak", "pine", "birch"],
-    rock: "grey", grass: "grass", creatures: { zombie: 3, spider: 2, wolf: 1 },
+    rock: "grey", grass: "grass", creatures: { zombie: 3, spider: 2, wolf: 1 }, levels: [5, 10],
   },
   {
     id: "westwood", name: "Westwood", x: -1500, z: -150, relief: 1.1,
     ground: "#3b673a", crest: "#6c974d", woods: 1.15, trees: ["oak", "oak", "pine", "birch"],
-    rock: "grey", grass: "grass", creatures: { wolf: 3, spider: 2, zombie: 1 },
+    rock: "grey", grass: "grass", creatures: { wolf: 3, spider: 2, zombie: 1 }, levels: [1, 5],
   },
   {
     id: "greywood", name: "Greywood", x: -2400, z: 1950, lift: 12, relief: 1.3, mountains: 1.2,
     ground: "#33523a", crest: "#56794c", woods: 1.4, trees: ["pine", "pine", "pine", "birch"],
-    rock: "grey", grass: "grass", creatures: { wolf: 4, spider: 3, golem: 0.4 },
+    rock: "grey", grass: "grass", creatures: { wolf: 4, spider: 3, golem: 0.4 }, levels: [10, 15],
   },
   {
     id: "highmoor", name: "Highmoor", x: 200, z: 2450, lift: 20, relief: 0.8, mountains: 1.3,
     ground: "#6b6248", crest: "#927a70", woods: 0.22, trees: ["pine", "dead"],
-    rock: "grey", grass: "heather", creatures: { golem: 1.5, wolf: 2.5, zombie: 1 },
+    rock: "grey", grass: "heather", creatures: { golem: 1.5, wolf: 2.5, zombie: 1 }, levels: [15, 20],
   },
   {
     id: "brightwater", name: "Brightwater", x: 2350, z: 2250, relief: 0.55, mountains: 0.3,
     ground: "#487a4a", crest: "#8ab45e", woods: 0.55, trees: ["birch", "birch", "oak"],
-    rock: "grey", grass: "grass", creatures: { wretch: 3, boar: 2, spider: 1 },
+    rock: "grey", grass: "grass", creatures: { wretch: 3, boar: 2, spider: 1 }, levels: [22, 27],
   },
   {
     id: "sunward", name: "Sunward", x: 2500, z: 100, relief: 0.5, mountains: 0.15,
     ground: "#7a8844", crest: "#c7b66a", woods: 0.15, trees: ["oak"],
-    rock: "grey", grass: "dry", creatures: { boar: 4, zombie: 2, wolf: 1 },
+    rock: "grey", grass: "dry", creatures: { boar: 4, zombie: 2, wolf: 1 }, levels: [18, 23],
   },
   {
     id: "redstep", name: "Redstep", x: 2500, z: -2350, lift: 10, relief: 1.7, mountains: 0.6, terrace: 9,
     ground: "#8a5a3a", crest: "#c3844f", woods: 0.06, trees: ["dead"],
-    rock: "red", grass: "dry", creatures: { golem: 2, boar: 1.5, wisp: 1 },
+    rock: "red", grass: "dry", creatures: { golem: 2, boar: 1.5, wisp: 1 }, levels: [25, 30],
   },
   {
     id: "ashfall", name: "Ashfall", x: -2450, z: -2150, relief: 1.2,
     ground: "#4a4642", crest: "#706860", woods: 0.55, trees: ["dead", "dead", "pine"],
-    rock: "dark", grass: "ash", creatures: { wisp: 4, zombie: 3 },
+    rock: "dark", grass: "ash", creatures: { wisp: 4, zombie: 3 }, levels: [11, 16],
   },
   {
     id: "lowfen", name: "Lowfen", x: -200, z: -2550, lift: -8, relief: 0.25, mountains: 0,
     ground: "#3d5839", crest: "#5f7a47", woods: 0.4, trees: ["dead", "birch", "birch"],
-    rock: "dark", grass: "reeds", creatures: { wretch: 4, spider: 2, zombie: 1 },
+    rock: "dark", grass: "reeds", creatures: { wretch: 4, spider: 2, zombie: 1 }, levels: [13, 18],
   },
 ];
 
@@ -369,8 +388,8 @@ const TERRA_LAKES: LakeDefinition[] = [
  *  on a cliff. */
 function terraFlats(): FlatZone[] {
   const flats: FlatZone[] = [
-    // The Gate Circle: big, and dead level, because it is the first thing
-    // anyone sees.
+    // The Gate Circle: big, and dead level, because it is the landmark the
+    // whole map is arranged around.
     { x: 0, z: 0, radius: 34, falloff: 60 },
     // Daso sits on a level shelf. A logging town on a hillside would look
     // like an accident.
@@ -395,7 +414,9 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     // Eight kilometres a side — a hundred times the eighty it used to be.
     // Big enough that crossing it is a trip and distant peaks are landmarks.
     size: TERRA_SIZE,
-    spawn: { x: 0, z: 0 },
+    // Daso, by its waystone: everyone starts in the logging town, among
+    // people with work for them, rather than alone at the Gate Circle.
+    spawn: waystoneArrival(TERRA_WAYSTONES.find((w) => w.id === "daso")!),
     // Daylight. The other two Ostras keep their gloom, which is the point:
     // arriving on Terra should feel like coming home, and a place described as
     // a mixing pot where most people live should not look like a crypt.
@@ -457,10 +478,9 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     // Gentle enough to learn the fight in. Level carries the danger further
     // out; this is the floor.
     difficulty: { damage: 0.6, health: 1 },
-    // The starter camps by the Gate Circle, kept from when Terra was eighty
-    // metres across. Spread wide: packed tighter than a Risen's aggro radius,
-    // every approach pulls the whole camp at once and a new player never gets a
-    // winnable first fight.
+    // The camps by the Gate Circle, kept from when Terra was eighty metres
+    // across and this was where everyone started. Spread wide: packed tighter
+    // than a Risen's aggro radius, every approach pulls the whole camp at once.
     spawns: [
       { kind: "zombie", count: 4, x: 20, z: -40, radius: 11 },
       { kind: "spider", count: 3, x: 44, z: 22, radius: 8 },
@@ -482,9 +502,14 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       forest: 0.5,
       forestWavelength: 650,
       rocks: 0.018,
-      campSpacing: 210,
-      campChance: 0.62,
-      metresPerLevel: 380,
+      // About seven times the camps of the first 210 m at 62%: walking between
+      // fights was the boring part. Camps sit in the middle half of their cell
+      // (see `campsIn`), so even this close neighbours stay 45 m apart and do
+      // not share aggro. Everything awake near a player is replicated and
+      // drawn, so density costs frames — this is about as far as it goes.
+      campSpacing: 90,
+      campChance: 0.85,
+      levelReach: 900,
     },
   },
 
@@ -526,9 +551,11 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     terrain: { seed: 24, hills: { amplitude: 0.9, wavelength: 40, octaves: 3 }, flats: [] },
     settlements: [],
     difficulty: { damage: 1, health: 1.2 },
-    // The gods' realm is guarded, not infested.
+    // The gods' realm is guarded, not infested. Levels 30-65 are meant to
+    // live here once it is more than a courtyard; for now, its guards are
+    // the next step up from the edge of Terra.
     spawns: [
-      { kind: "spider", count: 2, x: 14, z: 10, radius: 4, level: 4 },
+      { kind: "spider", count: 2, x: 14, z: 10, radius: 4, level: 35 },
     ],
     waystones: [],
     roads: [],
@@ -580,11 +607,12 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     // "A place of power and war." Going here before you are ready should be a
     // mistake you feel.
     difficulty: { damage: 1.6, health: 1.5 },
-    // The realm of fire and pain earns its name.
+    // The realm of fire and pain earns its name. The top of the curve, 65-100,
+    // belongs here; like the Ascendant it is a placeholder at that level.
     spawns: [
-      { kind: "zombie", count: 6, x: -8, z: -2, radius: 9, level: 6 },
-      { kind: "zombie", count: 3, x: 16, z: -6, radius: 5, level: 6 },
-      { kind: "spider", count: 4, x: -18, z: -12, radius: 7, level: 7 },
+      { kind: "zombie", count: 6, x: -8, z: -2, radius: 9, level: 68 },
+      { kind: "zombie", count: 3, x: 16, z: -6, radius: 5, level: 70 },
+      { kind: "spider", count: 4, x: -18, z: -12, radius: 7, level: 72 },
     ],
     waystones: [],
     roads: [],

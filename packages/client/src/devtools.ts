@@ -1,7 +1,7 @@
 import {
   LEVEL_SCALE,
   levelAt,
-  MAX_PROFICIENCY,
+  MAX_LEVEL,
   RARITIES,
   RARITY,
   rarityHex,
@@ -87,8 +87,12 @@ export class DevMenu {
           <label><input type="checkbox" data-act="god"> God mode</label>
         </div>
         <div class="row">
-          <input type="number" class="dev-skill" value="120" min="0" max="${MAX_PROFICIENCY}" step="10">
-          <button type="button" data-act="skills">Set every skill</button>
+          <input type="number" class="dev-char-level" value="10" min="1" max="${MAX_LEVEL}" step="1">
+          <button type="button" data-act="setLevel">Set level</button>
+        </div>
+        <div class="row">
+          <input type="number" class="dev-xp" value="1000" min="1" step="100">
+          <button type="button" data-act="giveXp" title="As if earned: levels up, with the banner">Give XP</button>
         </div>
       </section>
       <section>
@@ -225,9 +229,14 @@ export class DevMenu {
       case "god":
         this.hooks.send({ cmd: "god", on: (target as HTMLInputElement).checked });
         break;
-      case "skills": {
-        const value = Number((this.root.querySelector(".dev-skill") as HTMLInputElement).value);
-        if (Number.isFinite(value)) this.hooks.send({ cmd: "skills", value });
+      case "setLevel": {
+        const value = Number((this.root.querySelector(".dev-char-level") as HTMLInputElement).value);
+        if (Number.isFinite(value)) this.hooks.send({ cmd: "level", value });
+        break;
+      }
+      case "giveXp": {
+        const amount = Number((this.root.querySelector(".dev-xp") as HTMLInputElement).value);
+        if (Number.isFinite(amount)) this.hooks.send({ cmd: "xp", amount });
         break;
       }
       case "here": {

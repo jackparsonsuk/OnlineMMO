@@ -34,10 +34,14 @@ packages/shared/   one copy of everything both sides must agree on
   items.ts           slots, rarities, item bases; an item is a key
                      {base,level,rarity,seed} and describeItem() derives the rest
   itemNames.ts       names and lore from the item's seed
-  skills.ts          proficiency 0-1000 for everything, training, effectiveness
+  levels.ts          character level 1-100: the XP curve, kill XP by level gap,
+                     difficulty ("con") colours
+  classes.ts         classes (the Warrior), per-level stats, ability unlocks,
+                     Fervour
   stats.ts           Might/Focus/Vigour/Spirit + secondaries, and what they do
   elites.ts          rare named elites per region; unsafeElites() at boot
   quests.ts          quest data, objectives, reward choices, questXp
+  vendors.ts         sell prices, vendor stock (pure function of vendor + level)
   combat.ts spells.ts enemies.ts settlements.ts schema.ts constants.ts
 packages/server/
   rooms/OstraRoom.ts one room per Ostra: sim loop, camps, casts, loot, gates
@@ -47,7 +51,7 @@ packages/server/
 packages/client/src/
   session.ts         per-room glue: prediction, input, rigs, combat events,
                      the character screen's camera (setPortrait)
-  character.ts       the character screen: slots, lines to the body, pack, skills
+  character.ts       the character screen: slots, lines to the body, pack, abilities
   devtools.ts        the ` dev menu (dev builds only; server gates `dev` too)
   questUI.ts         quest dialogue (E), tracker, quest log (J)
   terrain.ts         chunk streamer + horizon mesh + groundTone

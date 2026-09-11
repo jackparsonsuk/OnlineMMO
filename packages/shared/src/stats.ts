@@ -104,11 +104,11 @@ export const MAX_ARMOUR_REDUCTION = 0.75;
 /**
  * Fraction of a blow that armour stops, against an attacker of `level`.
  *
- * Measured against the attacker's level rather than your own (you have none):
- * the same breastplate turns a Risen's swing at the Gate Circle into a bruise
- * and does much less against something at the edge of the world. Without that,
- * armour would be worth the same everywhere and every Ostra would feel the
- * same once you had enough of it.
+ * Measured against the attacker's level rather than your own: the same
+ * breastplate turns a Risen's swing by Daso into a bruise and does much less
+ * against something at the edge of the world. Without that, armour would be
+ * worth the same everywhere and every Ostra would feel the same once you had
+ * enough of it — and levelling would quietly make old armour better.
  */
 export function armourReduction(armour: number, attackerLevel: number): number {
   const a = Math.max(0, armour);

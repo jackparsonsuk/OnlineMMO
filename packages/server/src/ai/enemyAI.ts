@@ -71,6 +71,9 @@ export interface EnemyBrain {
   /** Knockback velocity still to be spent, decaying each tick. */
   knockX: number;
   knockZ: number;
+  /** A spitter its quarry has closed on: it stops backing off and fights
+   *  where it stands until they walk clear (see CAUGHT_REACH). */
+  cornered: boolean;
 }
 
 /** Just enough of a player for the AI to hunt it. */
@@ -100,12 +103,23 @@ const HOME_ARRIVAL = 1.2;
  *  are going rather than snapping, which reads as weight. */
 const TURN_RATE = 7;
 
+/**
+ * Close a spitter to within this (centre to centre, beyond its own radius)
+ * and it is caught: it stops backing off and fights where it stands.
+ *
+ * Without it a spitter retreated forever, and once blows took time to land —
+ * Strike takes most of a second, standing — it had always stepped out of reach
+ * before the swing arrived. Chasing it down is still the fight; this is what
+ * makes catching it count. Strike's reach plus a little.
+ */
+const CAUGHT_REACH = 3;
+
 /** Per-second decay of knockback velocity. A shove that ends in ~a third of a
  *  second reads as impact; slower reads as ice. */
 const KNOCK_DECAY = 9;
 
 /** A player who has hurt it is chased this much further than one who hasn't,
- *  so a Voidbolt from the edge of range is never free. */
+ *  so a Heroic Throw from the edge of range is never free. */
 const PROVOKED_REACH = 4;
 
 export function createBrain(x: number, z: number, campId: string, maxHealth: number): EnemyBrain {
@@ -128,6 +142,7 @@ export function createBrain(x: number, z: number, campId: string, maxHealth: num
     staggerUntil: 0,
     knockX: 0,
     knockZ: 0,
+    cornered: false,
   };
 }
 
@@ -140,6 +155,7 @@ export function calmDown(brain: EnemyBrain): void {
   brain.staggerUntil = 0;
   brain.knockX = 0;
   brain.knockZ = 0;
+  brain.cornered = false;
 }
 
 /**
@@ -419,8 +435,15 @@ function advance(
   if (range > 1e-4) turnToward(enemy, Math.atan2(toX, toZ), dt);
 
   // A spitter backs off when you close on it, still facing you — so the way
-  // to fight one is to commit to chasing it down.
-  if (preferred !== undefined && range < preferred - 3 && range > 1e-4) {
+  // to fight one is to commit to chasing it down. Once caught it stands, and
+  // only starts keeping its distance again once you have walked well clear.
+  if (preferred !== undefined) {
+    if (range <= archetype.radius + CAUGHT_REACH) brain.cornered = true;
+    else if (range >= preferred) brain.cornered = false;
+  } else {
+    brain.cornered = false;
+  }
+  if (preferred !== undefined && !brain.cornered && range < preferred - 3 && range > 1e-4) {
     const retreat = archetype.chaseSpeed * 0.75 * dt;
     moveBody(enemy, (-toX / range) * retreat, (-toZ / range) * retreat, world, archetype.radius);
     return;

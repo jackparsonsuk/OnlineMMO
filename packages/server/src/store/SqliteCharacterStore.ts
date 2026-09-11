@@ -2,21 +2,24 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  canWear,
+  DEFAULT_CLASS,
   describeItem,
+  EQUIP_SLOTS,
+  getOstra,
   INVENTORY_SIZE,
+  isClassId,
   isEquipSlot,
-  isGearSkill,
   isOstraId,
-  isSpellId,
   PLAYER_MAX_HEALTH,
-  sanitiseProficiency,
+  sanitiseProgress,
   sanitiseQuestLog,
   slotsFor,
   STARTING_OSTRA,
   wear,
   type Equipment,
   type ItemKey,
-  type Proficiency,
+  type Wearer,
 } from "@mmo/shared";
 import { LEGACY_SLOTS, migrateItem } from "../loot.js";
 import type { CharacterPosition, CharacterRecord, CharacterStore } from "./CharacterStore.js";
@@ -134,6 +137,27 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
       this.db.exec("ALTER TABLE characters ADD COLUMN gold INTEGER NOT NULL DEFAULT 0");
     }
 
+    if (!columns.has("level")) {
+      // Character levels replaced proficiency. Everyone who had trained under
+      // the old rules starts again at level 1 with their gear kept — gear
+      // above their new level waits in the bag (see `parseEquipment`). The
+      // `skills` column above is left where it is, unread, for the same reason
+      // `affinity` was: a migration that deletes data wants a better reason
+      // than tidiness.
+      this.db.exec("ALTER TABLE characters ADD COLUMN level INTEGER NOT NULL DEFAULT 1");
+      this.db.exec("ALTER TABLE characters ADD COLUMN xp INTEGER NOT NULL DEFAULT 0");
+      // ...and back in Daso, where level 1 lives now. Left where they were,
+      // they would wake at level 1 among the Gate Circle's level-7 Risen.
+      const spawn = getOstra(STARTING_OSTRA).spawn;
+      this.db.prepare("UPDATE characters SET ostra_id = ?, x = ?, z = ?")
+        .run(STARTING_OSTRA, spawn.x, spawn.z);
+    }
+
+    if (!columns.has("class_id")) {
+      // Everyone made before classes was a Warrior all along.
+      this.db.exec(`ALTER TABLE characters ADD COLUMN class_id TEXT NOT NULL DEFAULT '${DEFAULT_CLASS}'`);
+    }
+
     if (!columns.has("account_id")) {
       // Nullable on purpose: characters made before accounts existed have no
       // owner and cannot be claimed. They stay in the table, listed for nobody,
@@ -203,22 +227,24 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
   create(character: CharacterRecord): void {
     this.db.prepare(`
       INSERT INTO characters
-        (id, realm_id, account_id, name, colour, ostra_id, x, y, z, yaw, health,
-         skills, inventory, equipment, quests, gold, created_at, last_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, realm_id, account_id, name, colour, class_id, ostra_id, x, y, z, yaw, health,
+         level, xp, inventory, equipment, quests, gold, created_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       character.id,
       character.realmId,
       character.accountId,
       character.name,
       character.colour,
+      character.classId,
       character.ostraId,
       character.x,
       character.y,
       character.z,
       character.yaw,
       character.health,
-      JSON.stringify(character.skills),
+      character.level,
+      character.xp,
       JSON.stringify(character.inventory),
       JSON.stringify(character.equipment),
       JSON.stringify(character.quests),
@@ -231,7 +257,7 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
   savePosition(realmId: string, characterId: string, position: CharacterPosition): void {
     this.db.prepare(`
       UPDATE characters
-         SET ostra_id = ?, x = ?, y = ?, z = ?, yaw = ?, health = ?, skills = ?,
+         SET ostra_id = ?, x = ?, y = ?, z = ?, yaw = ?, health = ?, level = ?, xp = ?,
              inventory = ?, equipment = ?, quests = ?, gold = ?, last_seen_at = ?
        WHERE realm_id = ? AND id = ?
     `).run(
@@ -241,7 +267,8 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
       position.z,
       position.yaw,
       position.health,
-      JSON.stringify(position.skills),
+      position.level,
+      position.xp,
       JSON.stringify(position.inventory),
       JSON.stringify(position.equipment),
       JSON.stringify(position.quests),
@@ -264,11 +291,15 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
   }
 }
 
-/** Hand-editing the database, or a half-written row, should cost a character
- *  a skill — not their whole session. */
-function parseSkills(raw: unknown): Proficiency {
-  return sanitiseProficiency(parseJson(raw), (id) => isSpellId(id) || isGearSkill(id));
-}
+/**
+ * A bag may be over its size by up to a full set of gear. Worn items that no
+ * longer fit the rules go into the bag rather than vanishing (see
+ * `parseEquipment`), even past its size — and that overflow has to survive the
+ * next load too. Cutting back to INVENTORY_SIZE here used to throw it away the
+ * second time the character logged in. The limit is only a guard against a
+ * hand-edited save with ten thousand items in it.
+ */
+const OVERFULL_LIMIT = INVENTORY_SIZE + EQUIP_SLOTS.length;
 
 /**
  * Only keys this build can describe survive a load — a base removed from the
@@ -281,16 +312,18 @@ function parseInventory(raw: unknown): ItemKey[] {
   return parsed
     .map((value) => migrateItem(value))
     .filter((key): key is ItemKey => key !== undefined)
-    .slice(0, INVENTORY_SIZE);
+    .slice(0, OVERFULL_LIMIT);
 }
 
 /**
  * Worn gear, re-worn one piece at a time through the same `wear` the room uses,
  * so a save can never describe a body the rules would not allow — a two-handed
- * maul beside a shield, or a ring in the head slot. Whatever does not fit is
- * returned as `spill` for the bag.
+ * maul beside a shield, a ring in the head slot, a helm above the wearer's
+ * level (which is every character from before levels, the first time they
+ * load), or a robe their class does not wear (everyone from before classes).
+ * Whatever does not fit is returned as `spill` for the bag.
  */
-function parseEquipment(raw: unknown): { equipment: Equipment; spill: ItemKey[] } {
+function parseEquipment(raw: unknown, wearer: Wearer): { equipment: Equipment; spill: ItemKey[] } {
   const parsed = parseJson(raw);
   let equipment: Equipment = {};
   const spill: ItemKey[] = [];
@@ -301,6 +334,10 @@ function parseEquipment(raw: unknown): { equipment: Equipment; spill: ItemKey[] 
     const key = migrateItem(value);
     const item = key !== undefined ? describeItem(key) : undefined;
     if (!slot || !item) continue;
+    if (!canWear(item, wearer)) {
+      spill.push(item.key);
+      continue;
+    }
     const target = slotsFor(item).includes(slot) ? slot : slotsFor(item)[0]!;
     const result = wear(equipment, item, target);
     if (!result) continue;
@@ -337,13 +374,17 @@ function toAccount(row: Record<string, unknown>): AccountRecord {
 
 function toRecord(row: Record<string, unknown>): CharacterRecord {
   const ostraId = row["ostra_id"];
-  const { equipment, spill } = parseEquipment(row["equipment"]);
+  // A class a later build removed falls back rather than locking anyone out.
+  const classId = isClassId(row["class_id"]) ? row["class_id"] : DEFAULT_CLASS;
+  const progress = sanitiseProgress(Number(row["level"] ?? 1), Number(row["xp"] ?? 0));
+  const { equipment, spill } = parseEquipment(row["equipment"], { classId, level: progress.level });
   return {
     id: String(row["id"]),
     realmId: String(row["realm_id"]),
     accountId: String(row["account_id"] ?? ""),
     name: String(row["name"]),
     colour: Number(row["colour"]),
+    classId,
     // A row could name an Ostra a later build removed. Falling back to the
     // starting Ostra strands nobody in a room that no longer exists.
     ostraId: isOstraId(ostraId) ? ostraId : STARTING_OSTRA,
@@ -353,10 +394,12 @@ function toRecord(row: Record<string, unknown>): CharacterRecord {
     yaw: Number(row["yaw"]),
     // A row written before these columns existed reads as null.
     health: Number(row["health"] ?? PLAYER_MAX_HEALTH),
-    skills: parseSkills(row["skills"]),
+    level: progress.level,
+    xp: progress.xp,
     // Anything the body could not hold goes back in the bag — even past its
-    // size, once: losing a worn item to a rules change would be worse than a
-    // briefly overfull pack.
+    // size: losing a worn item to a rules change would be worse than an
+    // overfull pack, which only stops you picking things up until you have
+    // made room. Levels did exactly this to every save made before them.
     inventory: [...parseInventory(row["inventory"]), ...spill],
     equipment,
     quests: sanitiseQuestLog(parseJson(row["quests"])),

@@ -6,7 +6,9 @@
 
 import {
   basesFor,
+  classUsesFamily,
   encodeItem,
+  type ClassId,
   getBase,
   isItemKey,
   itemLevelFor,
@@ -34,6 +36,16 @@ const SOURCE_ODDS: Record<LootSource, Partial<Record<Rarity, number>>> = {
   dungeon: { rare: 55, mythic: 38, legendary: 7 },
   raid: { rare: 25, mythic: 50, legendary: 20, world: 2.5, ostra: 2.5 },
 };
+
+/**
+ * The rarity tilt for a creature: its Ostra's danger, and a little more the
+ * higher its level — up to level 30, the top of Terra, and no further. Levels
+ * run to a hundred now; a tilt that kept climbing would make everything past
+ * the Gates drop nothing but rares, and rare would stop meaning anything.
+ */
+export function dropDanger(ostraDanger: number, creatureLevel: number): number {
+  return ostraDanger * (1 + 0.02 * Math.min(29, Math.max(0, creatureLevel - 1)));
+}
 
 /**
  * Pick a rarity.
@@ -82,8 +94,8 @@ const SLOT_DROP_WEIGHT: Partial<Record<GearSlot, number>> = {
   weapon: 1.4, offhand: 0.7, neck: 0.6, ring: 0.9, sigil: 0.6,
 };
 
-function pickBase(random: () => number, rarity: Rarity): ItemBase | undefined {
-  const pool = basesFor(rarity);
+function pickBase(random: () => number, rarity: Rarity, classId: ClassId): ItemBase | undefined {
+  const pool = basesFor(rarity, classId);
   const slots = [...new Set(pool.map((base) => base.gear))];
   const weights = slots.map((slot) => SLOT_DROP_WEIGHT[slot] ?? 0);
   const total = weights.reduce((sum, weight) => sum + weight, 0);
@@ -113,6 +125,8 @@ export interface DropContext {
   /** Rarity tilt: the Ostra's danger and the creature's level together. */
   danger: number;
   source: LootSource;
+  /** The class of whoever it drops for: only what they can use drops. */
+  classId: ClassId;
   /** The creature's own find, tried first. */
   signature?: { base: string; chance: number };
 }
@@ -124,20 +138,22 @@ export function rollDrop(random: () => number, context: DropContext): ItemKey | 
   const signature = context.signature;
   if (signature && random() < signature.chance) {
     const base = getBase(signature.base);
-    if (base?.rarity) return encodeItem({ base: base.id, level, rarity: base.rarity, seed: newSeed(random) });
+    if (base?.rarity && classUsesFamily(context.classId, base.family)) {
+      return encodeItem({ base: base.id, level, rarity: base.rarity, seed: newSeed(random), classId: context.classId });
+    }
   }
 
   const rarity = rollRarity(random, context.source, context.danger);
-  const base = pickBase(random, rarity);
+  const base = pickBase(random, rarity, context.classId);
   if (!base) return undefined;
-  return encodeItem({ base: base.id, level, rarity, seed: newSeed(random) });
+  return encodeItem({ base: base.id, level, rarity, seed: newSeed(random), classId: context.classId });
 }
 
 /** Development only: one item of exactly this rarity and level. */
-export function rollDebugItem(random: () => number, rarity: Rarity, level: number): ItemKey | undefined {
-  const base = pickBase(random, rarity);
+export function rollDebugItem(random: () => number, rarity: Rarity, level: number, classId: ClassId): ItemKey | undefined {
+  const base = pickBase(random, rarity, classId);
   if (!base) return undefined;
-  return encodeItem({ base: base.id, level, rarity, seed: newSeed(random) });
+  return encodeItem({ base: base.id, level, rarity, seed: newSeed(random), classId });
 }
 
 // --- saves from before items were generated --------------------------------------

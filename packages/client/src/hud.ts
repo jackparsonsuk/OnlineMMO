@@ -1,16 +1,25 @@
 import {
-  proficiencyMultiplier,
-  SPELL_IDS,
+  CLASSES,
+  fervourMultiplier,
+  MAX_LEVEL,
   SPELLS,
+  xpToNext,
+  type ClassId,
   type OstraDefinition,
   type Player,
-  type Proficiency,
+  type ResourceKind,
   type SpellId,
   type WorldState,
 } from "@mmo/shared";
 
-/** How long a skill's XP row lingers after its last gain. */
-const XP_ROW_MS = 8000;
+const RESOURCE_NAMES: Record<ResourceKind, string> = { fervour: "Fervour", mana: "Mana" };
+
+interface AbilitySlot {
+  root: HTMLElement;
+  cool: HTMLElement;
+  meta: HTMLElement;
+  learnedAt: number;
+}
 
 export class Hud {
   private ostraName = document.getElementById("ostra-name") as HTMLElement;
@@ -27,11 +36,19 @@ export class Hud {
   private healthText = document.getElementById("health-text") as HTMLElement;
   private death = document.getElementById("death") as HTMLElement;
   private deathDetail = document.getElementById("death-detail") as HTMLElement;
-  private manaFill = document.querySelector("#mana-bar i") as HTMLElement;
-  private manaText = document.getElementById("mana-text") as HTMLElement;
+  private resourceBar = document.getElementById("resource-bar") as HTMLElement;
+  private resourceFill = document.querySelector("#resource-bar i") as HTMLElement;
+  private resourceText = document.getElementById("resource-text") as HTMLElement;
+  private castbar = document.getElementById("castbar") as HTMLElement;
+  private castFill = document.querySelector("#castbar i") as HTMLElement;
+  private castLabel = document.querySelector("#castbar span") as HTMLElement;
+  private castTimer: number | undefined;
+  private xpRoot = document.getElementById("xp") as HTMLElement;
+  private xpFill = document.querySelector("#xp-bar i") as HTMLElement;
+  private xpLevel = document.querySelector("#xp-text b") as HTMLElement;
+  private xpNumbers = document.querySelector("#xp-text span") as HTMLElement;
   private abilities = document.getElementById("abilities") as HTMLElement;
   private powerText = document.getElementById("power") as HTMLElement;
-  private notes = document.getElementById("notes") as HTMLElement;
   private toast = document.getElementById("toast") as HTMLElement;
   private toastTimer: number | undefined;
   private targetFrame = document.getElementById("target-frame") as HTMLElement;
@@ -46,12 +63,13 @@ export class Hud {
   private lowHealth = false;
   private shownCombo = -1;
   private shownHealth = -1;
-  private shownMana = -1;
+  private shownResource = -1;
   private shownMaxHealth = -1;
-  private shownMaxMana = -1;
+  private shownMaxResource = -1;
   /** Set by main; returns whether sound is now muted. */
   onToggleSound: (() => boolean) | undefined;
-  private slots = new Map<SpellId, { root: HTMLElement; cool: HTMLElement; prof: HTMLElement }>();
+  private slots = new Map<SpellId, AbilitySlot>();
+  private level = 1;
 
   constructor() {
     this.soundToggle.onclick = () => this.setMuted(this.onToggleSound?.() ?? false);
@@ -183,36 +201,48 @@ export class Hud {
     pips?.forEach((pip, index) => pip.classList.toggle("lit", index < step));
   }
 
-  setMana(mana: number, max: number): void {
-    if (mana === this.shownMana && max === this.shownMaxMana) return;
-    this.shownMana = mana;
-    this.shownMaxMana = max;
-    this.manaFill.style.width = `${Math.max(0, Math.min(1, mana / Math.max(1, max))) * 100}%`;
-    this.manaText.textContent = `${mana} / ${max}`;
+  /**
+   * The class's resource under the health bar. Fervour also says what it is
+   * worth right now, because "+21% damage" is the reason to care about it.
+   */
+  setResource(kind: ResourceKind, value: number, max: number): void {
+    if (value === this.shownResource && max === this.shownMaxResource) return;
+    this.shownResource = value;
+    this.shownMaxResource = max;
+    this.resourceBar.dataset["kind"] = kind;
+    this.resourceFill.style.width = `${Math.max(0, Math.min(1, value / Math.max(1, max))) * 100}%`;
+    const bonus = Math.round((fervourMultiplier(value) - 1) * 100);
+    this.resourceText.textContent = kind === "fervour"
+      ? `${RESOURCE_NAMES[kind]} ${value}${bonus > 0 ? ` \u00b7 +${bonus}% damage` : ""}`
+      : `${value} / ${max}`;
 
-    // Grey a spell you cannot currently afford, so the bar answers "why did
+    // Grey what you cannot currently afford, so the bar answers "why did
     // nothing happen?" before you have to ask it.
     for (const [id, slot] of this.slots) {
-      slot.root.classList.toggle("unaffordable", mana < SPELLS[id].manaCost);
+      slot.root.classList.toggle("unaffordable", value < SPELLS[id].cost);
     }
   }
 
-  /** Build the ability bar once. Called when a session starts. */
-  buildAbilityBar(): void {
+  /**
+   * Build the ability bar for a class: every ability it will ever learn, in
+   * order, the ones not yet learned shown locked with the level that brings
+   * them \u2014 so the bar is also the road ahead.
+   */
+  buildAbilityBar(classId: ClassId): void {
     this.abilities.innerHTML = "";
     this.slots.clear();
     this.shownCombo = -1;
+    const resource = RESOURCE_NAMES[CLASSES[classId].resource];
 
-    SPELL_IDS.forEach((id, index) => {
+    CLASSES[classId].abilities.forEach(({ spell: id, level }, index) => {
       const spell = SPELLS[id];
       const root = document.createElement("div");
       root.className = "ability";
+      root.title = spell.description;
       root.innerHTML =
         `<span class="key">${index + 1}</span>` +
         `<span class="name">${spell.name}</span>` +
-        `<span class="meta">Aequum ${spell.aequum}` +
-        `${spell.manaCost > 0 ? ` \u00b7 ${spell.manaCost} mana` : " \u00b7 free"}</span>` +
-        `<span class="prof"></span>` +
+        `<span class="meta" data-cost="${spell.cost > 0 ? `${spell.cost} ${resource}` : "free"}"></span>` +
         (id === "strike" ? `<span class="pips"><i></i><i></i><i></i></span>` : "") +
         `<span class="cool"></span>`;
       this.abilities.appendChild(root);
@@ -220,9 +250,70 @@ export class Hud {
       this.slots.set(id, {
         root,
         cool: root.querySelector(".cool") as HTMLElement,
-        prof: root.querySelector(".prof") as HTMLElement,
+        meta: root.querySelector(".meta") as HTMLElement,
+        learnedAt: level,
       });
     });
+    this.drawLocks();
+    // The resource line re-greys against the new slots on its next update.
+    this.shownResource = -1;
+  }
+
+  /** Your level: the XP bar's label, and which abilities are unlocked. */
+  setXp(level: number, xp: number): void {
+    const next = xpToNext(level);
+    this.xpLevel.textContent = `Level ${level}`;
+    this.xpNumbers.textContent = level >= MAX_LEVEL ? "Max level" : `${xp.toLocaleString()} / ${next.toLocaleString()} XP`;
+    this.xpFill.style.width = `${level >= MAX_LEVEL ? 100 : Math.min(100, (xp / Math.max(1, next)) * 100)}%`;
+    if (level !== this.level) {
+      this.level = level;
+      this.drawLocks();
+    }
+  }
+
+  private drawLocks(): void {
+    for (const slot of this.slots.values()) {
+      const locked = slot.learnedAt > this.level;
+      slot.root.classList.toggle("locked", locked);
+      slot.meta.textContent = locked ? `Level ${slot.learnedAt}` : slot.meta.dataset["cost"] ?? "";
+    }
+  }
+
+  /** A cast with a cast time has started: fill the bar over its length. */
+  startCast(name: string, ms: number): void {
+    window.clearTimeout(this.castTimer);
+    this.castbar.classList.remove("interrupted");
+    this.castLabel.textContent = name;
+    this.castbar.hidden = false;
+    this.castFill.style.transition = "none";
+    this.castFill.style.width = "0%";
+    // Force the reset to take before the fill starts.
+    void this.castFill.offsetWidth;
+    this.castFill.style.transition = `width ${ms}ms linear`;
+    this.castFill.style.width = "100%";
+  }
+
+  /** The cast landed, or was cancelled by moving — which says so briefly. */
+  endCast(interrupted: boolean): void {
+    window.clearTimeout(this.castTimer);
+    if (!interrupted) {
+      this.castbar.hidden = true;
+      return;
+    }
+    this.castbar.classList.add("interrupted");
+    this.castLabel.textContent = "Interrupted";
+    this.castFill.style.transition = "none";
+    this.castTimer = window.setTimeout(() => { this.castbar.hidden = true; }, 700);
+  }
+
+  /** "+77 XP", floating off the end of the bar. */
+  xpGain(amount: number): void {
+    if (amount <= 0) return;
+    const drop = document.createElement("div");
+    drop.className = "xp-drop";
+    drop.textContent = `+${amount.toLocaleString()} XP`;
+    this.xpRoot.appendChild(drop);
+    window.setTimeout(() => drop.remove(), 1400);
   }
 
   /** Sweep the cooldown shade on each slot. Cheap enough to run every frame. */
@@ -238,22 +329,7 @@ export class Hud {
     }
   }
 
-  /**
-   * Show how practised the caster is at each spell.
-   *
-   * Proficiency is shown as the damage bonus it actually buys rather than a
-   * raw number, because "+7% damage" answers the question a bare 47 does not.
-   * The raw numbers live on the character screen's skills page.
-   */
-  setSkills(skills: Proficiency): void {
-    for (const [id, slot] of this.slots) {
-      const proficiency = skills[id] ?? 0;
-      const bonus = Math.round((proficiencyMultiplier(proficiency) - 1) * 100);
-      slot.prof.textContent = bonus > 0 ? `+${bonus}%` : "";
-    }
-  }
-
-  /** The one number for "how strong is my gear, for me". */
+  /** The one number for "how strong is my gear". */
   setPower(power: number): void {
     this.shownPower = power;
     this.drawPurse();
@@ -285,48 +361,6 @@ export class Hud {
   }
 
   /**
-   * RuneScape-style XP drops: one row per skill you are training, each with
-   * its level, a bar filling to the next one, and the XP each hit landed
-   * floating off it. A blow that trains a weapon, a spell and your armour
-   * shows all three. A row stays for XP_ROW_MS after its last gain, so the
-   * list settles rather than flickering between hits.
-   */
-  xpDrop(skill: string, level: number, fraction: number, xp: number): void {
-    let row = this.xpRows.get(skill);
-    if (!row) {
-      const el = document.createElement("div");
-      el.className = "xp-row";
-      el.innerHTML = `<div class="xp-head"><span class="xp-name"></span><span class="xp-next"></span></div>` +
-        `<div class="xp-bar"><i></i></div>`;
-      document.getElementById("xp-tracker")?.appendChild(el);
-      row = { el, timer: 0 };
-      this.xpRows.set(skill, row);
-    }
-    const { el } = row;
-    el.classList.remove("leaving");
-    (el.querySelector(".xp-name") as HTMLElement).textContent = `${skill} ${level}`;
-    (el.querySelector(".xp-bar i") as HTMLElement).style.width = `${Math.round(fraction * 100)}%`;
-    (el.querySelector(".xp-next") as HTMLElement).textContent = `${Math.round(fraction * 100)} / 100 xp`;
-
-    const drop = document.createElement("div");
-    drop.className = "xp-drop";
-    drop.textContent = `+${xp} xp`;
-    el.appendChild(drop);
-    window.setTimeout(() => drop.remove(), 1400);
-
-    window.clearTimeout(row.timer);
-    row.timer = window.setTimeout(() => {
-      el.classList.add("leaving");
-      window.setTimeout(() => {
-        if (!el.classList.contains("leaving")) return;
-        el.remove();
-        this.xpRows.delete(skill);
-      }, 400);
-    }, XP_ROW_MS);
-  }
-  private readonly xpRows = new Map<string, { el: HTMLElement; timer: number }>();
-
-  /**
    * News for the whole Ostra — an elite waking or falling. Shares the level-up
    * column, so it stacks with them rather than covering them.
    */
@@ -338,28 +372,16 @@ export class Hud {
     window.setTimeout(() => banner.remove(), 6000);
   }
 
-  /** A level gained: centre of the screen, big, and gone in a few seconds. */
-  levelUp(skill: string, level: number): void {
+  /** A level gained: centre of the screen, big, and gone in a few seconds —
+   *  with anything it taught you, since that is what you will want to try. */
+  levelUp(level: number, learned: readonly string[]): void {
     const banner = document.createElement("div");
     banner.className = "level-up";
-    banner.innerHTML = `<small>Level up</small><b>${escapeHtml(skill)}</b><span>${level}</span>`;
-    // Stacked in one column, so a blow that levels two skills shows both.
+    banner.innerHTML = `<small>Level up</small><span>${level}</span>` +
+      (learned.length > 0 ? `<b>You have learned ${learned.map(escapeHtml).join(" and ")}</b>` : "");
+    // Stacked in one column, so a big quest turn-in worth two levels shows both.
     document.getElementById("level-ups")?.appendChild(banner);
-    window.setTimeout(() => banner.remove(), 3000);
-  }
-
-  /**
-   * A small line in the corner that rises and fades: "Heavy Armour 14".
-   * Skill-ups arrive in bursts early on; these stack quietly rather than
-   * fighting the toast for attention, and the oldest are dropped past four.
-   */
-  note(text: string): void {
-    const line = document.createElement("div");
-    line.className = "note";
-    line.textContent = text;
-    this.notes.appendChild(line);
-    while (this.notes.childElementCount > 4) this.notes.firstElementChild?.remove();
-    window.setTimeout(() => line.remove(), 3200);
+    window.setTimeout(() => banner.remove(), learned.length > 0 ? 4500 : 3000);
   }
 
   setDead(dead: boolean, detail = ""): void {

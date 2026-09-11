@@ -13,8 +13,8 @@
 
 export type Sound =
   | "swing" | "swingHeavy" | "hit" | "hitHeavy" | "crit"
-  | "bolt" | "boltHit" | "sunder" | "hurt" | "evade"
-  | "windup" | "kill" | "pickup" | "death"
+  | "throw" | "throwHit" | "sunder" | "cry" | "hurt" | "evade"
+  | "windup" | "kill" | "pickup" | "death" | "levelUp"
   | "growl" | "snort" | "gurgle" | "crackle" | "rumble"
   | "spit" | "charge" | "burst" | "slam";
 
@@ -103,17 +103,24 @@ export class SoundBoard {
         this.crack(t, 3200 * pitch, 0.06, 0.45 * volume);
         this.tone(t, 1320 * pitch, 1760 * pitch, 0.16, "triangle", 0.18 * volume);
         break;
-      case "bolt":
-        this.tone(t, 900 * pitch, 260 * pitch, 0.22, "sawtooth", 0.14 * volume, 2400);
-        this.whoosh(t, 1200, 3800, 0.14, 0.14 * volume);
+      case "throw":
+        // A weapon turning end over end: two quick cuts of air.
+        this.whoosh(t, 600 * pitch, 2200 * pitch, 0.12, 0.3 * volume);
+        this.whoosh(t + 0.1, 800 * pitch, 2600 * pitch, 0.12, 0.22 * volume);
         break;
-      case "boltHit":
-        this.tone(t, 520 * pitch, 110, 0.2, "square", 0.12 * volume, 1400);
-        this.crack(t, 2800, 0.07, 0.3 * volume);
+      case "throwHit":
+        this.thud(t, 140 * pitch, 50, 0.16, 0.8 * volume);
+        this.crack(t, 2000 * pitch, 0.07, 0.4 * volume);
         break;
       case "sunder":
         this.thud(t, 90 * pitch, 32, 0.45, 1.0 * volume);
         this.rumble(t, 0.5, 0.5 * volume);
+        break;
+      case "cry":
+        // A roar: a low voice climbing, over a rumble.
+        this.tone(t, 95 * pitch, 190 * pitch, 0.55, "sawtooth", 0.16 * volume, 900);
+        this.tone(t, 142 * pitch, 260 * pitch, 0.5, "sawtooth", 0.08 * volume, 1200);
+        this.rumble(t, 0.6, 0.35 * volume);
         break;
       case "hurt":
         this.thud(t, 110 * pitch, 60, 0.14, 0.8 * volume);
@@ -134,6 +141,14 @@ export class SoundBoard {
       case "pickup":
         this.tone(t, 880, 880, 0.08, "triangle", 0.16 * volume);
         this.tone(t + 0.08, 1320, 1320, 0.12, "triangle", 0.16 * volume);
+        break;
+      case "levelUp":
+        // A rising major arpeggio, and the top note held: the one sound in
+        // the game that is only ever good news.
+        [523, 659, 784, 1047].forEach((frequency, i) => {
+          this.tone(t + i * 0.09, frequency, frequency, i === 3 ? 0.7 : 0.16, "triangle", 0.2 * volume);
+        });
+        this.tone(t + 0.27, 1568, 1568, 0.6, "sine", 0.07 * volume);
         break;
       case "death":
         this.tone(t, 330, 80, 0.9, "triangle", 0.22 * volume);

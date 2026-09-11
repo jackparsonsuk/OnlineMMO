@@ -1,10 +1,12 @@
 import { matchMaker, Room, ServerError, type Client, type Rewind } from "@colyseus/core";
 import {
+  addXp,
   applyInput,
-  ARMOUR_SLOTS,
   armourReduction,
+  BATTLE_CRY_HOLD_MS,
   buildingColliders,
   campsIn,
+  canWear,
   characterStats,
   COMBAT_LINGER_MS,
   COMBO_FINISHER_KNOCKBACK,
@@ -22,12 +24,18 @@ import {
   Enemy,
   ENEMY_RESPAWN_MS,
   EnemyState,
+  FERVOUR_DRAIN_PER_SECOND,
+  FERVOUR_PER_BLOW,
+  FERVOUR_PER_SECOND,
+  fervourMultiplier,
   findGate,
   findVillager,
-  GEAR_SKILL_IDS,
+  getClass,
   getQuest,
-  isGearSkill,
-  isSpellId,
+  killXpFor,
+  knowsSpell,
+  MAX_LEVEL,
+  maxResourceFor,
   objectiveTarget,
   questReady,
   questRewardItems,
@@ -40,7 +48,6 @@ import {
   GROUND_ITEM_TTL_MS,
   GroundItem,
   LOOT_CLAIM_MS,
-  grownProficiency,
   HEALTH_REGEN_FRACTION_PER_SECOND,
   INVENTORY_SIZE,
   isEquipSlot,
@@ -54,9 +61,7 @@ import {
   levelDamageScale,
   levelHealthScale,
   manaRegenFor,
-  MAX_PROFICIENCY,
   maxHealthFor,
-  maxManaFor,
   MoveInput,
   PICKUP_RADIUS,
   PLAYER_MAX_HEALTH,
@@ -72,12 +77,18 @@ import {
   slotsFor,
   spellDamage,
   spellFromWire,
-  SPELL_IDS,
+  DEFAULT_CLASS,
+  buyPrice,
+  packValue,
+  vendorStock,
+  castSteps,
+  isMoving,
   STRIKE_COMBO_LENGTH,
   STRIKE_COMBO_WINDOW_MS,
   wear,
   type CampDefinition,
   type CharacterStats,
+  type ClassId,
   type Collider,
   type EliteAbility,
   type EliteDefinition,
@@ -94,13 +105,11 @@ import {
   TICK_RATE,
   type BoxCollider,
   type Equipment,
-  type Proficiency,
-  type SkillId,
   type Spell,
   type SpellId,
   WorldState,
 } from "@mmo/shared";
-import { rollDebugItem, rollDrop } from "../loot.js";
+import { dropDanger, rollDebugItem, rollDrop } from "../loot.js";
 import {
   calmDown,
   createBrain,
@@ -146,18 +155,26 @@ interface Session {
   transferring: boolean;
   /** Wall-clock ms when each spell may be cast again. */
   nextCastAt: Partial<Record<SpellId, number>>;
-  /** Live proficiency in everything; written back to the store on save. */
-  skills: Proficiency;
+  classId: ClassId;
+  /** Live level and XP; written back to the store on save. `level` is also
+   *  replicated on the player, for everyone's nametags. */
+  level: number;
+  xp: number;
   /** Carried items, and what is worn. Private: nobody else sees a bag. */
   inventory: ItemKey[];
   equipment: Equipment;
-  /** What the worn set adds up to for this character's training. Recomputed
-   *  whenever gear or a relevant skill changes, read on every blow. */
+  /** What this character adds up to: class and level, and the worn set.
+   *  Recomputed whenever either changes, read on every blow. */
   stats: CharacterStats;
-  /** Fractional mana and health carried between ticks, so a regen of a few
-   *  points a second is not rounded away to nothing at 30Hz. */
-  manaCarry: number;
+  /** Fractional resource and health carried between ticks, so a change of a
+   *  few points a second is not rounded away to nothing at 30Hz. */
+  resourceCarry: number;
   healthCarry: number;
+  /** Wall-clock ms until which Fervour does not drain (Battle Cry). */
+  fervourHoldUntil: number;
+  /** A cast with a cast time under way: inputs left until it lands, and the
+   *  latest aim. Moving cancels it (see `stepCast`). */
+  pendingCast: { spell: Spell; stepsLeft: number; aim: number } | undefined;
   /** Wall-clock ms when a fallen player wakes at a waystone. */
   respawnAt: number;
   /** Where they fell, to pick the nearest waystone. */
@@ -170,7 +187,7 @@ interface Session {
   comboAt: number;
   /** The creature they have selected. Spells that hit one thing prefer it. */
   targetId: string | undefined;
-  /** Development only: blows land (and train armour) but take no health. */
+  /** Development only: blows land but take no health. */
   god: boolean;
   quests: QuestLog;
   gold: number;
@@ -208,7 +225,7 @@ const TRANSFER_TIMEOUT_MS = 10_000;
 /**
  * Camps are only populated while somebody is near them.
  *
- * Terra holds ~700 camps and ~3000 creatures. Simulating and replicating all of
+ * Terra holds ~5000 camps and ~21000 creatures. Simulating and replicating all of
  * them for a map where everyone is standing in one corner would be the most
  * expensive thing the server does, for nothing anyone can see. A camp wakes
  * when a player comes within ACTIVATE of it — well beyond draw distance, so
@@ -326,8 +343,14 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       this.onQuestAccept(client, message?.quest));
     this.onMessage("questAbandon", (client, message: { quest?: unknown }) =>
       this.onQuestAbandon(client, message?.quest));
-    this.onMessage("questComplete", (client, message: { quest?: unknown; choice?: unknown; skill?: unknown }) =>
-      this.onQuestComplete(client, message?.quest, message?.choice, message?.skill));
+    this.onMessage("questComplete", (client, message: { quest?: unknown; choice?: unknown }) =>
+      this.onQuestComplete(client, message?.quest, message?.choice));
+    this.onMessage("vendorSell", (client, message: { vendor?: unknown; item?: unknown }) =>
+      this.onVendorSell(client, message?.vendor, message?.item));
+    this.onMessage("vendorSellAll", (client, message: { vendor?: unknown }) =>
+      this.onVendorSell(client, message?.vendor, undefined));
+    this.onMessage("vendorBuy", (client, message: { vendor?: unknown; index?: unknown }) =>
+      this.onVendorBuy(client, message?.vendor, message?.index));
     // Cheats for testing. Registered at all only outside production, so no
     // amount of crafting a message reaches them on a real server.
     if (context.devTools) {
@@ -383,7 +406,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         // so its rollback replays exactly the frames we haven't applied yet.
         for (const input of this.inputs.get(sessionId)) {
           applyInput(player, input, ctx.dt, world, !player.inCombat);
-          if (input.cast) this.tryCast(sessionId, session, player, input.cast, input.aim, now);
+          this.stepCast(sessionId, session, player, input, now);
         }
 
         this.checkGates(sessionId, session, player);
@@ -392,7 +415,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       this.stepEnemies(ctx.dt, world, now);
       this.stepElites(now);
       this.updateCombatFlags(now);
-      this.regenerate(ctx.dt);
+      this.regenerate(ctx.dt, now);
       this.processRespawns(now);
       this.processGround(now);
       if (this.tick % CAMP_CHECK_TICKS === 0) {
@@ -459,6 +482,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       y: groundHeight(this.ostra, x, z),
       z,
       yaw: character.yaw,
+      level: character.level,
       // A character stored at 0 HP died as the process went down; wake them
       // whole rather than dead on arrival with no respawn timer running.
       health: character.health > 0 ? character.health : PLAYER_MAX_HEALTH,
@@ -466,12 +490,14 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
     // Gear is loaded before anything can read maxHealth, so the bars are right
     // on the first frame rather than a patch later.
-    const stats = characterStats(character.equipment, character.skills);
+    const stats = characterStats(character.equipment, { classId: character.classId, level: character.level });
+    const resource = getClass(character.classId).resource;
     const joined = this.state.players.get(client.sessionId)!;
     joined.maxHealth = maxHealthFor(stats.totals);
-    joined.maxMana = maxManaFor(stats.totals);
+    joined.maxResource = maxResourceFor(resource, stats.totals);
     if (joined.health > joined.maxHealth) joined.health = joined.maxHealth;
-    joined.mana = joined.maxMana;
+    // Mana starts full; Fervour starts cold, because it is earned by fighting.
+    joined.resource = resource === "fervour" ? 0 : joined.maxResource;
 
     this.sessions.set(client.sessionId, {
       characterId: character.id,
@@ -480,12 +506,16 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       suppressedGate: this.gateContaining(x, z)?.id,
       transferring: false,
       nextCastAt: {},
-      skills: { ...character.skills },
+      pendingCast: undefined,
+      classId: character.classId,
+      level: character.level,
+      xp: character.xp,
       inventory: [...character.inventory],
       equipment: { ...character.equipment },
       stats,
-      manaCarry: 0,
+      resourceCarry: 0,
       healthCarry: 0,
+      fervourHoldUntil: 0,
       respawnAt: 0,
       diedAtX: x,
       diedAtZ: z,
@@ -514,7 +544,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   private onRequestProfile(client: Client): void {
     const session = this.sessions.get(client.sessionId);
     const player = this.state.players.get(client.sessionId);
-    if (session && player) this.sendProfile(client.sessionId, session, player);
+    if (session && player) this.sendProfile(client.sessionId, session);
   }
 
   onLeave(client: Client): void {
@@ -531,7 +561,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         z: player.z,
         yaw: player.yaw,
         health: player.health,
-        skills: session.skills,
+        level: session.level,
+        xp: session.xp,
         inventory: session.inventory,
         equipment: session.equipment,
         quests: session.quests,
@@ -723,10 +754,40 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   }
 
   /**
-   * Resolve one cast.
+   * One input's worth of casting: advance or cancel a cast under way, or
+   * start one if an ability key is held.
    *
-   * Every spell runs through the same shape test — a ring is just an arc of
-   * 2*PI — so adding a spell is a table entry rather than a new code path.
+   * Casts are counted in inputs, not milliseconds (`castSteps`), and the
+   * client counts the same inputs as it sends them — so a swing lands, or is
+   * cancelled by a step with movement in it, at the same input on both sides.
+   */
+  private stepCast(sessionId: string, session: Session, player: Player, input: MoveInput, now: number): void {
+    const moving = isMoving(input);
+    const pending = session.pendingCast;
+    if (pending) {
+      if (moving) {
+        // Moved: the cast is lost, costs nothing, and can be tried again at
+        // once — as in WoW, a cancelled cast does not start its cooldown.
+        session.pendingCast = undefined;
+        delete session.nextCastAt[pending.spell.id];
+        this.clients.getById(sessionId)?.send("castCancelled", { spell: pending.spell.id });
+        return;
+      }
+      // Aim follows the target for as long as the swing takes.
+      if (Number.isFinite(input.aim)) pending.aim = input.aim;
+      pending.stepsLeft--;
+      if (pending.stepsLeft <= 0) {
+        session.pendingCast = undefined;
+        this.completeCast(sessionId, session, player, pending.spell, pending.aim, now);
+      }
+      return;
+    }
+    if (input.cast) this.tryCast(sessionId, session, player, input.cast, input.aim, moving, now);
+  }
+
+  /**
+   * Start a cast: an instant one resolves now, one with a cast time waits
+   * for `stepCast` to finish it. Nothing with a cast time starts on the move.
    */
   private tryCast(
     sessionId: string,
@@ -734,16 +795,53 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     player: Player,
     wire: number,
     aim: number,
+    moving: boolean,
     now: number,
   ): void {
     const spell = spellFromWire(wire);
     if (!spell) return;
 
+    // Only what this class learns, and only once you are level enough. The
+    // client greys the rest out; this is what makes that true.
+    if (!knowsSpell(session.classId, session.level, spell.id)) return;
     if (now < (session.nextCastAt[spell.id] ?? 0)) return;
-    if (player.mana < spell.manaCost) return;
+    if (player.resource < spell.cost) return;
+    const steps = castSteps(spell);
+    if (steps > 0 && moving) return;
 
     session.nextCastAt[spell.id] = now + spell.cooldownMs;
-    player.mana -= spell.manaCost;
+    if (steps > 0) {
+      session.pendingCast = { spell, stepsLeft: steps, aim: Number.isFinite(aim) ? aim : player.yaw };
+      return;
+    }
+    this.completeCast(sessionId, session, player, spell, aim, now);
+  }
+
+  /**
+   * Resolve one cast, instant or at the end of its cast time.
+   *
+   * Every spell runs through the same shape test — a ring is just an arc of
+   * 2*PI — so adding a spell is a table entry rather than a new code path.
+   */
+  private completeCast(
+    sessionId: string,
+    session: Session,
+    player: Player,
+    spell: Spell,
+    aim: number,
+    now: number,
+  ): void {
+    // Paid on completion, as in WoW; something may have drained it since.
+    if (player.resource < spell.cost) return;
+    // A spender hits with the Fervour it is cashing in; what it costs is the
+    // bonus on every blow after it. That is the whole trade.
+    const fervour = getClass(session.classId).resource === "fervour" ? player.resource : 0;
+    player.resource -= spell.cost;
+
+    if (spell.targeting === "self") {
+      this.castOnSelf(sessionId, session, player, spell, now);
+      return;
+    }
 
     // The chain advances only if the last Strike was recent enough.
     let combo = 0;
@@ -758,7 +856,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     // Aim is client-supplied, like facing always was: it is only a direction,
     // and the shape test still bounds what it can reach.
     const yaw = Number.isFinite(aim) ? aim : player.yaw;
-    const hits = this.resolveSpell(sessionId, player, spell, session, yaw, combo, now);
+    const hits = this.resolveSpell(sessionId, player, spell, session, yaw, combo, fervour, now);
 
     // Everyone nearby sees the cast, so a fight between other players and a
     // camp is something you can watch rather than a set of numbers changing.
@@ -771,59 +869,30 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     if (hits.length === 0) return;
     session.combatUntil = now + COMBAT_LINGER_MS;
 
-    // Proficiency only grows on a LANDED cast. "The more you use magic the
-    // better you become" would otherwise mean facing a wall and holding a key,
-    // which is training in the least interesting sense. What you can learn is
-    // bounded by the toughest thing you hit.
-    let level = 1;
-    for (const hit of hits) level = Math.max(level, this.state.enemies.get(hit.id)?.level ?? 1);
-
-    let changed = this.train(session, spell.id, level);
-    // Whatever is in your hands learns from the blow too — both hands, since
-    // a dagger or focus in the off hand is part of the swing.
-    const trained = new Set<SkillId>();
-    for (const slot of ["weapon", "offhand"] as const) {
-      const key = session.equipment[slot];
-      const skill = key !== undefined ? describeItem(key)?.skill : undefined;
-      // A shield learns from blows taken, not dealt.
-      if (!skill || skill === "shields" || trained.has(skill)) continue;
-      trained.add(skill);
-      changed = this.train(session, skill, level) || changed;
+    // A free blow that lands stokes Fervour. Only a landed one: otherwise the
+    // way to build it would be to stand in a field swinging at the air.
+    if (spell.builds && getClass(session.classId).resource === "fervour") {
+      player.resource = Math.min(player.maxResource, player.resource + FERVOUR_PER_BLOW);
     }
-    // Trinkets channel magic: they learn from spells that cost mana.
-    if (spell.manaCost > 0 && this.wearsTrinket(session)) {
-      changed = this.train(session, "attunement", level) || changed;
-    }
-    if (changed) this.skillsChanged(sessionId, session, player);
   }
 
   /**
-   * One use of a skill against something of `level`. Returns whether it grew
-   * at all — every gain is shown as XP, so every gain is sent.
+   * A spell with no target: something the caster does to themselves. Battle
+   * Cry is the only one — Fervour to full, held there from draining for a
+   * while — but it is shaped like a table entry so the next is too.
    */
-  private train(session: Session, skill: SkillId, level: number, share = 1): boolean {
-    const before = session.skills[skill] ?? 0;
-    const after = grownProficiency(before, level, share);
-    if (after === before) return false;
-    session.skills[skill] = after;
-    return true;
+  private castOnSelf(sessionId: string, session: Session, player: Player, spell: Spell, now: number): void {
+    if (spell.id === "battleCry") {
+      player.resource = player.maxResource;
+      session.fervourHoldUntil = now + BATTLE_CRY_HOLD_MS;
+    }
+    this.broadcastNear(player.x, player.z, "cast", {
+      by: sessionId, spell: spell.id, yaw: player.yaw, combo: 0, hits: [],
+    });
   }
 
-  private wearsTrinket(session: Session): boolean {
-    return session.equipment.neck !== undefined || session.equipment.ring1 !== undefined
-      || session.equipment.ring2 !== undefined || session.equipment.sigil !== undefined;
-  }
-
-  /**
-   * A skill grew: tell the client (it shows the XP), and recompute what the
-   * gear is worth now that it fits a little better.
-   */
-  private skillsChanged(sessionId: string, session: Session, player: Player): void {
-    this.refreshStats(session, player);
-    this.clients.getById(sessionId)?.send("skills", { skills: session.skills });
-  }
-
-  /** Apply a spell to whatever it catches, and describe what happened. */
+  /** Apply a spell to whatever it catches, and describe what happened.
+   *  `fervour` is the caster's before paying for this cast. */
   private resolveSpell(
     sessionId: string,
     player: Player,
@@ -831,14 +900,15 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     session: Session,
     yaw: number,
     combo: number,
+    fervour: number,
     now: number,
   ): CastHit[] {
     // Where this player saw the world when they cast, not where it is now.
     const seen = this.rewind.lastSeenBy(sessionId);
-    // Gear adds to the spell; training multiplies the lot. Two axes, kept
-    // separate so neither makes the other pointless.
+    // Level and gear add to the spell through its attribute; Fervour
+    // multiplies the lot.
     const totals = session.stats.totals;
-    const base = spellDamage(spell, session.skills[spell.id] ?? 0, totals);
+    const base = spellDamage(spell, totals) * fervourMultiplier(fervour);
     const critChance = critChanceFor(totals);
     const finisher = spell.id === "strike" && combo === STRIKE_COMBO_LENGTH;
 
@@ -911,16 +981,25 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     return hits;
   }
 
-  /** Lay a creature down, start its respawn, and maybe leave something. */
+  /** Lay a creature down, start its respawn, pay out XP, and maybe leave
+   *  something. */
   private killEnemy(id: string, enemy: Enemy, killerSessionId: string, now: number): void {
     enemy.state = EnemyState.Dead;
     const brain = this.brains.get(id);
     const fight = this.eliteOf.get(id);
-    // Before calmDown: credit is read from the threat it forgets.
-    this.questKill(id, enemy, killerSessionId);
-    if (fight) this.eliteFell(id, fight, enemy, killerSessionId, now);
-    // Summoned creatures are part of the elite's fight, not a loot source.
-    else if (!this.addOf.has(id)) this.rollDrop(enemy, killerSessionId);
+    // Before calmDown: credit is read from the threat it forgets. Everyone
+    // who fought it counts, not only the killing blow — a group should never
+    // have to take turns at the last hit.
+    const fighters = new Set<string>([killerSessionId, ...(brain?.threat.keys() ?? [])]);
+    this.questKill(enemy, fighters, fight?.elite.id);
+    if (fight) {
+      this.eliteFell(id, fight, enemy, killerSessionId, now);
+    } else if (!this.addOf.has(id)) {
+      // Summoned creatures are part of the elite's fight, not a loot source,
+      // and the elite's XP already covers them.
+      this.rollDrop(enemy, killerSessionId);
+      for (const sessionId of fighters) this.grantKillXp(sessionId, enemy.level, false);
+    }
     if (brain) {
       calmDown(brain);
       brain.returning = false;
@@ -961,22 +1040,57 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   }
 
   /**
-   * Send a player their own training, bag and gear.
+   * Send a player their own class, XP, bag and gear.
    *
    * Private, so it goes by message rather than into replicated state — nobody
-   * else needs to know what you carry or how practised you are. Stats are not
-   * sent: the client works them out from the same keys with the same shared
-   * code, which is what lets it preview an item before you wear it.
+   * else needs to know what you carry. Stats are not sent: the client works
+   * them out from the same keys with the same shared code, which is what lets
+   * it preview an item before you wear it.
    */
-  private sendProfile(sessionId: string, session: Session, player: Player): void {
+  private sendProfile(sessionId: string, session: Session): void {
     this.clients.getById(sessionId)?.send("profile", {
-      skills: session.skills,
+      classId: session.classId,
+      level: session.level,
+      xp: session.xp,
       inventory: session.inventory,
       equipment: session.equipment,
       quests: session.quests,
       gold: session.gold,
-      manaNow: player.mana,
     });
+  }
+
+  // --- experience ---------------------------------------------------------------
+
+  private grantKillXp(sessionId: string, creatureLevel: number, elite: boolean): void {
+    const session = this.sessions.get(sessionId);
+    if (session) this.grantXp(sessionId, killXpFor(creatureLevel, session.level, elite));
+  }
+
+  /**
+   * Add XP, and level up as many times as it pays for.
+   *
+   * A level-up refreshes everything that hangs off the level — base stats,
+   * so the health cap; what can be worn and cast is read from `session.level`
+   * wherever it is checked — and restores health, because the moment you
+   * level should feel like one. Everyone nearby sees it happen.
+   */
+  private grantXp(sessionId: string, amount: number): void {
+    const session = this.sessions.get(sessionId);
+    const player = this.state.players.get(sessionId);
+    if (!session || !player || amount <= 0 || session.level >= MAX_LEVEL) return;
+
+    const result = addXp({ level: session.level, xp: session.xp }, amount);
+    session.level = result.level;
+    session.xp = result.xp;
+    if (result.levelsGained > 0) {
+      player.level = result.level;
+      this.refreshStats(session, player);
+      // Not for the dead: XP can arrive for a kill finished after you fell,
+      // and a level-up is not a resurrection.
+      if (player.health > 0) player.health = player.maxHealth;
+      this.broadcastNear(player.x, player.z, "levelUp", { id: sessionId, level: result.level });
+    }
+    this.clients.getById(sessionId)?.send("xp", { level: session.level, xp: session.xp, gained: amount });
   }
 
   // --- quests ----------------------------------------------------------------------
@@ -997,7 +1111,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     const player = this.state.players.get(client.sessionId);
     const quest = getQuest(id);
     if (!session || !player || !quest) return;
-    if (!canTake(quest, session.quests) || !this.nearVillager(player, quest.giver)) return;
+    if (!canTake(quest, session.quests, session.level) || !this.nearVillager(player, quest.giver)) return;
     session.quests.active[quest.id] = quest.objectives.map(() => 0);
     this.sendQuests(client.sessionId, session);
   }
@@ -1013,10 +1127,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   /**
    * Hand a quest in. The client names the item it chose (an index into the
    * choices `questRewardItems` gives this character — the same list the
-   * client was shown) and the skill it wants the XP in; everything else is
-   * checked here: done, near whoever takes it back, room in the bag.
+   * client was shown); everything else is checked here: done, near whoever
+   * takes it back, room in the bag.
    */
-  private onQuestComplete(client: Client, id: unknown, choice: unknown, skill: unknown): void {
+  private onQuestComplete(client: Client, id: unknown, choice: unknown): void {
     const session = this.sessions.get(client.sessionId);
     const player = this.state.players.get(client.sessionId);
     const quest = getQuest(id);
@@ -1024,10 +1138,9 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     const progress = session.quests.active[quest.id];
     if (!progress || !questReady(quest, progress) || !this.nearVillager(player, quest.turnIn)) return;
 
-    const items = questRewardItems(quest, session.characterId);
+    const items = questRewardItems(quest, session.characterId, session.classId);
     const item = typeof choice === "number" && Number.isInteger(choice) ? items[choice] : undefined;
     if (items.length > 0 && item === undefined) return;
-    if (!isSpellId(skill) && !isGearSkill(skill)) return;
     if (item !== undefined && session.inventory.length >= INVENTORY_SIZE) {
       client.send("bagFull");
       return;
@@ -1037,23 +1150,80 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     session.quests.done.push(quest.id);
     session.gold += quest.rewards.gold;
     if (item !== undefined) session.inventory.push(item);
-    session.skills[skill] = questXp(session.skills[skill] ?? 0, quest);
+    const xp = questXp(quest, session.level);
 
-    this.refreshStats(session, player);
-    this.sendProfile(client.sessionId, session, player);
-    this.clients.getById(client.sessionId)?.send("skills", { skills: session.skills });
-    this.clients.getById(client.sessionId)?.send("questDone", { quest: quest.id, item, skill });
+    this.sendProfile(client.sessionId, session);
+    // Before the XP, so "quest complete" is on screen before any level-up
+    // it pays for.
+    this.clients.getById(client.sessionId)?.send("questDone", { quest: quest.id, item, xp });
+    this.grantXp(client.sessionId, xp);
+  }
+
+  // --- vendors ---------------------------------------------------------------------
+
+  /** A vendor, by villager id, that this player is standing close enough to. */
+  private vendorNear(player: Player, id: unknown): string | undefined {
+    if (typeof id !== "string") return undefined;
+    const found = findVillager(id);
+    if (!found?.villager.vendor || !this.nearVillager(player, id)) return undefined;
+    return id;
+  }
+
+  /**
+   * Sell one item from the bag, or — with no item — the whole bag. Worn gear
+   * is never touched: selling is for what you are carrying, not wearing.
+   */
+  private onVendorSell(client: Client, vendor: unknown, key: unknown): void {
+    const session = this.sessions.get(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    if (!session || !player || !this.vendorNear(player, vendor)) return;
+
+    let sold: ItemKey[];
+    if (key === undefined) {
+      sold = session.inventory;
+      session.inventory = [];
+    } else {
+      const index = typeof key === "string" ? session.inventory.indexOf(key) : -1;
+      if (index === -1) return;
+      sold = session.inventory.splice(index, 1);
+    }
+    const gold = packValue(sold);
+    if (sold.length === 0) return;
+    session.gold += gold;
+    this.sendProfile(client.sessionId, session);
+    client.send("sold", { count: sold.length, gold });
+  }
+
+  /** Buy one piece of the vendor's stock — the same list `vendorStock` gives
+   *  the client for this character's level. */
+  private onVendorBuy(client: Client, vendor: unknown, index: unknown): void {
+    const session = this.sessions.get(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    const id = player ? this.vendorNear(player, vendor) : undefined;
+    if (!session || !player || !id || typeof index !== "number" || !Number.isInteger(index)) return;
+    const key = vendorStock(id, session.level, session.classId)[index];
+    const item = key !== undefined ? describeItem(key) : undefined;
+    if (!key || !item) return;
+    const price = buyPrice(item);
+    if (session.gold < price) {
+      client.send("tooPoor", { price });
+      return;
+    }
+    if (session.inventory.length >= INVENTORY_SIZE) {
+      client.send("bagFull");
+      return;
+    }
+    session.gold -= price;
+    session.inventory.push(key);
+    this.sendProfile(client.sessionId, session);
+    client.send("bought", { item: key, price });
   }
 
   /**
    * A creature died: advance kill, slay and collect objectives for everyone
-   * who fought it (anyone with threat on it, and whoever finished it), not
-   * only the killer — a group should not have to take turns landing the last
-   * blow. Called before the brain calms down, while its threat is intact.
+   * who fought it (anyone with threat on it, and whoever finished it).
    */
-  private questKill(enemyId: string, enemy: Enemy, killerSessionId: string): void {
-    const fighters = new Set<string>([killerSessionId, ...(this.brains.get(enemyId)?.threat.keys() ?? [])]);
-    const eliteId = this.eliteOf.get(enemyId)?.elite.id;
+  private questKill(enemy: Enemy, fighters: ReadonlySet<string>, eliteId: string | undefined): void {
     for (const sessionId of fighters) {
       const session = this.sessions.get(sessionId);
       if (!session) continue;
@@ -1121,9 +1291,11 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     const item = rollDrop(Math.random, {
       creatureLevel: enemy.level,
       ostraDanger: this.ostra.difficulty.health,
-      danger: this.ostra.difficulty.health * (1 + 0.06 * (enemy.level - 1)),
-      // Nothing that roams is an elite yet; see SOURCE_ODDS in loot.ts.
+      danger: dropDanger(this.ostra.difficulty.health, enemy.level),
+      // Elites pay out through `eliteFell`; see SOURCE_ODDS in loot.ts.
       source: "creature",
+      // Only what whoever earned it can use.
+      classId: this.sessions.get(killerSessionId)?.classId ?? DEFAULT_CLASS,
       signature: archetype.signature,
     });
     if (item !== undefined) this.dropOnGround(item, enemy.x, enemy.z, killerSessionId);
@@ -1174,7 +1346,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         // there to be looked at.
         const level = Math.round(number(message["level"], 30, 1, 1000));
         const radius = number(message["spread"], 3, 0, 20);
-        const items = [...RARITIES, ...RARITIES.slice(0, 3)].map((rarity) => rollDebugItem(Math.random, rarity, level));
+        const items = [...RARITIES, ...RARITIES.slice(0, 3)].map((rarity) => rollDebugItem(Math.random, rarity, level, session.classId));
         items.forEach((item, index) => {
           if (item === undefined) return;
           const angle = (index / items.length) * Math.PI * 2;
@@ -1188,29 +1360,36 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         const level = Math.round(number(message["level"], 30, 1, 1000));
         const count = Math.round(number(message["count"], 1, 1, INVENTORY_SIZE));
         for (let i = 0; i < count && session.inventory.length < INVENTORY_SIZE; i++) {
-          const item = rollDebugItem(Math.random, rarity, level);
+          const item = rollDebugItem(Math.random, rarity, level, session.classId);
           if (item !== undefined) session.inventory.push(item);
         }
-        this.sendProfile(client.sessionId, session, player);
+        this.sendProfile(client.sessionId, session);
         break;
       }
       case "clearBag":
         session.inventory = [];
-        this.sendProfile(client.sessionId, session, player);
+        this.sendProfile(client.sessionId, session);
         break;
       case "heal":
         player.health = player.maxHealth;
-        player.mana = player.maxMana;
+        player.resource = player.maxResource;
         break;
       case "god":
         session.god = message["on"] === true;
         break;
-      case "skills": {
-        const value = number(message["value"], 0, 0, MAX_PROFICIENCY);
-        for (const id of [...SPELL_IDS, ...GEAR_SKILL_IDS]) session.skills[id] = value;
-        this.skillsChanged(client.sessionId, session, player);
+      case "level": {
+        // Straight to a level, at the start of it. Gear above it stays on:
+        // this is for trying things, not for testing the equip rules.
+        session.level = Math.round(number(message["value"], session.level, 1, MAX_LEVEL));
+        session.xp = 0;
+        player.level = session.level;
+        this.refreshStats(session, player);
+        client.send("xp", { level: session.level, xp: session.xp, gained: 0 });
         break;
       }
+      case "xp":
+        this.grantXp(client.sessionId, Math.round(number(message["amount"], 0, 0, 10_000_000)));
+        break;
       case "elites": {
         // Every elite in this Ostra: alive and where, or how long until it wakes.
         client.send("eliteStatus", elitesIn(this.ostra.id).map((elite) => {
@@ -1334,7 +1513,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         this.groundExpiry.delete(groundId);
         this.groundClaimUntil.delete(groundId);
         this.clients.getById(sessionId)?.send("picked", { item: dropped.item });
-        this.sendProfile(sessionId, session, player);
+        this.sendProfile(sessionId, session);
         break;
       }
     }
@@ -1354,6 +1533,11 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     if (index === -1) return;
     const item = describeItem(key);
     if (!item) return;
+    // The client says so before you try; this is what makes it so.
+    if (!canWear(item, { classId: session.classId, level: session.level })) {
+      client.send("cannotWear", { level: item.requiredLevel, family: item.family });
+      return;
+    }
 
     const slot = isEquipSlot(requestedSlot) && slotsFor(item).includes(requestedSlot)
       ? requestedSlot
@@ -1362,8 +1546,11 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     if (!result) return;
 
     // Everything displaced goes back in the bag rather than vanishing — so a
-    // two-hander replacing a sword and a shield needs room for both.
-    if (session.inventory.length - 1 + result.removed.length > INVENTORY_SIZE) {
+    // two-hander replacing a sword and a shield needs room for both. A bag
+    // already over its size (gear spilled by a rules change) may still wear
+    // things, as long as the bag does not grow: that is how it empties.
+    const after = session.inventory.length - 1 + result.removed.length;
+    if (after > INVENTORY_SIZE && after > session.inventory.length) {
       client.send("bagFull");
       return;
     }
@@ -1401,52 +1588,67 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     const index = session.inventory.indexOf(key);
     if (index === -1) return;
     session.inventory.splice(index, 1);
-    this.sendProfile(client.sessionId, session, player);
+    this.sendProfile(client.sessionId, session);
   }
 
   /** Recompute the caps gear provides, and tell the owner. */
   private applyEquipment(sessionId: string, session: Session, player: Player): void {
     this.refreshStats(session, player);
-    this.sendProfile(sessionId, session, player);
+    this.sendProfile(sessionId, session);
   }
 
   /**
-   * Work out what the worn set is worth now, and move the caps to match.
+   * Work out what this character adds up to now — class and level, and the
+   * worn set — and move the caps to match.
    *
-   * Current health and mana are clamped rather than scaled: taking off armour
-   * should not kill you, but it must not leave you above your new ceiling
-   * either.
+   * Current health and resource are clamped rather than scaled: taking off
+   * armour should not kill you, but it must not leave you above your new
+   * ceiling either.
    */
   private refreshStats(session: Session, player: Player): void {
-    session.stats = characterStats(session.equipment, session.skills);
+    session.stats = characterStats(session.equipment, { classId: session.classId, level: session.level });
     player.maxHealth = maxHealthFor(session.stats.totals);
-    player.maxMana = maxManaFor(session.stats.totals);
+    player.maxResource = maxResourceFor(getClass(session.classId).resource, session.stats.totals);
     if (player.health > player.maxHealth) player.health = player.maxHealth;
-    if (player.mana > player.maxMana) player.mana = player.maxMana;
+    if (player.resource > player.maxResource) player.resource = player.maxResource;
   }
 
-  /** Mana always comes back, faster at rest; health only at rest. */
-  private regenerate(dt: number): void {
+  /** How the class's resource moves this tick, per second. */
+  private resourceRate(session: Session, player: Player, now: number): number {
+    if (getClass(session.classId).resource === "mana") {
+      return manaRegenFor(session.stats.totals, session.stats.heavyPieces, player.inCombat);
+    }
+    // Fervour: rises while you fight, holds after a Battle Cry, drains once
+    // the fight is over.
+    if (player.inCombat) return FERVOUR_PER_SECOND;
+    return now < session.fervourHoldUntil ? 0 : -FERVOUR_DRAIN_PER_SECOND;
+  }
+
+  /** The resource moves by its own rules; health only comes back at rest. */
+  private regenerate(dt: number, now: number): void {
     for (const [sessionId, session] of this.sessions) {
       const player = this.state.players.get(sessionId);
       if (!player) continue;
       if (player.health === 0) {
-        session.manaCarry = 0;
+        session.resourceCarry = 0;
         session.healthCarry = 0;
         continue;
       }
 
-      if (player.mana < player.maxMana) {
-        // Accumulate the fraction: at 5/s and 30Hz each step is 0.167 mana, and
-        // rounding that per-tick would regenerate exactly nothing.
-        session.manaCarry += manaRegenFor(session.stats.totals, session.stats.heavyPieces, player.inCombat) * dt;
-        const whole = Math.floor(session.manaCarry);
-        if (whole > 0) {
-          session.manaCarry -= whole;
-          player.mana = Math.min(player.maxMana, player.mana + whole);
-        }
+      // Accumulate the fraction: at 4/s and 30Hz each step is 0.13 of a
+      // point, and rounding that per-tick would move exactly nothing.
+      const rate = this.resourceRate(session, player, now);
+      const full = rate > 0 && player.resource >= player.maxResource;
+      const empty = rate < 0 && player.resource <= 0;
+      if (rate === 0 || full || empty) {
+        session.resourceCarry = 0;
       } else {
-        session.manaCarry = 0;
+        session.resourceCarry += rate * dt;
+        const whole = Math.trunc(session.resourceCarry);
+        if (whole !== 0) {
+          session.resourceCarry -= whole;
+          player.resource = Math.max(0, Math.min(player.maxResource, player.resource + whole));
+        }
       }
 
       if (!player.inCombat && player.health < player.maxHealth) {
@@ -1465,7 +1667,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
   /**
    * A creature's blow lands. `raw` is before armour; `attackerLevel` is what
-   * armour is measured against and what the blow can teach.
+   * armour is measured against.
    */
   private damagePlayer(sessionId: string, raw: number, byEnemyId: string, attackerLevel: number): void {
     const player = this.state.players.get(sessionId);
@@ -1473,7 +1675,6 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     if (!player || !session || player.health === 0) return;
 
     const now = Date.now();
-    this.trainDefence(sessionId, session, player, attackerLevel);
     if (session.god) return;
     const reduction = armourReduction(session.stats.totals.armour, attackerLevel);
     const amount = Math.max(1, Math.round(raw * (1 - reduction)));
@@ -1486,36 +1687,15 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
 
     if (player.health === 0) {
       session.respawnAt = now + PLAYER_RESPAWN_MS;
+      session.pendingCast = undefined;
       session.diedAtX = player.x;
       session.diedAtZ = player.z;
       session.combatUntil = 0;
       player.inCombat = false;
+      // Fervour is the fight's; the fight is over.
+      if (getClass(session.classId).resource === "fervour") player.resource = 0;
       this.broadcastNear(player.x, player.z, "died", { id: sessionId });
     }
-  }
-
-  /**
-   * Armour learns from being hit. Each weight trains by the share of the
-   * armour slots it covers, so a full suit of plate learns at full speed and a
-   * lone cloth hood at a sixth of it; a raised shield learns from every blow.
-   */
-  private trainDefence(sessionId: string, session: Session, player: Player, level: number): void {
-    const pieces = new Map<SkillId, number>();
-    for (const slot of ARMOUR_SLOTS) {
-      const key = session.equipment[slot];
-      const skill = key !== undefined ? describeItem(key)?.skill : undefined;
-      if (skill) pieces.set(skill, (pieces.get(skill) ?? 0) + 1);
-    }
-
-    let changed = false;
-    for (const [skill, count] of pieces) {
-      changed = this.train(session, skill, level, count / ARMOUR_SLOTS.length) || changed;
-    }
-    const offhand = session.equipment.offhand;
-    if (offhand !== undefined && describeItem(offhand)?.skill === "shields") {
-      changed = this.train(session, "shields", level) || changed;
-    }
-    if (changed) this.skillsChanged(sessionId, session, player);
   }
 
   /** Stand the dead back up once their timer is out. */
@@ -1559,9 +1739,10 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       player.z = spot.z;
       player.y = groundHeight(this.ostra, spot.x, spot.z);
       player.health = player.maxHealth;
-      player.mana = player.maxMana;
-      session.manaCarry = 0;
+      player.resource = getClass(session.classId).resource === "fervour" ? 0 : player.maxResource;
+      session.resourceCarry = 0;
       session.healthCarry = 0;
+      session.fervourHoldUntil = 0;
       session.comboStep = 0;
       // Whatever they were standing in when they died must not fire on arrival.
       session.suppressedGate = this.gateContaining(spot.x, spot.z)?.id;
@@ -1576,7 +1757,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   }
 
   private scaledHealth(base: number, level: number): number {
-    return Math.max(1, Math.round(base * this.ostra.difficulty.health * levelHealthScale(level)));
+    // Health travels as a uint16; past that it would wrap to nearly nothing.
+    return Math.max(1, Math.min(65535, Math.round(base * this.ostra.difficulty.health * levelHealthScale(level))));
   }
 
   /** Falls back rather than throwing: a stored kind this build no longer knows
@@ -1677,12 +1859,16 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     if (credited.length === 0) credited.push(killerSessionId);
 
     credited.forEach((sessionId, who) => {
+      // The same credit rule as the loot: a share of the fight, not a touch.
+      this.grantKillXp(sessionId, enemy.level, true);
       for (let i = 0; i < elite.drops; i++) {
         const item = rollDrop(Math.random, {
           creatureLevel: enemy.level,
           ostraDanger: this.ostra.difficulty.health,
-          danger: this.ostra.difficulty.health * (1 + 0.06 * (enemy.level - 1)),
+          danger: dropDanger(this.ostra.difficulty.health, enemy.level),
           source: "elite",
+          // Each credited player's drops are for their own class.
+          classId: this.sessions.get(sessionId)?.classId ?? DEFAULT_CLASS,
         });
         if (item === undefined) continue;
         // Spread round the body, each player's in their own arc, so a pile of
@@ -1895,7 +2081,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         z,
         yaw: arrivalGate.exitYaw,
         health: player.health,
-        skills: session.skills,
+        level: session.level,
+        xp: session.xp,
         inventory: session.inventory,
         equipment: session.equipment,
         quests: session.quests,

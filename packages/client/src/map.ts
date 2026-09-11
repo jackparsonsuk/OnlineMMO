@@ -34,6 +34,8 @@ export interface MapBlip {
   /** Radius in CSS pixels. */
   size: number;
   ring?: boolean;
+  /** A rare elite: also drawn on the world map. */
+  elite?: boolean;
 }
 
 interface Landmark {
@@ -452,13 +454,19 @@ export class Cartographer {
       ctx.fillText(landmark.name, px, py - 10);
     }
 
+    // Your target, and every living elite — gold, ringed, a little larger.
     for (const blip of blips) {
-      if (!blip.ring) continue;
+      if (!blip.ring && !blip.elite) continue;
       const [px, py] = toPx(blip.x, blip.z);
       ctx.beginPath();
-      ctx.arc(px, py, 3, 0, Math.PI * 2);
+      ctx.arc(px, py, blip.elite ? 4.5 : 3, 0, Math.PI * 2);
       ctx.fillStyle = blip.colour;
       ctx.fill();
+      if (blip.elite) {
+        ctx.strokeStyle = "#1a1408";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
     }
 
     const [px, py] = toPx(x, z);
@@ -504,7 +512,8 @@ export class Cartographer {
     }
   }
 
-  /** "Near Westroad Stone · danger 3", updated only when it changes. */
+  /** "Westroad Stone · levels 5-10", updated only when it changes. The band
+   *  is the region's, so it answers "am I ready to be here" at a glance. */
   private updateInfo(x: number, z: number): void {
     let nearest: Landmark | undefined;
     let best = Infinity;
@@ -519,14 +528,10 @@ export class Cartographer {
     let place = this.ostra.name;
     if (nearest && best < 90) place = nearest.name;
     else if (nearest && best < 900) place = `${compassWord(Math.atan2(x - nearest.x, z - nearest.z))} of ${nearest.name}`;
-    else place = regionOf(this.ostra, x, z)?.name ?? place;
+    const region = regionOf(this.ostra, x, z);
+    if (!(nearest && best < 900)) place = region?.name ?? place;
 
-    let danger = "";
-    const wilds = this.ostra.wilds;
-    if (wilds) {
-      const level = 1 + Math.floor(Math.hypot(x - this.ostra.spawn.x, z - this.ostra.spawn.z) / wilds.metresPerLevel);
-      danger = ` · danger ${Math.min(12, level)}`;
-    }
+    const danger = region && this.ostra.wilds ? ` · levels ${region.levels[0]}–${region.levels[1]}` : "";
     const info = `${place}${danger}`;
     if (info !== this.lastInfo) {
       this.lastInfo = info;

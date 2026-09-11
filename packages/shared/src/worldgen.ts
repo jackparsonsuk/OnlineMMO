@@ -589,13 +589,28 @@ export function safePoints(ostra: OstraDefinition): Array<{ x: number; z: number
   return points;
 }
 
-/** Level from distance to the spawn: the map's difficulty rises in rings.
- *  Exported for the dev menu's "where am I" readout. */
+/**
+ * Creature level at a point.
+ *
+ * Each region has a band of levels (`RegionDefinition.levels`), and inside it
+ * the level rises with distance from the spawn — from the bottom of the band
+ * on the side nearest home to the top on the far side. So the map gets harder
+ * the further you go from Daso, but in steps you can see on the map: crossing
+ * into the Greywood is a jump, as a new zone should be, and every region still
+ * has an easy edge to arrive on and a hard heart.
+ *
+ * Exported for the dev menu's "where am I" readout.
+ */
 export function levelAt(ostra: OstraDefinition, x: number, z: number): number {
   const wilds = ostra.wilds;
-  if (!wilds) return 1;
-  const fromSpawn = dist(x, z, ostra.spawn.x, ostra.spawn.z);
-  return Math.min(MAX_ENEMY_LEVEL, 1 + Math.floor(fromSpawn / wilds.metresPerLevel));
+  const region = regionOf(ostra, x, z);
+  if (!wilds || !region) return 1;
+  const [low, high] = region.levels;
+  const centre = dist(region.x, region.z, ostra.spawn.x, ostra.spawn.z);
+  const near = Math.max(0, centre - wilds.levelReach);
+  const far = centre + wilds.levelReach;
+  const t = Math.max(0, Math.min(1, (dist(x, z, ostra.spawn.x, ostra.spawn.z) - near) / (far - near)));
+  return Math.min(MAX_ENEMY_LEVEL, high, low + Math.floor(t * (high - low + 1)));
 }
 
 /** Pick a creature by the region's weights, from a unit roll. */
@@ -614,14 +629,16 @@ function pickCreature(region: RegionDefinition | undefined, roll: number, wooded
 
 /** Pack size for a generated camp. Wolves run in packs; golems alone. */
 function campSize(kind: EnemyKind, roll: number, level: number): number {
+  // A pack grows with the danger, but only so far: two or three round Daso,
+  // five out in the Greywood, and no bigger past that. Levels already make a
+  // creature tougher; a pack of ten would make every camp a wipe.
+  const extra = Math.min(3, Math.floor(level / 4));
   switch (kind) {
     case "golem": return 1 + (roll < 0.3 ? 1 : 0);
-    // A pack grows with the danger: two or three by the Gate Circle, five out
-    // in Greywood.
-    case "wolf": return 2 + Math.floor(roll * 2) + Math.floor(level / 4);
+    case "wolf": return 2 + Math.floor(roll * 2) + extra;
     case "boar": return 1 + Math.floor(roll * 3);
     case "wretch": return 2 + Math.floor(roll * 2);
-    default: return 2 + Math.floor(roll * 3) + Math.floor(level / 4);
+    default: return 2 + Math.floor(roll * 3) + extra;
   }
 }
 
@@ -661,10 +678,14 @@ export function campsIn(ostra: OstraDefinition): readonly CampDefinition[] {
       for (let j = first; j <= last; j++) {
         let h = hash2(i, j, wilds.seed + 17);
         if (h / 4294967296 >= wilds.campChance) continue;
+        // Kept to the middle half of the cell. Jittered wider, camps bunched
+        // into pairs sharing aggro in some places and left long dead walks in
+        // others; this way neighbours are always at least half a cell apart
+        // and never much more than one and a half.
         h = rehash(h, 1);
-        const x = (i + 0.15 + 0.7 * (h / 4294967296)) * spacing;
+        const x = (i + 0.25 + 0.5 * (h / 4294967296)) * spacing;
         h = rehash(h, 2);
-        const z = (j + 0.15 + 0.7 * (h / 4294967296)) * spacing;
+        const z = (j + 0.25 + 0.5 * (h / 4294967296)) * spacing;
         if (Math.abs(x) > half - margin || Math.abs(z) > half - margin) continue;
 
         const level = levelAt(ostra, x, z);

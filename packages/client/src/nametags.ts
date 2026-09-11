@@ -101,6 +101,24 @@ export class Nametags {
     mark.dataset["kind"] = marker === "?" ? "ready" : marker === "!" ? "offer" : "underway";
   }
 
+  /**
+   * The level after the name. `colour` is for creatures, whose level is a
+   * warning — tinted by how it compares to yours (`difficultyOf`); players'
+   * are left plain. Only call when it changes; this touches the DOM.
+   */
+  setLevel(sessionId: string, level: number, colour?: string): void {
+    const tag = this.tags.get(sessionId);
+    if (!tag) return;
+    let badge = tag.querySelector<HTMLElement>(".level");
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "level";
+      tag.querySelector(".label")?.after(badge);
+    }
+    badge.textContent = String(level);
+    badge.style.color = colour ?? "";
+  }
+
   /** @param fraction 0..1. Only call when it changes; this touches the DOM. */
   setHealth(sessionId: string, fraction: number): void {
     const fill = this.bars.get(sessionId);

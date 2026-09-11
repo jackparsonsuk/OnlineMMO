@@ -13,6 +13,9 @@ export interface CharacterSummary {
   id: string;
   name: string;
   ostraId: OstraId;
+  /** Both absent from a server older than levels. */
+  classId?: string;
+  level?: number;
 }
 
 export class ApiError extends Error {
@@ -140,5 +143,7 @@ function toSummary(value: unknown): CharacterSummary | undefined {
     // An Ostra this build doesn't know would leave us asking to join a room
     // that cannot exist; fall back rather than hanging on a failed join.
     ostraId: isOstraId(record["ostraId"]) ? record["ostraId"] : STARTING_OSTRA,
+    classId: typeof record["classId"] === "string" ? record["classId"] : undefined,
+    level: typeof record["level"] === "number" ? record["level"] : undefined,
   };
 }

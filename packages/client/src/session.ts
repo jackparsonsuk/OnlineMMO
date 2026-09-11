@@ -12,6 +12,10 @@ import {
 import {
   applyInput,
   buildingColliders,
+  CLASSES,
+  type ClassId,
+  DIFFICULTY_COLOUR,
+  difficultyOf,
   type Enemy,
   type EnemyArchetype,
   type EnemyKind,
@@ -24,8 +28,11 @@ import {
   isEnemyKind,
   isInArc,
   isSpellId,
-  SPELL_IDS,
+  castSteps,
+  isMoving,
+  knowsSpell,
   SPELLS,
+  spellToWire,
   type Spell,
   type SpellId,
   STRIKE_COMBO_LENGTH,
@@ -135,10 +142,13 @@ const TARGET_KEEP_RANGE = 70;
  *  own reach — enough to cover a creature stepping back as you swing. */
 const AIM_ASSIST_SLACK = 2.5;
 
-/** Without a target, a Strike leans toward anything within this angle of
- *  where you are looking; a Voidbolt, much less. */
+/** Without a target, a blow leans toward anything within this angle of
+ *  where you are looking; a Heroic Throw, much less. */
 const SOFT_AIM_MELEE = 1.3;
 const SOFT_AIM_RANGED = 0.3;
+
+/** Past this reach, an ability aims like a thrown one. */
+const RANGED_REACH = 6;
 
 /** The character screen looks at you from this far off your facing, in
  *  radians — a three-quarter view reads a blocky body far better than face-on. */
@@ -218,6 +228,8 @@ interface PlayerView {
   /** Facing during a cast, which overrides the body's usual yaw. */
   castYaw: number;
   dead: boolean;
+  /** The level on their nametag, to notice when it changes. */
+  level: number;
 }
 
 export function createSession(
@@ -228,9 +240,13 @@ export function createSession(
   keyboard: KeyboardInput,
   cameraYaw: () => number,
   audio: SoundBoard,
+  classId: ClassId,
 ): OstraSession {
   const scene = world.scene;
   const born = performance.now();
+  /** Your bar, in order: key N casts `bar[N - 1]`. */
+  const bar = CLASSES[classId].abilities.map((ability) => ability.spell);
+  const resourceKind = CLASSES[classId].resource;
 
   // One Predict per room drives everything visual: remote players are
   // interpolated ~INTERP_DELAY_MS in the past (so we always have two real
@@ -263,15 +279,19 @@ export function createSession(
   const combatText = new CombatText(document.getElementById("combat-text") as HTMLElement);
   const cartographer = new Cartographer(ostra);
 
-  /** One faint ground marker per spell — the exact shape the server tests. */
+  /** One faint ground marker per ability that has a shape — the exact shape
+   *  the server tests. Battle Cry hits nothing, so draws none. */
   const castArcs = new Map<SpellId, TransformNode>();
   const ARC_COLOURS: Record<SpellId, number> = {
     strike: 0xbfe4ff,
-    voidbolt: 0xa987ff,
+    throw: 0xd8e6f0,
     sunder: 0xffb066,
+    cleave: 0xffd28a,
+    bash: 0xbfe4ff,
+    battleCry: 0xffc46b,
   };
-  for (const id of SPELL_IDS) {
-    castArcs.set(id, createCastArc(scene, SPELLS[id], ARC_COLOURS[id]));
+  for (const id of bar) {
+    if (SPELLS[id].targeting !== "self") castArcs.set(id, createCastArc(scene, SPELLS[id], ARC_COLOURS[id]));
   }
 
   let castShownAt = -Infinity;
@@ -280,7 +300,7 @@ export function createSession(
   // The client mirrors each spell's cooldown so the effect draws on the
   // frame you press, not a round trip later. Both sides read the same
   // table; the server is still the only thing that deals damage or spends
-  // mana, so a client that lies to itself only lies about a picture.
+  // Fervour, so a client that lies to itself only lies about a picture.
   const nextCastAt = new Map<SpellId, number>();
   /** The Strike chain, mirrored the same way. */
   let comboStep = 0;
@@ -549,16 +569,16 @@ export function createSession(
   /**
    * Which way to aim a cast.
    *
-   * Your target if you have one and it is near enough; otherwise, for a Strike,
+   * Your target if you have one and it is near enough; otherwise, for a blow,
    * whatever is closest to where you are looking — a melee swing that whiffs
    * past something slightly off-centre feels like the game's fault, not
-   * yours. Voidbolt gets a much narrower nudge: reach is its reward, and
+   * yours. Heroic Throw gets a much narrower nudge: reach is its reward, and
    * accuracy is its price. The server tests against the positions we drew, so
    * aiming at the picture is aiming at the truth.
    */
   function aimFor(spell: Spell | undefined): number {
     const camera = facingYaw();
-    if (!spell || spell.arc >= Math.PI * 2 || !selfPlayer) return camera;
+    if (!spell || spell.arc >= Math.PI * 2 || spell.targeting === "self" || !selfPlayer) return camera;
     const self = selfPosition();
 
     const locked = livingEnemy(target);
@@ -570,7 +590,7 @@ export function createSession(
       }
     }
 
-    const cone = spell.id === "strike" ? SOFT_AIM_MELEE : SOFT_AIM_RANGED;
+    const cone = spell.range > RANGED_REACH ? SOFT_AIM_RANGED : SOFT_AIM_MELEE;
     let best: number | undefined;
     let bestScore = Infinity;
     room.state.enemies.forEach((enemy: Enemy) => {
@@ -625,7 +645,7 @@ export function createSession(
     );
   }
 
-  /** Draw a cast: body motion, slash or bolt or ring. For our own and for
+  /** Draw a cast: body motion, slash or throw or ring. For our own and for
    *  everyone else's alike; only the prediction of hits is ours alone. */
   function showCast(
     view: PlayerView,
@@ -641,27 +661,40 @@ export function createSession(
     view.castYaw = yaw;
     const start = origin();
 
-    if (spell.id === "strike") {
+    if (spell.id === "strike" || spell.id === "bash") {
       play(combo === STRIKE_COMBO_LENGTH ? "swingHeavy" : "swing", start.x, start.z);
-    } else if (spell.id === "voidbolt") {
-      play("bolt", start.x, start.z);
+    } else if (spell.id === "cleave") {
+      play("swingHeavy", start.x, start.z);
+    } else if (spell.id === "throw") {
+      play("throw", start.x, start.z);
     }
 
     later(now + castContact(spell.id, combo), () => {
       const at = origin();
       const t = performance.now();
-      if (spell.id === "strike") {
+      if (spell.id === "strike" || spell.id === "bash") {
         effects.slash(t, at.x, at.y, at.z, yaw, spell.range, combo === 2 ? -1 : 1, combo === STRIKE_COMBO_LENGTH);
+        onContact();
+      } else if (spell.id === "cleave") {
+        // Heavy and wide: the finisher's slash, swept the other way.
+        effects.slash(t, at.x, at.y, at.z, yaw, spell.range, -1, true);
         onContact();
       } else if (spell.id === "sunder") {
         effects.shockwave(t, at.x, at.y, at.z, spell.range);
         play("sunder", at.x, at.z);
         onContact();
+      } else if (spell.id === "battleCry") {
+        // A ring that goes out from you and hits nothing: it is the shout.
+        effects.shockwave(t, at.x, at.y, at.z, 3.2, 0xffc46b, 6);
+        play("cry", at.x, at.z);
+        onContact();
       } else {
-        const hand = new Vector3(at.x + Math.sin(yaw) * 0.55, at.y + 0.95, at.z + Math.cos(yaw) * 0.55);
+        // Heroic Throw: steel, tumbling, a little slower than a bolt of magic
+        // would be, leaving sparks rather than light.
+        const hand = new Vector3(at.x + Math.sin(yaw) * 0.55, at.y + 1.25, at.z + Math.cos(yaw) * 0.55);
         const end = boltTarget?.()
           ?? new Vector3(at.x + Math.sin(yaw) * spell.range, at.y + 0.9, at.z + Math.cos(yaw) * spell.range);
-        effects.bolt(t, hand, end, onContact);
+        effects.bolt(t, hand, end, onContact, 0xd8e0e8, 42, "spark");
       }
     });
   }
@@ -677,13 +710,27 @@ export function createSession(
     );
   }
 
+  /** A creature's level in the colour of how it compares to yours. */
+  function levelColour(level: number): string {
+    return DIFFICULTY_COLOUR[difficultyOf(level, selfPlayer?.level ?? 1)];
+  }
+
+  /** Your level changed: every creature's badge means something new. */
+  let colouredFor = 0;
+  function recolourLevels(): void {
+    const level = selfPlayer?.level ?? 1;
+    if (level === colouredFor) return;
+    colouredFor = level;
+    room.state.enemies.forEach((enemy: Enemy, id: string) => nametags.setLevel(id, enemy.level, levelColour(enemy.level)));
+  }
+
   // --- state callbacks ---------------------------------------------------------
 
   const $ = getStateCallbacks(room);
 
   const offAdd = $(room.state).players.onAdd((player: Player, sessionId: string) => {
     const rig = buildPlayerRig(scene, player.colour);
-    players.set(sessionId, { rig, animator: new Animator(rig), castYaw: 0, dead: false });
+    players.set(sessionId, { rig, animator: new Animator(rig), castYaw: 0, dead: false, level: player.level });
     meshes.set(sessionId, rig.root);
     nametags.add(
       sessionId,
@@ -691,6 +738,7 @@ export function createSession(
       player.colour,
       sessionId === room.sessionId ? "self" : "player",
     );
+    nametags.setLevel(sessionId, player.level);
 
     if (sessionId === room.sessionId) {
       selfPlayer = player;
@@ -730,7 +778,8 @@ export function createSession(
     // pose the animator puts the parts in scales with it.
     if (enemy.scale !== 1) rig.root.scaling.setAll(enemy.scale);
     enemies.set(enemyId, { swing: 0, rig, animator, archetype, state: enemy.state, health: enemy.health, variant: "hostile" });
-    nametags.add(enemyId, `${enemy.name || archetype.name} · ${enemy.level}`, archetype.colour, "hostile", true, enemy.name !== "");
+    nametags.add(enemyId, enemy.name || archetype.name, archetype.colour, "hostile", true, enemy.name !== "");
+    nametags.setLevel(enemyId, enemy.level, levelColour(enemy.level));
     nametags.setHealth(enemyId, enemy.health / Math.max(1, enemy.maxHealth));
   });
 
@@ -794,7 +843,7 @@ export function createSession(
           for (const hit of payload.hits) {
             strikeEnemy(hit.id, at.x, at.z, hit.crit || payload.combo === STRIKE_COMBO_LENGTH, performance.now());
           }
-          if (payload.hits.length > 0) play(spell.id === "voidbolt" ? "boltHit" : "hit", at.x, at.z, 0.6);
+          if (payload.hits.length > 0) play(spell.id === "throw" ? "throwHit" : "hit", at.x, at.z, 0.6);
         }, first ? () => enemyPoint(first) : undefined);
       }
     }
@@ -968,6 +1017,24 @@ export function createSession(
     world.terrain?.prime(payload.x, payload.z, 140);
   });
 
+  // The server cancelled a cast of ours. Normally we already did, on the same
+  // input; this covers the rare disagreement.
+  const offCastCancelled = room.onMessage("castCancelled", () => cancelLocalCast());
+
+  // Someone levelled — you or anyone nearby: a golden ring off them and the
+  // news over their head. The banner and the sound for your own are the HUD's.
+  const offLevelUp = room.onMessage("levelUp", (payload: { id: string; level: number }) => {
+    const player = room.state.players.get(payload.id);
+    if (!player) return;
+    const now = performance.now();
+    const x = predict.value(player, "x");
+    const y = predict.value(player, "y");
+    const z = predict.value(player, "z");
+    effects.shockwave(now, x, y, z, 4.5, 0xf0d060, 10);
+    later(now + 140, () => effects.shockwave(performance.now(), x, y, z, 2.6, 0xfff0b0, 0));
+    combatText.spawn(now, x, y + PLAYER_HALF * 2 + 0.5, z, `Level ${payload.level}!`, "level");
+  });
+
   // --- fixed-step input ---------------------------------------------------
   // The server advertises its own step rate through the join handshake; using
   // it (rather than our own constant) is what keeps prediction and replay on
@@ -993,13 +1060,18 @@ export function createSession(
     while (accumulator >= stepMs) {
       accumulator -= stepMs;
       const axes = keyboard.axes();
-      const slot = keyboard.castSlot();
+      const wanted = bar[keyboard.castSlot() - 1];
       input.data.moveX = axes.x;
       input.data.moveZ = axes.z;
       input.data.yaw = facingYaw();
-      input.data.cast = slot;
-      input.data.aim = aimFor(slot > 0 ? SPELLS[SPELL_IDS[slot - 1]!] : undefined);
+      // The key is a slot on your bar; the wire carries which ability that is.
+      input.data.cast = wanted ? spellToWire(wanted) : 0;
+      // A cast under way keeps aiming at its target until it lands, key held
+      // or not — the server takes the latest aim.
+      input.data.aim = aimFor(localCast?.spell ?? (wanted ? SPELLS[wanted] : undefined));
       input.data.sprint = keyboard.sprinting();
+      // The same step the server will run on this input (`stepCast`).
+      stepLocalCast(input.data, wanted, now);
       // The reconciler is subscribed to this handle, so sending is also what
       // advances the local prediction — there's no second call to make.
       input.send();
@@ -1051,18 +1123,66 @@ export function createSession(
   const nametagTargets: NametagTarget[] = [];
   const blips: MapBlip[] = [];
 
-  /** Start our own cast the moment the key goes down, if it can be afforded. */
-  function beginLocalCast(now: number): void {
-    if (!selfPlayer || selfPlayer.health === 0) return;
-    const slot = keyboard.castSlot();
-    const wanted = slot > 0 ? SPELL_IDS[slot - 1] : undefined;
+  /** Our own cast with a cast time, under way: inputs left until it lands. */
+  let localCast: { spell: Spell; stepsLeft: number } | undefined;
+
+  function cancelLocalCast(): void {
+    if (!localCast) return;
+    // A cancelled cast does not start its cooldown — same as the server.
+    nextCastAt.delete(localCast.spell.id);
+    localCast = undefined;
+    hud.endCast(true);
+  }
+
+  /**
+   * One sent input's worth of our own casting — the same rule the server's
+   * `stepCast` runs on the same input, so a swing lands or is cancelled at the
+   * same step on both sides. Learned, off cooldown and affordable are checked
+   * here too, so a cast the server is about to ignore draws nothing.
+   */
+  function stepLocalCast(command: { moveX: number; moveZ: number }, wanted: SpellId | undefined, now: number): void {
+    if (!selfPlayer || selfPlayer.health === 0) {
+      if (localCast) {
+        localCast = undefined;
+        hud.endCast(false);
+      }
+      return;
+    }
+    const moving = isMoving(command);
+    if (localCast) {
+      if (moving) {
+        cancelLocalCast();
+        return;
+      }
+      localCast.stepsLeft--;
+      if (localCast.stepsLeft > 0) return;
+      const spell = localCast.spell;
+      localCast = undefined;
+      hud.endCast(false);
+      fireLocalCast(spell, now);
+      return;
+    }
+
     if (!wanted) return;
     const spell = SPELLS[wanted];
-    // Mana is checked here too, so a cast you cannot afford doesn't draw an
-    // effect the server is about to ignore.
-    if (now < (nextCastAt.get(wanted) ?? 0) || selfPlayer.mana < spell.manaCost) return;
+    if (!knowsSpell(classId, selfPlayer.level, wanted)) return;
+    if (now < (nextCastAt.get(wanted) ?? 0) || selfPlayer.resource < spell.cost) return;
+    const steps = castSteps(spell);
+    // Nothing with a cast time starts on the move.
+    if (steps > 0 && moving) return;
     nextCastAt.set(wanted, now + spell.cooldownMs);
+    if (steps > 0) {
+      localCast = { spell, stepsLeft: steps };
+      hud.startCast(spell.name, spell.castMs);
+      return;
+    }
+    fireLocalCast(spell, now);
+  }
 
+  /** Our own cast lands: the swing, and the impact predicted as the server
+   *  will judge it. */
+  function fireLocalCast(spell: Spell, now: number): void {
+    const wanted = spell.id;
     let combo = 0;
     if (wanted === "strike") {
       combo = now - comboAt <= STRIKE_COMBO_WINDOW_MS ? (comboStep % STRIKE_COMBO_LENGTH) + 1 : 1;
@@ -1077,28 +1197,30 @@ export function createSession(
 
     const view = players.get(room.sessionId);
     if (!view) return;
-    const heavy = wanted === "sunder" || combo === STRIKE_COMBO_LENGTH;
-    let boltVictim: string | undefined;
-    if (wanted === "voidbolt") {
+    const heavy = wanted === "sunder" || wanted === "cleave" || wanted === "bash" || combo === STRIKE_COMBO_LENGTH;
+    const thrown = wanted === "throw";
+    let thrownAt: string | undefined;
+    if (thrown) {
       const self = selfPosition();
-      boltVictim = predictHits(spell, self.x, self.z, yaw)[0];
+      thrownAt = predictHits(spell, self.x, self.z, yaw)[0];
     }
 
     showCast(view, spell, combo, yaw, now, selfPosition, () => {
+      if (spell.targeting === "self") return;
       // The blade connects: judge it the way the server will, against what
       // we can see, and draw the result now rather than a round trip later.
       const self = selfPosition();
-      const hits = wanted === "voidbolt" && boltVictim ? [boltVictim] : predictHits(spell, self.x, self.z, yaw);
+      const hits = thrown && thrownAt ? [thrownAt] : predictHits(spell, self.x, self.z, yaw);
       const t = performance.now();
       for (const id of hits) {
         predictedHits.add(id);
         strikeEnemy(id, self.x, self.z, heavy, t);
       }
       if (hits.length > 0) {
-        audio.play(wanted === "voidbolt" ? "boltHit" : heavy ? "hitHeavy" : "hit", 1);
+        audio.play(thrown ? "throwHit" : heavy ? "hitHeavy" : "hit", 1);
         shake(heavy ? 0.16 : 0.07, heavy ? 180 : 110, t);
       }
-    }, boltVictim ? () => enemyPoint(boltVictim!) : undefined);
+    }, thrownAt ? () => enemyPoint(thrownAt!) : undefined);
   }
 
   function frame(now: number): void {
@@ -1154,6 +1276,10 @@ export function createSession(
       if (!dead && view.dead) view.animator.revive(now);
       view.dead = dead;
       view.animator.update(now, x, z, mine && keyboard.sprinting() && !player.inCombat);
+      if (player.level !== view.level) {
+        view.level = player.level;
+        nametags.setLevel(sessionId, player.level);
+      }
 
       nametagTargets.push({ sessionId, x, y, z });
       if (!mine) {
@@ -1171,10 +1297,10 @@ export function createSession(
       const dead = enemy.state === EnemyState.Dead;
       const hunting = enemy.state === EnemyState.Chase;
 
-      if (!dead && enemy.name !== "" && distance < 400) {
-        // An elite shows gold on the minimap, and further out than anything
-        // else — close enough to hunt, not so far the map gives it away.
-        blips.push({ x, z, size: 4.2, colour: "#e8c23f", ring: enemyId === target });
+      if (!dead && enemy.name !== "") {
+        // A living elite shows gold on the minimap and the world map at any
+        // range: it is announced to the whole Ostra, and worth crossing it for.
+        blips.push({ x, z, size: 4.2, colour: "#e8c23f", ring: enemyId === target, elite: true });
       } else if (distance < 270 && !dead) {
         blips.push({
           x, z, size: enemyId === target ? 3.4 : 2.4,
@@ -1278,7 +1404,6 @@ export function createSession(
         if (!alive) audio.play("death", 1);
       }
 
-      beginLocalCast(now);
       hud.setCombo(now - comboAt <= STRIKE_COMBO_WINDOW_MS ? comboStep : 0);
 
       const showing = castShownId !== undefined && now - castShownAt < SWING_VISUAL_MS;
@@ -1291,8 +1416,9 @@ export function createSession(
         arc.rotation.y = castShownYaw;
       }
 
-      hud.setMana(selfPlayer.mana, selfPlayer.maxMana);
+      hud.setResource(resourceKind, selfPlayer.resource, selfPlayer.maxResource);
       hud.setCooldowns(now, nextCastAt);
+      recolourLevels();
       // Follow the *rendered* position, not the raw schema one, or the camera
       // judders by exactly the correction the reconciler is smoothing out.
       stepPortrait(now);
@@ -1375,6 +1501,9 @@ export function createSession(
     offEvade();
     offRespawned();
     offTeleported();
+    offCastCancelled();
+    hud.endCast(false);
+    offLevelUp();
     cartographer.dispose();
     scene.onPointerObservable.remove(pointer);
     reconciler?.dispose();
