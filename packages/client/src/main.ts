@@ -5,6 +5,9 @@ import {
   type Equipment,
   GEAR_SKILLS,
   getOstra,
+  getQuest,
+  type QuestLog,
+  questMarker,
   isOstraId,
   type ItemKey,
   type Proficiency,
@@ -20,6 +23,7 @@ import { AccountClient } from "./account.js";
 import { SoundBoard } from "./audio.js";
 import { CharacterScreen } from "./character.js";
 import { DevMenu, type EliteStatus } from "./devtools.js";
+import { QuestUI } from "./questUI.js";
 import { showTitleScreen } from "./titleScreen.js";
 import { Hud } from "./hud.js";
 import { KeyboardInput } from "./input.js";
@@ -65,6 +69,26 @@ const characterScreen = new CharacterScreen(document.getElementById("character")
   openChanged: (open, shift) => session?.setPortrait(open, shift),
 });
 
+const questUI = new QuestUI({
+  accept: (quest) => sendToRoom?.("questAccept", { quest }),
+  abandon: (quest) => sendToRoom?.("questAbandon", { quest }),
+  complete: (quest, choice, skill) => sendToRoom?.("questComplete", { quest, choice, skill }),
+  notify: (text) => hud.flash(text, "#f0d98a"),
+});
+
+/** Put the right mark over every villager, and the right hint in the bubble. */
+function refreshQuestMarkers(): void {
+  const log = questUI.currentLog;
+  session?.setQuestMarkers((id) => questMarker(id, log));
+  hud.refreshSpeech();
+}
+
+function applyQuests(log: QuestLog | undefined, gold: number | undefined): void {
+  questUI.setLog(log ?? { active: {}, done: [] });
+  hud.setGold(gold ?? 0);
+  refreshQuestMarkers();
+}
+
 // Cheats, on the backtick key. Not even constructed in a production build;
 // the server refuses the commands there regardless.
 const devMenu = import.meta.env.DEV
@@ -90,6 +114,14 @@ window.addEventListener("keydown", (event) => {
     case "Backquote":
       devMenu?.toggle();
       break;
+    case "KeyE": {
+      const villager = session?.nearestVillager();
+      if (villager) questUI.talkTo(villager);
+      break;
+    }
+    case "KeyJ":
+      if (session) questUI.toggleJournal();
+      break;
     case "KeyM":
       session?.toggleMap();
       break;
@@ -101,6 +133,7 @@ window.addEventListener("keydown", (event) => {
     case "Escape":
       // Close whatever is open first; only then drop the target.
       if (session?.mapOpen) session.toggleMap();
+      else if (questUI.close()) break;
       else if (characterScreen.isOpen) characterScreen.setOpen(false);
       else session?.clearTarget();
       break;
@@ -125,6 +158,8 @@ interface ProfileMessage {
   skills: Proficiency;
   inventory: ItemKey[];
   equipment: Equipment;
+  quests?: QuestLog;
+  gold?: number;
   manaNow: number;
 }
 
@@ -175,6 +210,8 @@ async function main(): Promise<void> {
   const account = new AccountClient(HTTP_ENDPOINT, health.realmId);
   const character = await showTitleScreen(account);
   characterScreen.setName(character.name);
+  // Quest rewards are derived from the character's id; the server does the same.
+  questUI.setCharacter(character.id);
 
   const client = new Client(WS_ENDPOINT);
   // What actually authorises the join. The room's static onAuth verifies this
@@ -223,6 +260,10 @@ function frame(now: number): void {
   else world.scene.render();
   characterScreen.update(now, world.scene, canvas, session?.selfRig());
   devMenu?.update(now);
+  if (session) {
+    const self = session.selfPosition();
+    questUI.update(self.x, self.z);
+  }
 }
 
 /** Wire the client up to an Ostra it has just joined. */
@@ -235,6 +276,9 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   hud.setOstra(ostra);
   hud.setStatus("connected");
   hud.buildAbilityBar();
+  // A new Ostra is new villagers; mark them from what we already know.
+  questUI.close();
+  refreshQuestMarkers();
 
   // Training, bag and gear are private to this player, so they arrive as a
   // message rather than in replicated state. Asked for rather than pushed: a
@@ -248,11 +292,23 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
       equipment: payload.equipment ?? {},
     });
     hud.setPower(characterScreen.power);
+    questUI.setSkills(payload.skills ?? {});
+    applyQuests(payload.quests, payload.gold);
   });
   next.onMessage("skills", (payload: { skills: Proficiency }) => {
     applySkills(payload.skills ?? {});
     characterScreen.setSkills(payload.skills ?? {});
+    questUI.setSkills(payload.skills ?? {});
     hud.setPower(characterScreen.power);
+  });
+  next.onMessage("quests", (payload: { quests: QuestLog; gold: number }) => applyQuests(payload.quests, payload.gold));
+  next.onMessage("questDone", (payload: { quest: string; item?: ItemKey }) => {
+    const quest = getQuest(payload.quest);
+    if (!quest) return;
+    const item = payload.item !== undefined ? describeItem(payload.item) : undefined;
+    hud.announce("Quest complete", quest.title,
+      `+${quest.rewards.gold} gold${item ? ` · ${item.name}` : ""}`, true);
+    audio.play("pickup");
   });
   next.onMessage("picked", (payload: { item: ItemKey }) => {
     const item = describeItem(payload.item);

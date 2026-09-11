@@ -91,13 +91,25 @@ export class Hud {
    * Only touches the DOM when the speaker changes, so standing in front of
    * someone doesn't rewrite their line sixty times a second.
    */
-  setSpeech(who: string | undefined, line = ""): void {
+  setSpeech(who: string | undefined, line = "", talk = false): void {
     if (who === this.speaking) return;
     this.speaking = who;
     this.speech.hidden = who === undefined;
     if (who === undefined) return;
     this.speechWho.textContent = who;
     this.speechLine.textContent = line;
+    // Anyone who might have work for you says how to ask.
+    if (talk) {
+      const hint = document.createElement("span");
+      hint.className = "speech-talk";
+      hint.innerHTML = "<kbd>E</kbd> talk";
+      this.speechLine.appendChild(hint);
+    }
+  }
+
+  /** Force the bubble to redraw next frame — its hint may have changed. */
+  refreshSpeech(): void {
+    this.speaking = undefined;
   }
 
   /** Only touches the DOM when the number actually moved. */
@@ -243,7 +255,20 @@ export class Hud {
 
   /** The one number for "how strong is my gear, for me". */
   setPower(power: number): void {
-    this.powerText.textContent = `Power ${power}`;
+    this.shownPower = power;
+    this.drawPurse();
+  }
+
+  setGold(gold: number): void {
+    this.shownGold = gold;
+    this.drawPurse();
+  }
+
+  private shownPower = 0;
+  private shownGold = 0;
+
+  private drawPurse(): void {
+    this.powerText.innerHTML = `Power ${this.shownPower} · <span class="gold">${this.shownGold} gold</span>`;
   }
 
   /**

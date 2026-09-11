@@ -60,6 +60,8 @@ export function createCharacter(
     yaw: 0,
     health: PLAYER_MAX_HEALTH,
     skills: {},
+    quests: { active: {}, done: [] },
+    gold: 0,
     inventory: [],
     equipment: {},
     createdAt: now,

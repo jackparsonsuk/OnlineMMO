@@ -1,0 +1,330 @@
+/**
+ * Quests: people in the world asking for help, and paying for it.
+ *
+ * A quest is data — who gives it, who takes it back, what must be done, what it
+ * pays — and a player's progress is a small record of counts. Both sides read
+ * this file: the client to draw the dialogue, the tracker and the "!" over a
+ * villager's head; the server, which is the only one that ever advances or
+ * completes anything, to check every request against the same rules.
+ *
+ * Objectives are the handful of things the world can already tell apart:
+ *
+ *   kill     — N of a kind of creature
+ *   slay     — one particular elite (see `elites.ts`)
+ *   collect  — N of something that only some of a kind of creature carry
+ *   visit    — stand at a place
+ *
+ * and a quest whose `turnIn` is someone other than its `giver` is a delivery:
+ * finishing it means walking there.
+ *
+ * Collected things are counted, not carried. A pack full of wolf fangs would
+ * be thirty slots of clutter the loot system has no use for.
+ *
+ * Rewards are gold, one item of the player's choosing from a few, and XP they
+ * put into whichever skill they like — capped, so a quest from the Gate Circle
+ * cannot teach what only the edge of the world can (see `questXp`).
+ */
+
+import type { EnemyKind } from "./enemies.js";
+import { basesFor, encodeItem, type ItemKey, type Rarity } from "./items.js";
+import { hash2 } from "./noise.js";
+import { SETTLEMENTS, type SettlementDefinition, type VillagerDefinition } from "./settlements.js";
+import { LEVEL_SCALE, MAX_PROFICIENCY, trainingCeiling, XP_PER_LEVEL } from "./skills.js";
+
+export type QuestObjective =
+  | { kind: "kill"; creature: EnemyKind; count: number; label: string }
+  | { kind: "slay"; elite: string; label: string }
+  | { kind: "collect"; from: EnemyKind; count: number; chance: number; label: string }
+  | { kind: "visit"; x: number; z: number; radius: number; label: string };
+
+export interface QuestRewards {
+  gold: number;
+  /** XP the player puts into a skill of their choosing, at turn-in. */
+  xp: number;
+  /** How many items to choose between, and how good they are. */
+  choices: number;
+  rarity: Rarity;
+}
+
+export interface QuestDefinition {
+  id: string;
+  title: string;
+  /** Villager ids (see `VillagerDefinition.id`). */
+  giver: string;
+  turnIn: string;
+  /** Creature level it is pitched at: sets reward item level and XP cap. */
+  level: number;
+  /** Quests that must be done first. */
+  requires: string[];
+  /** One line for the log and the tracker. */
+  summary: string;
+  /** What the giver says when offering it... */
+  offer: string;
+  /** ...when you come back before it's done... */
+  progress: string;
+  /** ...and what whoever takes it back says when it is. */
+  complete: string;
+  objectives: QuestObjective[];
+  rewards: QuestRewards;
+}
+
+/** A player's quests: progress per objective for those under way, and the ids
+ *  of those finished. Persisted with the character. */
+export interface QuestLog {
+  active: Record<string, number[]>;
+  done: string[];
+}
+
+/** Anyone further than this from a villager is not talking to them. */
+export const TALK_RANGE = 5;
+
+/** More quests under way than this and you should finish some first. */
+export const MAX_ACTIVE_QUESTS = 12;
+
+// --- the quests ---------------------------------------------------------------
+
+const DASO_LEVEL = 4;
+const FANSHONA_LEVEL = 8;
+
+export const QUESTS: Record<string, QuestDefinition> = {
+  // --- Daso -------------------------------------------------------------------------
+  "herla-wolves": {
+    id: "herla-wolves", title: "A Hunter's Welcome", giver: "herla", turnIn: "herla", level: DASO_LEVEL,
+    requires: [],
+    summary: "Kill Greywood Wolves on the woodcutters' path for Herla.",
+    offer: "You'll be wanting a bed, and I'll be wanting the wolves off the woodcutters' path. "
+      + "Five of them, and the room's yours for the week.",
+    progress: "Still hearing howling. Not five yet, then.",
+    complete: "Five. I heard every one of them go quiet. Sit down — the first one's on the house.",
+    objectives: [{ kind: "kill", creature: "wolf", count: 5, label: "Greywood Wolves killed" }],
+    rewards: { gold: 12, xp: 150, choices: 2, rarity: "common" },
+  },
+  "osk-webs": {
+    id: "osk-webs", title: "Webs in the Timber", giver: "osk", turnIn: "osk", level: DASO_LEVEL,
+    requires: [],
+    summary: "Clear the Void Spiders out of the woods around Daso for Osk.",
+    offer: "Spiders have got into the stacked oak. Webs through the grain, eggs in the knots. "
+      + "Thin them out before the whole yard's worth nothing.",
+    progress: "Found another nest this morning. Keep at it.",
+    complete: "Good. I'll burn the worst of the stack, but the rest'll season. You've saved me a year.",
+    objectives: [{ kind: "kill", creature: "spider", count: 6, label: "Void Spiders killed" }],
+    rewards: { gold: 12, xp: 150, choices: 2, rarity: "common" },
+  },
+  "wen-fangs": {
+    id: "wen-fangs", title: "Teeth for the Saw", giver: "wen", turnIn: "wen", level: DASO_LEVEL,
+    requires: ["herla-wolves"],
+    summary: "Bring Wen fangs from Greywood Wolves.",
+    offer: "Heard you've been at the wolves. Wolf fang makes a better saw-set than anything the smith sells — "
+      + "don't ask me why. Bring me four good ones.",
+    progress: "Those are chipped. Good ones, I said.",
+    complete: "Now that's a set. Hear that? That's a blade that'll go through ash like it's butter.",
+    objectives: [{ kind: "collect", from: "wolf", count: 4, chance: 0.5, label: "Good wolf fangs" }],
+    rewards: { gold: 15, xp: 200, choices: 3, rarity: "uncommon" },
+  },
+  "ilda-westroad": {
+    id: "ilda-westroad", title: "The Empty Cart", giver: "ilda", turnIn: "ilda", level: DASO_LEVEL,
+    requires: [],
+    summary: "Walk the Westroad to its waystone and see what became of Ilda's driver.",
+    offer: "The cart came back this morning without its driver. Horse was calm as anything. "
+      + "Walk the Westroad as far as the stone and tell me what you see.",
+    progress: "Well? The stone's east of here, on the road. You can't miss it.",
+    complete: "Nothing at all? No blood, no cart-tracks off the road? ...Somehow that's worse. Thank you for looking.",
+    objectives: [{ kind: "visit", x: -700, z: -62, radius: 14, label: "Reach the Westroad Stone" }],
+    rewards: { gold: 10, xp: 150, choices: 2, rarity: "common" },
+  },
+  "ilda-haul": {
+    id: "ilda-haul", title: "The Long Haul", giver: "ilda", turnIn: "ysolde", level: DASO_LEVEL + 2,
+    requires: ["ilda-westroad"],
+    summary: "Carry Daso's tally to Ysolde at the Weighhouse in Fanshona, far to the north-east.",
+    offer: "I can't spare a driver now, not after this. Ysolde at the Weighhouse in Fanshona owes Daso for "
+      + "three loads. Take her this tally. North-east, past the Heartland — follow the roads and don't stop at night.",
+    progress: "It's a long way. The roads will get you there.",
+    complete: "Daso's tally. Of course they sent it with a stranger. Tell Ilda it's settled — and stay a while. "
+      + "Fanshona could use someone who walks that far for other people.",
+    objectives: [],
+    rewards: { gold: 30, xp: 300, choices: 3, rarity: "uncommon" },
+  },
+
+  // --- Fanshona -------------------------------------------------------------------
+  "tobin-wretches": {
+    id: "tobin-wretches", title: "Spit Through the Mesh", giver: "tobin", turnIn: "tobin", level: FANSHONA_LEVEL,
+    requires: [],
+    summary: "Kill the Fen Wretches fouling Tobin's nets.",
+    offer: "The Wretches take a net a week. Spit straight through the mesh, and then they eat what's in it. "
+      + "Six of them fewer and I might finish a net before it's ruined.",
+    progress: "Lost another one last night. Hear that gurgling? That's them laughing.",
+    complete: "Quiet on the water tonight. That's a sound I'd forgotten.",
+    objectives: [{ kind: "kill", creature: "wretch", count: 6, label: "Fen Wretches killed" }],
+    rewards: { gold: 20, xp: 250, choices: 2, rarity: "uncommon" },
+  },
+  "pell-hides": {
+    id: "pell-hides", title: "Thornback Hide", giver: "pell", turnIn: "pell", level: FANSHONA_LEVEL,
+    requires: [],
+    summary: "Bring Pell hides from Thornback Boars to patch the boats.",
+    offer: "Thornback hide patches a hull better than pitch, if you can get close enough to take one. "
+      + "Most of them come off too torn. Bring me four I can use.",
+    progress: "That one's more hole than hide. Four good ones.",
+    complete: "Thick as a door and twice as stubborn. The Brightwater won't get through these.",
+    objectives: [{ kind: "collect", from: "boar", count: 4, chance: 0.5, label: "Usable Thornback hides" }],
+    rewards: { gold: 20, xp: 250, choices: 3, rarity: "uncommon" },
+  },
+  "maera-stone": {
+    id: "maera-stone", title: "The Brightwater Stone", giver: "maera", turnIn: "maera", level: FANSHONA_LEVEL,
+    requires: [],
+    summary: "Go to the Brightwater Stone and see why the boats won't moor there.",
+    offer: "Every boat on the Brightwater ties up here, or it doesn't tie up at all — and lately none of them "
+      + "will go near the Brightwater Stone. Go and look, and tell me why.",
+    progress: "The stone's east along the shore. Mind the shallows.",
+    complete: "Something in the water, watching. That's what the fishers say too. I'd hoped you'd tell me they were wrong.",
+    objectives: [{ kind: "visit", x: 2450, z: 2300, radius: 14, label: "Reach the Brightwater Stone" }],
+    rewards: { gold: 15, xp: 200, choices: 2, rarity: "common" },
+  },
+  "caddo-silt": {
+    id: "caddo-silt", title: "What Waits in the Shallows", giver: "caddo", turnIn: "caddo", level: 13,
+    requires: ["tobin-wretches", "maera-stone"],
+    summary: "Slay Mother Silt, who waits in the Brightwater shallows north-east of Fanshona.",
+    offer: "Came through the Gate the day it opened, and she was in the lake then too. Mother Silt. "
+      + "The Wretches are hers, you know — every one. You've the look of someone who could finish it. "
+      + "Past the Brightwater Stone, where the water goes still.",
+    progress: "She's still there. I can feel it when the lake goes quiet.",
+    complete: "Fifty years I've watched that water. It looks different already. Take this — you've earned more, "
+      + "but it's what an old man has.",
+    objectives: [{ kind: "slay", elite: "silt", label: "Mother Silt slain" }],
+    rewards: { gold: 60, xp: 500, choices: 3, rarity: "rare" },
+  },
+};
+
+export const QUEST_IDS = Object.keys(QUESTS);
+
+export function getQuest(id: unknown): QuestDefinition | undefined {
+  return typeof id === "string" && Object.hasOwn(QUESTS, id) ? QUESTS[id] : undefined;
+}
+
+// --- rules ----------------------------------------------------------------------
+
+/** How many of an objective finish it. */
+export function objectiveTarget(objective: QuestObjective): number {
+  return objective.kind === "kill" || objective.kind === "collect" ? objective.count : 1;
+}
+
+export function questReady(quest: QuestDefinition, progress: readonly number[] | undefined): boolean {
+  return quest.objectives.every((objective, i) => (progress?.[i] ?? 0) >= objectiveTarget(objective));
+}
+
+/** What a villager has for this player right now. */
+export function questsAt(npc: string, log: QuestLog): {
+  offers: QuestDefinition[];
+  ready: QuestDefinition[];
+  underway: QuestDefinition[];
+} {
+  const offers: QuestDefinition[] = [];
+  const ready: QuestDefinition[] = [];
+  const underway: QuestDefinition[] = [];
+  for (const quest of Object.values(QUESTS)) {
+    const progress = log.active[quest.id];
+    if (progress) {
+      if (quest.turnIn === npc && questReady(quest, progress)) ready.push(quest);
+      else if (quest.giver === npc || quest.turnIn === npc) underway.push(quest);
+    } else if (quest.giver === npc && canTake(quest, log)) {
+      offers.push(quest);
+    }
+  }
+  return { offers, ready, underway };
+}
+
+export function canTake(quest: QuestDefinition, log: QuestLog): boolean {
+  return !log.done.includes(quest.id)
+    && log.active[quest.id] === undefined
+    && quest.requires.every((id) => log.done.includes(id))
+    && Object.keys(log.active).length < MAX_ACTIVE_QUESTS;
+}
+
+/** The mark over a villager's head: something to hand in beats something to
+ *  take, which beats something under way. */
+export function questMarker(npc: string, log: QuestLog): "?" | "!" | "…" | "" {
+  const here = questsAt(npc, log);
+  if (here.ready.length > 0) return "?";
+  if (here.offers.length > 0) return "!";
+  if (here.underway.length > 0) return "…";
+  return "";
+}
+
+/**
+ * The items a quest offers this character, derived from the character and the
+ * quest alone — so the client can show exactly the choices the server will
+ * honour, and a player cannot reroll them by asking again. Integer hashing
+ * only, like everything else that must match across the wire; one of each kind
+ * of piece where it can, so a choice is a real choice.
+ */
+export function questRewardItems(quest: QuestDefinition, characterId: string): ItemKey[] {
+  let h = 0x811c9dc5;
+  for (const text of [characterId, quest.id]) {
+    for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  }
+  const pool = basesFor(quest.rewards.rarity).filter((base) => base.name === undefined);
+  const items: ItemKey[] = [];
+  const usedGear = new Set<string>();
+  for (let n = 0; n < quest.rewards.choices && pool.length > 0; n++) {
+    let pick = pool[hash2(h, n, 0x9e37) % pool.length]!;
+    for (let tries = 1; usedGear.has(pick.gear) && tries < 12; tries++) {
+      pick = pool[hash2(h, n * 16 + tries, 0x9e37) % pool.length]!;
+    }
+    usedGear.add(pick.gear);
+    items.push(encodeItem({
+      base: pick.id,
+      level: Math.max(1, quest.level * LEVEL_SCALE),
+      rarity: quest.rewards.rarity,
+      seed: hash2(h, n, 0x51ed),
+    }));
+  }
+  return items;
+}
+
+/**
+ * A skill after a quest's XP is put into it: the XP as a fraction of a level
+ * each 100, capped at what the quest's level could teach in the field — a
+ * reward should speed you up, not skip the world. Never lowers a skill.
+ */
+export function questXp(current: number, quest: QuestDefinition): number {
+  const gained = current + quest.rewards.xp / XP_PER_LEVEL;
+  const cap = Math.max(current, Math.min(MAX_PROFICIENCY, trainingCeiling(quest.level)));
+  return Math.min(gained, cap);
+}
+
+/** Where a villager is, by id. */
+export function findVillager(id: string): { villager: VillagerDefinition; settlement: SettlementDefinition } | undefined {
+  for (const settlement of Object.values(SETTLEMENTS)) {
+    const villager = settlement.villagers.find((candidate) => candidate.id === id);
+    if (villager) return { villager, settlement };
+  }
+  return undefined;
+}
+
+/** The short name: "Osk", not "Osk, timberwright". */
+export function villagerName(id: string): string {
+  return findVillager(id)?.villager.name.split(",")[0] ?? id;
+}
+
+/** Only known quests, with progress arrays the right length and in range, and
+ *  nothing both active and done. A hand-edited save costs a quest, not a session. */
+export function sanitiseQuestLog(raw: unknown): QuestLog {
+  const log: QuestLog = { active: {}, done: [] };
+  if (typeof raw !== "object" || raw === null) return log;
+  const { active, done } = raw as { active?: unknown; done?: unknown };
+  if (Array.isArray(done)) {
+    for (const id of done) if (getQuest(id) && !log.done.includes(id as string)) log.done.push(id as string);
+  }
+  if (typeof active === "object" && active !== null) {
+    for (const [id, progress] of Object.entries(active as Record<string, unknown>)) {
+      const quest = getQuest(id);
+      if (!quest || log.done.includes(id) || !Array.isArray(progress)) continue;
+      log.active[id] = quest.objectives.map((objective, i) => {
+        const value = progress[i];
+        return typeof value === "number" && Number.isFinite(value)
+          ? Math.max(0, Math.min(objectiveTarget(objective), Math.floor(value)))
+          : 0;
+      });
+    }
+  }
+  return log;
+}

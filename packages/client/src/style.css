@@ -1603,3 +1603,138 @@ body.portrait #xp-tracker, body.no-hud #xp-tracker { display: none; }
 #dev .dev-elite span { display: flex; flex-direction: column; color: #f0d98a; }
 #dev .dev-elite small { font-size: 10.5px; color: #8b98a5; }
 #dev .dev-elite small .alive { color: #6dcf7e; }
+
+/* --- quests ------------------------------------------------------------------ */
+
+/* The mark over a villager's head: gold "!" for work on offer, gold "?" for
+   something to hand in, grey "…" for something under way. */
+.nametag .marker {
+  display: inline-block;
+  margin-right: 5px;
+  font-weight: 800;
+  font-size: 14px;
+  color: #f0c83c;
+  text-shadow: 0 0 6px rgb(240 200 60 / 60%), 0 1px 2px #000;
+}
+
+.nametag .marker[data-kind="underway"] { color: #9aa7b4; text-shadow: 0 1px 2px #000; font-size: 12px; }
+
+.speech-talk { display: block; margin-top: 4px; font-size: 11px; color: #f0d98a; font-style: normal; }
+
+#power .gold, .quest-purse .gold { color: #f0c83c; }
+
+#quest-tracker {
+  position: fixed;
+  top: 226px;
+  right: 12px;
+  width: 210px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 90%);
+  pointer-events: none;
+}
+
+#quest-tracker[hidden] { display: none; }
+#quest-tracker .tracked b { color: #f0d98a; font-size: 12.5px; }
+#quest-tracker .tracked.ready b { color: #6dcf7e; }
+#quest-tracker ul { margin: 2px 0 0; padding: 0 0 0 12px; color: #c6d2de; }
+#quest-tracker li { list-style: "– "; }
+#quest-tracker li.done { color: #6b7682; text-decoration: line-through; }
+#quest-tracker li.ready { color: #6dcf7e; list-style: "» "; }
+
+#quest-dialog, #quest-log {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(480px, 92vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 0 18px 16px;
+  border-radius: 12px;
+  border: 1px solid rgb(240 200 60 / 30%);
+  background: linear-gradient(180deg, rgb(20 18 14 / 97%), rgb(12 13 16 / 97%));
+  box-shadow: 0 20px 60px rgb(0 0 0 / 60%);
+  font-size: 13px;
+  line-height: 1.5;
+  z-index: 7;
+  pointer-events: auto;
+}
+
+#quest-dialog[hidden], #quest-log[hidden] { display: none; }
+
+#quest-dialog header, #quest-log header {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 -18px 8px;
+  padding: 12px 18px 10px;
+  border-bottom: 1px solid rgb(240 200 60 / 15%);
+  background: rgb(20 18 14 / 98%);
+}
+
+#quest-dialog header b, #quest-log header b { font-size: 15px; color: #f0d98a; }
+#quest-log header span { font-size: 11px; color: #8b98a5; }
+#quest-dialog header button, #quest-log header button {
+  margin-left: auto; width: 26px; height: 26px; border-radius: 6px;
+  border: 1px solid rgb(230 237 243 / 14%); background: none; color: #9aa7b4; font-size: 17px; cursor: pointer;
+}
+
+#quest-dialog h3, #quest-log h3 { margin: 6px 0 4px; font-size: 16px; color: #fff; }
+.quest-speech { margin: 6px 0 10px; font-style: italic; color: #d9cfb4; }
+.quest-none { color: #8b98a5; font-style: italic; }
+.quest-none .mark { color: #f0c83c; font-style: normal; }
+
+.quest-rows { display: flex; flex-direction: column; gap: 5px; }
+.quest-row {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid rgb(230 237 243 / 10%); background: rgb(230 237 243 / 4%);
+  color: #e6edf3; font: inherit; text-align: left; cursor: pointer;
+}
+.quest-row:hover { border-color: rgb(240 200 60 / 50%); }
+.quest-row i { width: 14px; font-style: normal; font-weight: 800; color: #f0c83c; text-align: center; }
+.quest-row.underway i { color: #9aa7b4; }
+
+.quest-objectives { margin: 4px 0 10px; padding-left: 18px; color: #c6d2de; }
+.quest-objectives li.done { color: #6dcf7e; }
+
+.quest-rewards h4 { margin: 12px 0 6px; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #8b98a5; }
+.quest-purse { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; color: #c6d2de; }
+.quest-purse label { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.quest-purse select {
+  padding: 3px 6px; border-radius: 6px; border: 1px solid rgb(230 237 243 / 18%);
+  background: rgb(230 237 243 / 6%); color: #e6edf3; font: inherit; font-size: 12px;
+}
+.quest-purse small { color: #8b98a5; }
+
+.quest-items { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; margin-top: 8px; }
+.quest-item {
+  display: flex; flex-direction: column; gap: 1px; padding: 8px; border-radius: 8px; text-align: left;
+  border: 1px solid color-mix(in srgb, var(--rarity) 45%, transparent);
+  background: color-mix(in srgb, var(--rarity) 7%, transparent);
+  color: #e6edf3; font: inherit; cursor: pointer;
+}
+.quest-item:disabled { cursor: default; }
+.quest-item b { color: var(--rarity); font-size: 12.5px; line-height: 1.3; }
+.quest-item small { font-size: 10.5px; color: #8b98a5; }
+.quest-item small.stats { color: #6dcf7e; }
+.quest-item.picked { border-color: var(--rarity); box-shadow: 0 0 0 1px var(--rarity), 0 0 14px color-mix(in srgb, var(--rarity) 40%, transparent); }
+
+#quest-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+#quest-dialog footer button, #quest-log .abandon {
+  padding: 7px 14px; border-radius: 7px; border: 1px solid rgb(230 237 243 / 18%);
+  background: rgb(230 237 243 / 5%); color: #e6edf3; font: inherit; cursor: pointer;
+}
+#quest-dialog footer button.primary { border-color: rgb(240 200 60 / 60%); background: rgb(240 200 60 / 16%); color: #f7e3a0; font-weight: 600; }
+
+#quest-log section { padding: 8px 0 12px; border-bottom: 1px solid rgb(230 237 243 / 8%); }
+#quest-log section p { margin: 0 0 4px; color: #c6d2de; }
+#quest-log section small { color: #8b98a5; }
+#quest-log .abandon { float: right; padding: 3px 10px; font-size: 11.5px; color: #ff9d8f; }
+#quest-log .abandon.confirm { border-color: #ff7b72; background: rgb(255 123 114 / 14%); }
+
+body.portrait #quest-tracker, body.no-hud #quest-tracker { display: none; }

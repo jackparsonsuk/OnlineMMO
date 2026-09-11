@@ -27,7 +27,11 @@ smaller entries below; those are the first step towards them.
 - **The main story: reopening the Gates.** The lore says the Gates were shut;
   the story is unlocking them, one at a time, each opening a new Ostra. Locked
   Gates stand in the world as the goal you can see and cannot yet take.
-- **Quests.** Villagers stand still and say one line today (see below).
+- **More quests.** The system is in (`quests.ts`) with nine starter quests in
+  Daso and Fanshona. Next: quests for the Heartland and the far regions, a
+  quest to each elite, repeatable bounties, and the Gate story as a chain.
+  The system still lacks talk-to objectives, escorts, quest items you carry
+  and use, and shared progress within a party (once there are parties).
 - **Dungeons.** Instanced, for a party; the first real source of mythic loot.
 - **Raids.** Larger instances; where World and Ostra rarity come from.
 - **Player houses.** Also the answer to "somewhere to store more than thirty
@@ -146,7 +150,7 @@ smaller entries below; those are the first step towards them.
   them all; here everyone starts with three.
 - **An economy.** Vendors in Daso and Fanshona, a currency, trading between
   players, and somewhere to store more than thirty items.
-- **Quests from villagers.** They stand still and say one line.
+- **Gold has nowhere to go.** Quests pay it; nothing sells. Vendors first.
 - **Grouping and chat.** No way to form a party or talk.
 
 ## Client and tech

@@ -83,6 +83,24 @@ export class Nametags {
     this.tags.set(sessionId, tag);
   }
 
+  /** A mark before the name — a quest's "!" or "?". Empty removes it. */
+  setMarker(sessionId: string, marker: string): void {
+    const tag = this.tags.get(sessionId);
+    if (!tag) return;
+    let mark = tag.querySelector<HTMLElement>(".marker");
+    if (!marker) {
+      mark?.remove();
+      return;
+    }
+    if (!mark) {
+      mark = document.createElement("span");
+      mark.className = "marker";
+      tag.prepend(mark);
+    }
+    mark.textContent = marker;
+    mark.dataset["kind"] = marker === "?" ? "ready" : marker === "!" ? "offer" : "underway";
+  }
+
   /** @param fraction 0..1. Only call when it changes; this touches the DOM. */
   setHealth(sessionId: string, fraction: number): void {
     const fill = this.bars.get(sessionId);

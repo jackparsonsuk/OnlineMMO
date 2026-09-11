@@ -31,8 +31,8 @@ one.
 
 Controls: **WASD** move, **Shift** sprint (out of combat), **Space / 1 / 2 / 3**
 cast, **Tab** or click to target, **Esc** to let go, **M** map, **I** (or **C**)
-character and pack, drag to orbit, scroll to zoom, walk into a Gate ring to
-travel.
+character and pack, **E** talk to a villager, **J** quest log, drag to orbit,
+scroll to zoom, walk into a Gate ring to travel.
 
 In development, **`` ` ``** (backtick) opens the dev menu: teleport by clicking
 the world map (the hint shows the coordinates, region and creature level under
@@ -541,6 +541,46 @@ client-side, because equipment itself is private — without them the client
 could not draw its own bars. Taking armour off clamps current health to the new
 ceiling rather than scaling it: it should never kill you, and never leave you
 above your cap.
+
+## Quests
+
+Villagers ask for help, and pay for it. A **"!"** over someone's head means
+they have work for you, a **"?"** means something is ready to hand back, and a
+grey **"…"** means something of theirs is under way. Walk up and press **E** to
+talk. Quests under way are tracked under the minimap, and **J** opens the log,
+where a quest can be abandoned.
+
+A quest is data in `quests.ts`: who gives it, who takes it back, what must be
+done, and what it pays. There are four kinds of objective, the things the
+world can already tell apart:
+
+- **kill** N of a creature
+- **slay** one particular elite
+- **collect** N of something only some of a creature carry
+- **visit** a place
+
+A quest handed back to someone other than its giver is a delivery. Collected
+things are counted, not carried, because thirty slots of wolf fangs would be
+clutter the loot system has no use for. A kill counts for **everyone who fought
+the creature** (anyone with threat on it), not just the killing blow, so a
+group never has to take turns at the last hit.
+
+**Rewards** are gold (the first currency, and nothing sells yet), one item of
+your choosing from two or three, and XP you put into whichever skill you like.
+The item choices come from `questRewardItems`, which is a pure function of the
+quest and the character's id. The client shows exactly the choices the server
+will honour, and asking again cannot reroll them. The XP is capped at what the
+quest's level could teach in the field (`questXp`), so a Daso errand speeds up
+early training without skipping the world.
+
+The client decides nothing. Accept, abandon and complete are requests the room
+checks against the same rules: whether you can take it, whether you are within
+talking range of the right villager, whether it is done, and whether there is
+room in the bag. The log (`{ active, done }`) and gold are saved with the
+character. The first content is nine quests: a Daso chain (wolves, spiders,
+fangs, the driver missing on the Westroad), a long delivery that walks you to
+Fanshona, and a Fanshona chain that ends with Old Caddo sending you after Mother
+Silt.
 
 ## Accounts
 

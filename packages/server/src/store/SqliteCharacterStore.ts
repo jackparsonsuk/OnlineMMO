@@ -10,6 +10,7 @@ import {
   isSpellId,
   PLAYER_MAX_HEALTH,
   sanitiseProficiency,
+  sanitiseQuestLog,
   slotsFor,
   STARTING_OSTRA,
   wear,
@@ -124,6 +125,15 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
       this.db.exec("ALTER TABLE characters ADD COLUMN equipment TEXT NOT NULL DEFAULT '{}'");
     }
 
+    if (!columns.has("quests")) {
+      // A JSON blob, like skills, for the same reasons.
+      this.db.exec("ALTER TABLE characters ADD COLUMN quests TEXT NOT NULL DEFAULT '{}'");
+    }
+
+    if (!columns.has("gold")) {
+      this.db.exec("ALTER TABLE characters ADD COLUMN gold INTEGER NOT NULL DEFAULT 0");
+    }
+
     if (!columns.has("account_id")) {
       // Nullable on purpose: characters made before accounts existed have no
       // owner and cannot be claimed. They stay in the table, listed for nobody,
@@ -194,8 +204,8 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
     this.db.prepare(`
       INSERT INTO characters
         (id, realm_id, account_id, name, colour, ostra_id, x, y, z, yaw, health,
-         skills, inventory, equipment, created_at, last_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         skills, inventory, equipment, quests, gold, created_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       character.id,
       character.realmId,
@@ -211,6 +221,8 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
       JSON.stringify(character.skills),
       JSON.stringify(character.inventory),
       JSON.stringify(character.equipment),
+      JSON.stringify(character.quests),
+      Math.max(0, Math.floor(character.gold)),
       character.createdAt,
       character.lastSeenAt,
     );
@@ -220,7 +232,7 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
     this.db.prepare(`
       UPDATE characters
          SET ostra_id = ?, x = ?, y = ?, z = ?, yaw = ?, health = ?, skills = ?,
-             inventory = ?, equipment = ?, last_seen_at = ?
+             inventory = ?, equipment = ?, quests = ?, gold = ?, last_seen_at = ?
        WHERE realm_id = ? AND id = ?
     `).run(
       position.ostraId,
@@ -232,6 +244,8 @@ export class SqliteCharacterStore implements CharacterStore, AccountStore {
       JSON.stringify(position.skills),
       JSON.stringify(position.inventory),
       JSON.stringify(position.equipment),
+      JSON.stringify(position.quests),
+      Math.max(0, Math.floor(position.gold)),
       Date.now(),
       realmId,
       characterId,
@@ -345,6 +359,8 @@ function toRecord(row: Record<string, unknown>): CharacterRecord {
     // briefly overfull pack.
     inventory: [...parseInventory(row["inventory"]), ...spill],
     equipment,
+    quests: sanitiseQuestLog(parseJson(row["quests"])),
+    gold: Math.max(0, Math.floor(Number(row["gold"] ?? 0)) || 0),
     createdAt: Number(row["created_at"]),
     lastSeenAt: Number(row["last_seen_at"]),
   };

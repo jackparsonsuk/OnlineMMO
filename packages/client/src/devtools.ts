@@ -104,6 +104,13 @@ export class DevMenu {
         </div>
       </section>
       <section>
+        <h4>Quests</h4>
+        <div class="row">
+          <button type="button" data-act="questsFinish" title="Complete every objective of every quest under way">Finish objectives</button>
+          <button type="button" data-act="questsReset" title="Forget every quest, done or not">Reset all</button>
+        </div>
+      </section>
+      <section>
         <h4>Elites</h4>
         <div class="row">
           <button type="button" data-act="elites">Refresh</button>
@@ -240,6 +247,10 @@ export class DevMenu {
         break;
       case "elites":
         this.hooks.send({ cmd: "elites" });
+        break;
+      case "questsFinish":
+      case "questsReset":
+        this.hooks.send({ cmd: act });
         break;
       case "respawnElites":
         this.hooks.send({ cmd: "respawnElites" });

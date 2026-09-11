@@ -93,6 +93,10 @@ export interface OstraSession {
   selfRig(): Rig | undefined;
   /** Where your body is drawn this frame. */
   selfPosition(): { x: number; y: number; z: number };
+  /** The villager close enough to talk to, if any. */
+  nearestVillager(): VillagerDefinition | undefined;
+  /** Mark villagers' nametags with what they have for you ("!", "?", "…"). */
+  setQuestMarkers(markerFor: (id: string) => string): void;
   /** Development: open the world map and hand the next click to `picker`. */
   pickOnMap(picker: ((x: number, z: number) => void) | undefined): void;
   readonly picking: boolean;
@@ -1028,6 +1032,15 @@ export function createSession(
       nametags.add(key, villager.name, villager.colour, "villager");
     }
   }
+  /** The villager you are close enough to hear, this frame. */
+  let nearby: (typeof villagers)[number] | undefined;
+
+  /** Put a quest mark over everyone who has one for you. */
+  function setQuestMarkers(markerFor: (id: string) => string): void {
+    for (const villager of villagers) {
+      if (villager.id !== undefined) nametags.setMarker(villager.key, markerFor(villager.id));
+    }
+  }
 
   const waystones = ostra.waystones.map((stone) => {
     const key = `waystone:${stone.id}`;
@@ -1302,7 +1315,8 @@ export function createSession(
           closest = villager;
         }
       }
-      hud.setSpeech(closest?.name, closest?.line);
+      hud.setSpeech(closest?.name, closest?.line, closest?.id !== undefined);
+      nearby = closest;
       cartographer.update(x, z, facingYaw(), blips, targetBearing);
     }
 
@@ -1407,6 +1421,8 @@ export function createSession(
     setPortrait,
     selfRig: () => players.get(room.sessionId)?.rig,
     selfPosition,
+    nearestVillager: () => nearby,
+    setQuestMarkers,
     pickOnMap: (picker) => cartographer.setPicker(picker),
     get picking() { return cartographer.picking; },
     dispose,

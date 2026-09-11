@@ -40,6 +40,8 @@ export interface PropDefinition {
 /** Someone standing at their work. Static: a logging town at work is people
  *  in fixed places, and it costs no bandwidth at all. */
 export interface VillagerDefinition {
+  /** Set on anyone quests refer to (see `quests.ts`). */
+  id?: string;
   name: string;
   /** What they say when you stand near them. */
   line: string;
@@ -195,28 +197,28 @@ export const DASO: SettlementDefinition = {
       colour: 0x8a6b45,
     },
     {
-      name: "Herla, innkeeper",
+      id: "herla", name: "Herla, innkeeper",
       line: "Fifty of us, and I know every order by heart. Sit where you like.",
       ...at(-1, 4.2),
       yaw: 0.1,
       colour: 0x9a5b52,
     },
     {
-      name: "Osk, timberwright",
+      id: "osk", name: "Osk, timberwright",
       line: "Oak from the ridge, ash from the low ground. Don't mix them.",
       ...at(1.8, -6),
       yaw: 0.4,
       colour: 0x5c7a52,
     },
     {
-      name: "Wen, sawyer",
+      id: "wen", name: "Wen, sawyer",
       line: "Work's work. Nobody comes to Daso on purpose.",
       ...at(-2.2, -6.2),
       yaw: -0.6,
       colour: 0x4a6580,
     },
     {
-      name: "Ilda, hauler",
+      id: "ilda", name: "Ilda, hauler",
       line: "Careful past the treeline. Things have been coming closer.",
       ...at(7.5, 3.5),
       yaw: -1.5,
@@ -309,11 +311,11 @@ export const FANSHONA: SettlementDefinition = {
   ],
 
   villagers: [
-    { name: "Maera, harbourmistress", line: "Every boat on the Brightwater ties up here, or it doesn't tie up at all.", ...lakeside(0, 14), yaw: FANSHONA_YAW + Math.PI, colour: 0x3f6a8a },
-    { name: "Tobin, net-mender", line: "The Wretches take a net a week. Spit straight through the mesh.", ...lakeside(-7, -6), yaw: FANSHONA_YAW + 0.8, colour: 0x6a7a5a },
-    { name: "Ysolde, weigher", line: "Fish, timber down from Daso, stone off the moor. Everything gets weighed.", ...lakeside(1.5, -1), yaw: FANSHONA_YAW + Math.PI, colour: 0x8a5a6a },
-    { name: "Old Caddo", line: "Came through the Gate the day it opened. Saw the lake and never left.", ...lakeside(-3, 6), yaw: FANSHONA_YAW - 0.6, colour: 0x7a6a50 },
-    { name: "Pell, boatwright", line: "Thornback hide patches a hull, if you can get close enough to take one.", ...lakeside(10, 6), yaw: FANSHONA_YAW - 2.2, colour: 0x8a6a3a },
+    { id: "maera", name: "Maera, harbourmistress", line: "Every boat on the Brightwater ties up here, or it doesn't tie up at all.", ...lakeside(0, 14), yaw: FANSHONA_YAW + Math.PI, colour: 0x3f6a8a },
+    { id: "tobin", name: "Tobin, net-mender", line: "The Wretches take a net a week. Spit straight through the mesh.", ...lakeside(-7, -6), yaw: FANSHONA_YAW + 0.8, colour: 0x6a7a5a },
+    { id: "ysolde", name: "Ysolde, weigher", line: "Fish, timber down from Daso, stone off the moor. Everything gets weighed.", ...lakeside(1.5, -1), yaw: FANSHONA_YAW + Math.PI, colour: 0x8a5a6a },
+    { id: "caddo", name: "Old Caddo", line: "Came through the Gate the day it opened. Saw the lake and never left.", ...lakeside(-3, 6), yaw: FANSHONA_YAW - 0.6, colour: 0x7a6a50 },
+    { id: "pell", name: "Pell, boatwright", line: "Thornback hide patches a hull, if you can get close enough to take one.", ...lakeside(10, 6), yaw: FANSHONA_YAW - 2.2, colour: 0x8a6a3a },
   ],
 
   trees: [

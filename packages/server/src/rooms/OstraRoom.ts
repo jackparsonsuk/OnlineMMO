@@ -11,6 +11,7 @@ import {
   COMBO_FINISHER_MULTIPLIER,
   critChanceFor,
   CRIT_MULTIPLIER,
+  canTake,
   CREDIT_DAMAGE_SHARE,
   CREDIT_TAKEN_SHARE,
   describeItem,
@@ -22,7 +23,18 @@ import {
   ENEMY_RESPAWN_MS,
   EnemyState,
   findGate,
+  findVillager,
   GEAR_SKILL_IDS,
+  getQuest,
+  isGearSkill,
+  isSpellId,
+  objectiveTarget,
+  questReady,
+  questRewardItems,
+  questXp,
+  settlementsIn,
+  TALK_RANGE,
+  type QuestLog,
   getArchetype,
   groundHeight,
   GROUND_ITEM_TTL_MS,
@@ -160,6 +172,8 @@ interface Session {
   targetId: string | undefined;
   /** Development only: blows land (and train armour) but take no health. */
   god: boolean;
+  quests: QuestLog;
+  gold: number;
 }
 
 /** One live elite, and the fight it is in. Reset when the fight ends. */
@@ -308,6 +322,12 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       this.onUnequip(client, message?.slot));
     this.onMessage("destroy", (client, message: { item?: unknown }) =>
       this.onDestroy(client, message?.item));
+    this.onMessage("questAccept", (client, message: { quest?: unknown }) =>
+      this.onQuestAccept(client, message?.quest));
+    this.onMessage("questAbandon", (client, message: { quest?: unknown }) =>
+      this.onQuestAbandon(client, message?.quest));
+    this.onMessage("questComplete", (client, message: { quest?: unknown; choice?: unknown; skill?: unknown }) =>
+      this.onQuestComplete(client, message?.quest, message?.choice, message?.skill));
     // Cheats for testing. Registered at all only outside production, so no
     // amount of crafting a message reaches them on a real server.
     if (context.devTools) {
@@ -378,6 +398,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       if (this.tick % CAMP_CHECK_TICKS === 0) {
         this.updateCamps(now);
         this.updateElites(now);
+        this.questVisits();
       }
     }, TICK_RATE);
   }
@@ -473,6 +494,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       comboAt: 0,
       targetId: undefined,
       god: false,
+      quests: { active: { ...character.quests.active }, done: [...character.quests.done] },
+      gold: character.gold,
     });
 
     // Wake the camps around them now rather than up to half a second later,
@@ -511,6 +534,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         skills: session.skills,
         inventory: session.inventory,
         equipment: session.equipment,
+        quests: session.quests,
+        gold: session.gold,
       });
     }
 
@@ -891,7 +916,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     enemy.state = EnemyState.Dead;
     const brain = this.brains.get(id);
     const fight = this.eliteOf.get(id);
-    // Before calmDown: an elite's credit is read from the threat it forgets.
+    // Before calmDown: credit is read from the threat it forgets.
+    this.questKill(id, enemy, killerSessionId);
     if (fight) this.eliteFell(id, fight, enemy, killerSessionId, now);
     // Summoned creatures are part of the elite's fight, not a loot source.
     else if (!this.addOf.has(id)) this.rollDrop(enemy, killerSessionId);
@@ -947,8 +973,128 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       skills: session.skills,
       inventory: session.inventory,
       equipment: session.equipment,
+      quests: session.quests,
+      gold: session.gold,
       manaNow: player.mana,
     });
+  }
+
+  // --- quests ----------------------------------------------------------------------
+
+  /** Close enough to a villager to be talking to them. */
+  private nearVillager(player: Player, npc: string): boolean {
+    const found = findVillager(npc);
+    if (!found || !settlementsIn(this.ostra).includes(found.settlement)) return false;
+    return Math.hypot(player.x - found.villager.x, player.z - found.villager.z) <= TALK_RANGE + 1;
+  }
+
+  private sendQuests(sessionId: string, session: Session): void {
+    this.clients.getById(sessionId)?.send("quests", { quests: session.quests, gold: session.gold });
+  }
+
+  private onQuestAccept(client: Client, id: unknown): void {
+    const session = this.sessions.get(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    const quest = getQuest(id);
+    if (!session || !player || !quest) return;
+    if (!canTake(quest, session.quests) || !this.nearVillager(player, quest.giver)) return;
+    session.quests.active[quest.id] = quest.objectives.map(() => 0);
+    this.sendQuests(client.sessionId, session);
+  }
+
+  private onQuestAbandon(client: Client, id: unknown): void {
+    const session = this.sessions.get(client.sessionId);
+    const quest = getQuest(id);
+    if (!session || !quest || session.quests.active[quest.id] === undefined) return;
+    delete session.quests.active[quest.id];
+    this.sendQuests(client.sessionId, session);
+  }
+
+  /**
+   * Hand a quest in. The client names the item it chose (an index into the
+   * choices `questRewardItems` gives this character — the same list the
+   * client was shown) and the skill it wants the XP in; everything else is
+   * checked here: done, near whoever takes it back, room in the bag.
+   */
+  private onQuestComplete(client: Client, id: unknown, choice: unknown, skill: unknown): void {
+    const session = this.sessions.get(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    const quest = getQuest(id);
+    if (!session || !player || !quest) return;
+    const progress = session.quests.active[quest.id];
+    if (!progress || !questReady(quest, progress) || !this.nearVillager(player, quest.turnIn)) return;
+
+    const items = questRewardItems(quest, session.characterId);
+    const item = typeof choice === "number" && Number.isInteger(choice) ? items[choice] : undefined;
+    if (items.length > 0 && item === undefined) return;
+    if (!isSpellId(skill) && !isGearSkill(skill)) return;
+    if (item !== undefined && session.inventory.length >= INVENTORY_SIZE) {
+      client.send("bagFull");
+      return;
+    }
+
+    delete session.quests.active[quest.id];
+    session.quests.done.push(quest.id);
+    session.gold += quest.rewards.gold;
+    if (item !== undefined) session.inventory.push(item);
+    session.skills[skill] = questXp(session.skills[skill] ?? 0, quest);
+
+    this.refreshStats(session, player);
+    this.sendProfile(client.sessionId, session, player);
+    this.clients.getById(client.sessionId)?.send("skills", { skills: session.skills });
+    this.clients.getById(client.sessionId)?.send("questDone", { quest: quest.id, item, skill });
+  }
+
+  /**
+   * A creature died: advance kill, slay and collect objectives for everyone
+   * who fought it (anyone with threat on it, and whoever finished it), not
+   * only the killer — a group should not have to take turns landing the last
+   * blow. Called before the brain calms down, while its threat is intact.
+   */
+  private questKill(enemyId: string, enemy: Enemy, killerSessionId: string): void {
+    const fighters = new Set<string>([killerSessionId, ...(this.brains.get(enemyId)?.threat.keys() ?? [])]);
+    const eliteId = this.eliteOf.get(enemyId)?.elite.id;
+    for (const sessionId of fighters) {
+      const session = this.sessions.get(sessionId);
+      if (!session) continue;
+      let changed = false;
+      for (const [questId, progress] of Object.entries(session.quests.active)) {
+        const quest = getQuest(questId);
+        if (!quest) continue;
+        quest.objectives.forEach((objective, i) => {
+          const have = progress[i] ?? 0;
+          if (have >= objectiveTarget(objective)) return;
+          const counts = objective.kind === "kill" ? objective.creature === enemy.kind
+            : objective.kind === "slay" ? objective.elite === eliteId
+              : objective.kind === "collect" ? objective.from === enemy.kind && Math.random() < objective.chance
+                : false;
+          if (!counts) return;
+          progress[i] = have + 1;
+          changed = true;
+        });
+      }
+      if (changed) this.sendQuests(sessionId, session);
+    }
+  }
+
+  /** Visit objectives, checked with the camps: twice a second is plenty for
+   *  "are you standing at the stone yet". */
+  private questVisits(): void {
+    for (const [sessionId, session] of this.sessions) {
+      const player = this.state.players.get(sessionId);
+      if (!player || session.transferring) continue;
+      let changed = false;
+      for (const [questId, progress] of Object.entries(session.quests.active)) {
+        const quest = getQuest(questId);
+        quest?.objectives.forEach((objective, i) => {
+          if (objective.kind !== "visit" || (progress[i] ?? 0) >= 1) return;
+          if (Math.hypot(player.x - objective.x, player.z - objective.z) > objective.radius) return;
+          progress[i] = 1;
+          changed = true;
+        });
+      }
+      if (changed) this.sendQuests(sessionId, session);
+    }
   }
 
   /** Send to everyone whose player is within EVENT_RANGE of a point. */
@@ -1085,6 +1231,19 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         }));
         break;
       }
+      case "questsFinish":
+        // Every objective of everything under way, done — hand-ins still
+        // have to be walked to.
+        for (const [id, progress] of Object.entries(session.quests.active)) {
+          const quest = getQuest(id);
+          quest?.objectives.forEach((objective, i) => { progress[i] = objectiveTarget(objective); });
+        }
+        this.sendQuests(client.sessionId, session);
+        break;
+      case "questsReset":
+        session.quests = { active: {}, done: [] };
+        this.sendQuests(client.sessionId, session);
+        break;
       case "respawnElites":
         // Timers set to now, so the next check wakes them — with the
         // announcement, which is the point of testing it.
@@ -1739,6 +1898,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         skills: session.skills,
         inventory: session.inventory,
         equipment: session.equipment,
+        quests: session.quests,
+        gold: session.gold,
       });
 
       // With an auth context, so the reserved seat carries the account — see

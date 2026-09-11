@@ -37,6 +37,7 @@ packages/shared/   one copy of everything both sides must agree on
   skills.ts          proficiency 0-1000 for everything, training, effectiveness
   stats.ts           Might/Focus/Vigour/Spirit + secondaries, and what they do
   elites.ts          rare named elites per region; unsafeElites() at boot
+  quests.ts          quest data, objectives, reward choices, questXp
   combat.ts spells.ts enemies.ts settlements.ts schema.ts constants.ts
 packages/server/
   rooms/OstraRoom.ts one room per Ostra: sim loop, camps, casts, loot, gates
@@ -48,6 +49,7 @@ packages/client/src/
                      the character screen's camera (setPortrait)
   character.ts       the character screen: slots, lines to the body, pack, skills
   devtools.ts        the ` dev menu (dev builds only; server gates `dev` too)
+  questUI.ts         quest dialogue (E), tracker, quest log (J)
   terrain.ts         chunk streamer + horizon mesh + groundTone
   scenery.ts         thin-instanced trees/rocks/grass per chunk
   rigs.ts            procedural animated bodies (Animator)

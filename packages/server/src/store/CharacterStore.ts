@@ -1,4 +1,4 @@
-import type { Equipment, ItemKey, OstraId, Proficiency } from "@mmo/shared";
+import type { Equipment, ItemKey, OstraId, Proficiency, QuestLog } from "@mmo/shared";
 
 /**
  * A character as it survives between sessions. Position and Ostra live here
@@ -34,6 +34,9 @@ export interface CharacterRecord {
   inventory: ItemKey[];
   /** Worn item keys, by slot. */
   equipment: Equipment;
+  /** Quests under way and done. */
+  quests: QuestLog;
+  gold: number;
   createdAt: number;
   lastSeenAt: number;
 }
@@ -45,6 +48,8 @@ export type CharacterPosition =
     skills: Proficiency;
     inventory: ItemKey[];
     equipment: Equipment;
+    quests: QuestLog;
+    gold: number;
   };
 
 /**
