@@ -57,6 +57,7 @@ packages/client/src/
   character.ts       the character screen: slots, lines to the body, pack, abilities
   devtools.ts        the ` dev menu (dev builds only; server gates `dev` too)
   questUI.ts         quest dialogue (E), tracker, quest log (J)
+  chat.ts            chat (Enter): say and party channels, the log
   party.ts           party frames, the party window (P), invites
   terrain.ts         chunk streamer + horizon mesh + groundTone
   scenery.ts         thin-instanced trees/rocks/grass per chunk

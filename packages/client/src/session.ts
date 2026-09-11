@@ -109,6 +109,8 @@ export interface OstraSession {
   /** Who is in your party, by session id: their names go green, and they
    *  show on the maps in green too. */
   setParty(sessionIds: ReadonlySet<string>): void;
+  /** A line said aloud by the player with this session id, over their head. */
+  say(sessionId: string, text: string): void;
   /** Called when another player is clicked, with where on screen. */
   onPlayerClick: ((sessionId: string, name: string, x: number, y: number) => void) | undefined;
   readonly picking: boolean;
@@ -1587,6 +1589,7 @@ export function createSession(
     pickOnMap: (picker) => cartographer.setPicker(picker),
     get picking() { return cartographer.picking; },
     setParty,
+    say: (sessionId, text) => nametags.say(sessionId, text),
     onPlayerClick: undefined,
     dispose,
     debug: { predict, meshes, colliders, input, target: () => target },

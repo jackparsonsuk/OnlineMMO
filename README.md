@@ -32,8 +32,8 @@ one.
 Controls: **WASD** move, **Shift** sprint (out of combat), **Space / 1–6**
 abilities, **Tab** or click to target, **Esc** to let go, **M** map, **I** (or **C**)
 character and pack, **E** talk to a villager, **J** quest log, **P** party (or
-click another player to invite them), drag to orbit, scroll to zoom, walk into
-a Gate ring to travel.
+click another player to invite them), **Enter** chat, drag to orbit, scroll to
+zoom, walk into a Gate ring to travel.
 
 In development, **`` ` ``** (backtick) opens the dev menu: teleport by clicking
 the world map (the hint shows the coordinates, region and creature level under
@@ -738,6 +738,20 @@ one, so a departure from a connection that is no longer the character's is
 ignored. Someone who drops out stays in the party for three minutes, so a
 reload does not cost them their group; a server restart disbands every party.
 
+## Chat
+
+**Enter** opens a line at the bottom left. Two channels: **say**, heard by
+anyone in the same room within 60 m and drawn in a bubble over the speaker's
+head, and **party**, heard by the whole party wherever each of them is. A line
+goes to the party by default when you have one — that is who you are playing
+with — and aloud otherwise; `/s` or `/p` at the start picks for that line. The
+log fades when closed and comes back while typing.
+
+The server trims each line, replaces control characters, caps it at 200
+characters and refuses more than five lines in six seconds; the client only
+ever puts it on screen as text, never HTML. That is the whole of moderation so
+far — there is no mute, report or filter (see TODO).
+
 ## Dungeons
 
 Instanced places for a party, built as small Ostras (`OstraDefinition.dungeon`,
@@ -1108,7 +1122,8 @@ build next live in [TODO.md](TODO.md).
 - **Docks are scenery.** You wade beside Fanshona's dock, not along it.
 - **No taunt, no group threat tools.** Threat is damage-based; there is no way
   to deliberately hold a creature off a friend.
-- **No chat.** Parties exist, but nothing lets anyone talk in game.
+- **Chat has no moderation.** Say and party channels exist, trimmed, capped
+  and rate-limited, but nobody can be muted or reported.
 - **Dungeons have no lockout.** Leaving empties an instance and the next trip
   down is a fresh one, boss and all, as often as a party likes.
 - **Abilities are learned by levelling, not found.** The lore says spells come

@@ -531,7 +531,13 @@ export class Cartographer {
     const region = regionOf(this.ostra, x, z);
     if (!(nearest && best < 900)) place = region?.name ?? place;
 
-    const band = this.ostra.dungeon?.levels ?? (this.ostra.wilds ? region?.levels : undefined);
+    // At a dungeon's Gate, the band that matters is the dungeon's, not the
+    // woods it stands in: "The Hollow Barrow · levels 1–5" read as a promise.
+    const dungeonGate = this.ostra.gates.find((gate) =>
+      getOstra(gate.target).dungeon && Math.hypot(gate.x - x, gate.z - z) < 40);
+    const band = this.ostra.dungeon?.levels
+      ?? (dungeonGate ? getOstra(dungeonGate.target).dungeon?.levels : undefined)
+      ?? (this.ostra.wilds ? region?.levels : undefined);
     const danger = band ? ` · levels ${band[0]}–${band[1]}` : "";
     const info = `${place}${danger}`;
     if (info !== this.lastInfo) {

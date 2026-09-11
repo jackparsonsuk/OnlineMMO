@@ -139,6 +139,21 @@ export class Nametags {
     this.tags.get(sessionId)?.classList.toggle("targeted", targeted);
   }
 
+  /**
+   * Something said aloud, over the speaker's head for a few seconds. Longer
+   * lines stay up longer; a new line replaces the last.
+   */
+  say(sessionId: string, text: string): void {
+    const tag = this.tags.get(sessionId);
+    if (!tag) return;
+    tag.querySelector(".bubble")?.remove();
+    const bubble = document.createElement("span");
+    bubble.className = "bubble";
+    bubble.textContent = text;
+    tag.appendChild(bubble);
+    window.setTimeout(() => bubble.remove(), 4000 + Math.min(6000, text.length * 60));
+  }
+
   /** Mark a player who is in your party. */
   setParty(sessionId: string, inParty: boolean): void {
     this.tags.get(sessionId)?.classList.toggle("party", inParty);

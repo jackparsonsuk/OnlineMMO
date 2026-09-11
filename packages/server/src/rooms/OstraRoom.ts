@@ -197,6 +197,8 @@ interface Session {
   god: boolean;
   quests: QuestLog;
   gold: number;
+  /** When their recent chat lines were sent, for the flood limit. */
+  chatTimes: number[];
 }
 
 /** One live elite, and the fight it is in. Reset when the fight ends. */
@@ -280,6 +282,13 @@ const dungeonGrants = new Map<string, { instance: string; x: number; z: number; 
  *  touched it — the one healing a friend is part of the fight too, and there
  *  will be healers. */
 const PARTY_SHARE_RANGE = 60;
+
+/** Speaking aloud carries this far — across a clearing or a dungeon hall. */
+const SAY_RANGE = 60;
+const CHAT_MAX_LENGTH = 200;
+/** At most this many lines in any CHAT_WINDOW_MS. */
+const CHAT_LINES_PER_WINDOW = 5;
+const CHAT_WINDOW_MS = 6_000;
 
 /** Where you step out of a Gate: in front of it, facing away. */
 function gateArrival(gate: GateDefinition): { x: number; z: number; yaw: number } {
@@ -436,6 +445,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const session = this.sessions.get(client.sessionId);
       if (session && typeof message?.id === "string") parties.kick(session.characterId, message.id);
     });
+    this.onMessage("chat", (client, message: { text?: unknown; channel?: unknown }) =>
+      this.onChat(client, message?.text, message?.channel));
     // Cheats for testing. Registered at all only outside production, so no
     // amount of crafting a message reaches them on a real server.
     if (context.devTools) {
@@ -619,6 +630,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       god: false,
       quests: { active: { ...character.quests.active }, done: [...character.quests.done] },
       gold: character.gold,
+      chatTimes: [],
     });
     this.announcePresence(client.sessionId);
 
@@ -641,6 +653,42 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       sessionId,
       send: (type, payload) => this.clients.getById(sessionId)?.send(type, payload),
     });
+  }
+
+  /**
+   * A line of chat. "say" reaches everyone in this room within SAY_RANGE, and
+   * is drawn over the speaker's head; "party" reaches the whole party wherever
+   * they are. Text is trimmed, stripped of control characters and capped, and
+   * a flood of it is refused — this is the whole of moderation for now (see
+   * TODO), so it is deliberately strict.
+   */
+  private onChat(client: Client, rawText: unknown, channel: unknown): void {
+    const session = this.sessions.get(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    if (!session || !player || typeof rawText !== "string") return;
+    const text = rawText.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, CHAT_MAX_LENGTH);
+    if (text.length === 0) return;
+
+    const now = Date.now();
+    session.chatTimes = session.chatTimes.filter((at) => now - at < CHAT_WINDOW_MS);
+    if (session.chatTimes.length >= CHAT_LINES_PER_WINDOW) {
+      client.send("chatRefused", { text: "Slow down — you are speaking too fast." });
+      return;
+    }
+    session.chatTimes.push(now);
+
+    const payload = { from: player.name, sessionId: client.sessionId, text };
+    if (channel === "party") {
+      if (!parties.partyChat(session.characterId, payload)) {
+        client.send("chatRefused", { text: "You are not in a party. (/s to speak aloud.)" });
+      }
+      return;
+    }
+    for (const other of this.clients) {
+      const listener = this.state.players.get(other.sessionId);
+      if (!listener || Math.hypot(listener.x - player.x, listener.z - player.z) > SAY_RANGE) continue;
+      other.send("chat", { ...payload, channel: "say" });
+    }
   }
 
   /** Party members of this player who are in this room, alive, and within

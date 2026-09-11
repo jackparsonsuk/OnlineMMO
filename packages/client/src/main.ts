@@ -25,6 +25,7 @@ import {
 import { AccountClient } from "./account.js";
 import { SoundBoard } from "./audio.js";
 import { CharacterScreen } from "./character.js";
+import { Chat, type ChatLine } from "./chat.js";
 import { DevMenu, type EliteStatus } from "./devtools.js";
 import { PartyUI, type PartyRoster } from "./party.js";
 import { QuestUI } from "./questUI.js";
@@ -94,6 +95,8 @@ const partyUI = new PartyUI({
   leave: () => sendToRoom?.("partyLeave"),
   kick: (id) => sendToRoom?.("partyKick", { id }),
 });
+
+const chat = new Chat((text, channel) => sendToRoom?.("chat", { text, channel }));
 
 /** Tell the session which bodies in this room are your party. */
 function markParty(): void {
@@ -177,6 +180,14 @@ window.addEventListener("keydown", (event) => {
       break;
     case "KeyP":
       if (session) partyUI.toggle();
+      break;
+    case "Enter":
+    case "NumpadEnter":
+      if (session && !chat.isOpen) {
+        // Or the Enter that opened the box would also submit it.
+        event.preventDefault();
+        chat.open();
+      }
       break;
     case "KeyM":
       session?.toggleMap();
@@ -300,6 +311,7 @@ function frame(now: number): void {
   characterScreen.update(now, world.scene, canvas, session?.selfRig());
   devMenu?.update(now);
   partyUI.update(room?.state);
+  chat.update(Date.now());
   if (session) {
     const self = session.selfPosition();
     questUI.update(self.x, self.z);
@@ -404,8 +416,14 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   // Parties outlive rooms; the server re-sends yours on every arrival.
   next.onMessage("party", (payload: PartyRoster | null) => {
     partyUI.setRoster(payload);
+    chat.setInParty(payload !== null);
     markParty();
   });
+  next.onMessage("chat", (line: ChatLine) => {
+    chat.add(line);
+    if (line.channel === "say") session?.say(line.sessionId, line.text);
+  });
+  next.onMessage("chatRefused", (payload: { text: string }) => chat.note(payload.text));
   next.onMessage("partyInvite", (payload: { from: string }) => {
     partyUI.showInvite(payload.from);
     audio.play("pickup", 0.6);

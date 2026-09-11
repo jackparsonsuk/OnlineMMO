@@ -241,6 +241,17 @@ function partyFor(characterId: string): Party | undefined {
   return id !== undefined ? parties.get(id) : undefined;
 }
 
+/**
+ * A line said to the party, wherever each of them is standing. Returns
+ * false if there is no party to hear it.
+ */
+export function partyChat(characterId: string, payload: { from: string; sessionId: string; text: string }): boolean {
+  const party = partyFor(characterId);
+  if (!party) return false;
+  for (const id of party.members) online.get(id)?.send("chat", { ...payload, channel: "party" });
+  return true;
+}
+
 /** Everyone else in this character's party, online or not. */
 export function partyMates(characterId: string): string[] {
   return partyFor(characterId)?.members.filter((id) => id !== characterId) ?? [];

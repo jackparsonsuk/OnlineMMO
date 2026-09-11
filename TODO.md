@@ -54,8 +54,9 @@ smaller entries below; those are the first step towards them.
 - **Mounts.** Terra takes fourteen minutes to cross at a sprint.
 - **Pets.**
 - **Graphics redo.**
-- **Chat.** Parties exist (`parties.ts`); nothing lets anyone talk. Say, party
-  and Ostra channels, and bubbles over heads. Needs the moderation below.
+- **More chat.** Say and party are in (`chat.ts`); an Ostra-wide channel,
+  whispers, and the moderation below — mute and report first, since there
+  is nothing today but a length cap and a flood limit.
 - **Trading, vendors and gold.** A currency, vendors in Daso and Fanshona, and
   player-to-player trade — until then the only thing to do with loot you don't
   want is destroy it.
