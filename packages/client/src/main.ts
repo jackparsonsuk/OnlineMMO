@@ -1,6 +1,8 @@
 import type { Room, SeatReservation } from "@colyseus/sdk";
 import { Client } from "@colyseus/sdk";
 import {
+  baseStats,
+  canWear,
   CLASSES,
   classUsesFamily,
   type ItemFamily,
@@ -15,7 +17,10 @@ import {
   isClassId,
   isOstraId,
   type ItemKey,
+  HEALTH_PER_VIGOUR,
+  PRIMARY_STATS,
   rarityHex,
+  STATS,
   ROOM_NAME,
   type OstraDefinition,
   SPELLS,
@@ -33,7 +38,7 @@ import { QuestUI } from "./questUI.js";
 import { TravelUI } from "./travelUI.js";
 import { VendorUI } from "./vendorUI.js";
 import { showTitleScreen } from "./titleScreen.js";
-import { Hud } from "./hud.js";
+import { Hud, type LevelGains } from "./hud.js";
 import { KeyboardInput } from "./input.js";
 import { MouseLook } from "./mouselook.js";
 import { applyOstra, createWorld } from "./scene.js";
@@ -150,6 +155,37 @@ function refreshQuestMarkers(): void {
   hud.refreshSpeech();
 }
 
+/**
+ * What crossing into `reached` handed this character.
+ *
+ * All of it derived from the same pure functions the server grows a character
+ * with — `baseStats` for the attributes, `canWear` for the pack — so the
+ * banner cannot claim a point the character screen does not show.
+ */
+function levelGains(reached: number): LevelGains {
+  const before = baseStats(classId, reached - 1);
+  const after = baseStats(classId, reached);
+  const stats: Array<{ name: string; amount: number }> = [];
+  for (const stat of PRIMARY_STATS) {
+    const amount = (after[stat] ?? 0) - (before[stat] ?? 0);
+    if (amount > 0) stats.push({ name: STATS[stat].name, amount });
+  }
+
+  // Asked as "wearable now, and not a level ago" rather than by comparing
+  // requiredLevel, so it stays true to the rule if `canWear` ever grows a
+  // second condition. Worn gear is not in the pack, so nothing already on the
+  // body is counted.
+  const was = { classId, level: reached - 1 };
+  const now = { classId, level: reached };
+  const wearable = characterScreen.pack.filter((key) => {
+    const item = describeItem(key);
+    return item !== undefined && canWear(item, now) && !canWear(item, was);
+  }).length;
+
+  const vigour = (after.vigour ?? 0) - (before.vigour ?? 0);
+  return { stats, health: vigour * HEALTH_PER_VIGOUR, wearable };
+}
+
 /** Level and XP from the server: the bar, and everything a level unlocks. */
 function applyProgress(nextLevel: number, xp: number, gained: number): void {
   const before = level;
@@ -163,9 +199,13 @@ function applyProgress(nextLevel: number, xp: number, gained: number): void {
   travelUI.setLevel(level);
   if (level === before) return;
   refreshQuestMarkers();
-  // One banner per level crossed, each with what it taught.
+  // One banner per level crossed, each with what that level gave.
   for (let reached = before + 1; reached <= level && gained > 0; reached++) {
-    hud.levelUp(reached, spellsLearnedAt(classId, reached).map((id) => SPELLS[id].name));
+    hud.levelUp(
+      reached,
+      spellsLearnedAt(classId, reached).map((id) => SPELLS[id].name),
+      levelGains(reached),
+    );
   }
   if (gained > 0) audio.play("levelUp", 1);
 }

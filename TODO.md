@@ -173,8 +173,6 @@ smaller entries below; those are the first step towards them.
 
 - **Spells from scrolls and books.** The lore says the Library Ostracon holds
   them all; here abilities come with levels. A caster class could learn this way.
-- **Level-up could say what it gave.** The banner names new abilities, but
-  not the Might and Vigour, or the gear that just became wearable.
 - **Rested XP, or something like it**, if the curve past 30 turns out to feel
   like a wall rather than a road.
 - **XP in a group.** Everyone who fights a creature gets its full XP, and so

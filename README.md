@@ -515,6 +515,23 @@ the creature** (anyone with threat on it), and to their party close by (see
 Parties), in full, the same rule quests use, so grouping never costs anyone;
 an elite's goes to everyone it credits (see Rare elites). A level-up restores your health and is seen by everyone nearby.
 
+**The banner says what the level gave.** For a long time it named new
+abilities and nothing else, so a level that taught none said nothing but a
+number, and the Might, the Vigour and the sword in your pack that had just
+become wearable all went unmentioned — a reward you are not told about is
+hardly a reward. It now reads out the attributes the class grew, the health
+that Vigour bought, and how many carried items the new level lets you wear,
+then the abilities. All of it is derived client-side by `levelGains` from the
+same pure functions the server grows a character with — `baseStats` diffed
+against the level before, and `canWear` asked twice ("wearable now, and not a
+level ago") rather than comparing `requiredLevel`, so it stays true to the
+rule if `canWear` ever grows a second condition — which means the banner
+cannot claim a point the character screen does not show. An attribute that
+did not move is left out, because a class with fractional growth gains nothing
+in some attribute on some levels and a "+0" is worse than silence. The banner
+lives longer the more it has to say: its animation ends at zero opacity, so
+the duration is what the reader actually gets.
+
 Creature levels share the scale, so the number over its head is a
 comparison, coloured WoW-style by `difficultyOf`: grey (beneath you, pays
 nothing), green, yellow (a fair fight), orange, red.

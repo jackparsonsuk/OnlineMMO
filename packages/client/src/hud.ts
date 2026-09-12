@@ -19,6 +19,22 @@ interface AbilitySlot {
   learnedAt: number;
 }
 
+/**
+ * What crossing a level handed a character, ready to read out. Derived in
+ * `main.ts` from the same pure functions the server grows stats with, so the
+ * banner can never disagree with the character screen.
+ */
+export interface LevelGains {
+  /** Primary attributes, already diffed and with anything that did not move
+   *  left out — a class with fractional growth gains nothing in some
+   *  attribute on some levels, and naming a "+0" is worse than silence. */
+  stats: ReadonlyArray<{ name: string; amount: number }>;
+  /** Maximum health the level's Vigour bought. */
+  health: number;
+  /** Items already in the pack that this level makes wearable. */
+  wearable: number;
+}
+
 export class Hud {
   private zoneBanner = document.getElementById("zone-banner") as HTMLElement;
   private ostraName = document.getElementById("ostra-name") as HTMLElement;
@@ -471,14 +487,43 @@ export class Hud {
 
   /** A level gained: centre of the screen, big, and gone in a few seconds —
    *  with anything it taught you, since that is what you will want to try. */
-  levelUp(level: number, learned: readonly string[]): void {
+  /**
+   * A level, and everything it handed you.
+   *
+   * The level-up is the moment the whole of `levels.ts` was rebuilt around, and
+   * for a long time the banner only ever named new abilities — so a level that
+   * taught nothing said nothing but a number, and the Might, the Vigour and the
+   * sword in your pack that had just become wearable all went unmentioned. A
+   * reward you are not told about is not much of a reward.
+   *
+   * The lines are stacked strongest-first: what you became, what you learned,
+   * then what is now waiting in your pack.
+   */
+  levelUp(level: number, learned: readonly string[], gains: LevelGains): void {
+    const lines: string[] = [];
+    const grew = gains.stats.map((stat) => `+${stat.amount} ${escapeHtml(stat.name)}`);
+    if (gains.health > 0) grew.push(`+${gains.health} health`);
+    if (grew.length > 0) lines.push(`<u>${grew.join(" · ")}</u>`);
+    if (learned.length > 0) {
+      lines.push(`<b>You have learned ${learned.map(escapeHtml).join(" and ")}</b>`);
+    }
+    if (gains.wearable > 0) {
+      lines.push(`<i>${gains.wearable === 1
+        ? "Something in your pack fits you now"
+        : `${gains.wearable} things in your pack fit you now`}</i>`);
+    }
+
     const banner = document.createElement("div");
     banner.className = "level-up";
-    banner.innerHTML = `<small>Level up</small><span>${level}</span>` +
-      (learned.length > 0 ? `<b>You have learned ${learned.map(escapeHtml).join(" and ")}</b>` : "");
+    banner.innerHTML = `<small>Level up</small><span>${level}</span>${lines.join("")}`;
+    // The animation ends at zero opacity, so its duration — not the timer — is
+    // how long the banner is actually readable. More to read, longer to read
+    // it; the timer only tidies up afterwards.
+    const life = 2600 + lines.length * 700;
+    banner.style.animationDuration = `${life}ms`;
     // Stacked in one column, so a big quest turn-in worth two levels shows both.
     document.getElementById("level-ups")?.appendChild(banner);
-    window.setTimeout(() => banner.remove(), learned.length > 0 ? 4500 : 3000);
+    window.setTimeout(() => banner.remove(), life + 200);
   }
 
   setDead(dead: boolean, detail = ""): void {

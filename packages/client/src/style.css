@@ -1753,12 +1753,26 @@ body.no-hud :is(#compass, #minimap, #actionbar, #corner, #target-frame, #party, 
   pointer-events: none;
   z-index: 7;
   text-shadow: 0 2px 12px rgb(0 0 0 / 90%);
-  animation: level-up 3s ease-out forwards;
+  /* Duration is set per banner in `Hud.levelUp` — more to read, longer to
+     read it. This is the floor, for a banner that says only a number. */
+  animation: level-up 2600ms ease-out forwards;
 }
 
 .level-up small { font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase; color: #f0d98a; }
 .level-up span { font-size: 52px; font-weight: 700; color: #e8c23f; line-height: 1.05; }
 .level-up b { margin-top: 4px; font-size: 16px; font-weight: 600; color: #fff; }
+/* What you became: green, like every other number that went up in your
+   favour. Tabular, so two levels at once line up as they stack. */
+.level-up u {
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #6dcf7e;
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+}
+/* ...and the nudge towards the pack, quieter than either. */
+.level-up i { margin-top: 3px; font-size: 13px; font-style: italic; color: #d9cfb4; }
 
 @keyframes level-up {
   0% { opacity: 0; transform: scale(0.7); }

@@ -341,6 +341,12 @@ export class CharacterScreen {
     return characterStats(this.profile.equipment, this.wearer).power;
   }
 
+  /** What is carried, as the server last said. The level-up banner reads it
+   *  to count what a new level just made wearable. */
+  get pack(): readonly ItemKey[] {
+    return this.profile.inventory;
+  }
+
   private get wearer(): Wearer {
     return { classId: this.profile.classId, level: this.profile.level };
   }
