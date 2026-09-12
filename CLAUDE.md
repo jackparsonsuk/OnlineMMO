@@ -108,6 +108,10 @@ packages/client/src/
   `mesh.infiniteDistance` — it pins depth to the near plane and covers the
   world. The sky dome follows the camera by hand.
 - Your own player's facing is never reconciled; it reads `cameraYaw()`.
+- `predict.value(player, f)` adds a correction offset that eases toward zero
+  and never quite arrives, so any test for an exact value (`vy === 0` means
+  standing) must read `reconciler.state` — the predicted step itself. Reading
+  it smoothed left the body stuck in its jump pose after landing.
 - In dev, `JWT_SECRET` is random per boot and `tsx watch` restarts the server on
   every server/shared change — stored sessions become invalid and the client
   drops back to sign-in.
