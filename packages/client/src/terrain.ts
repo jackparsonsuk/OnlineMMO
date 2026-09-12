@@ -1,10 +1,13 @@
 import { Color3 } from "@babylonjs/core/Maths/math.js";
+import { DynamicTexture } from "@babylonjs/core/Materials/Textures/dynamicTexture.js";
+import { Texture } from "@babylonjs/core/Materials/Textures/texture.js";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js";
 import { Mesh } from "@babylonjs/core/Meshes/mesh.js";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData.js";
 import type { Scene } from "@babylonjs/core/scene.js";
 import {
   fbm,
+  hash2,
   forestAt,
   heightAt,
   lakeLevel,
@@ -144,6 +147,11 @@ export function groundTone(
     // mesh, which has no trees on it.
     const wooded = forestAt(ostra, x, z);
     if (wooded > 0.3) out.scaleToRef(1 - Math.min(0.28, (wooded - 0.3) * 0.45), out);
+    // Clumps a few metres across, between the kilometre-wide dry patches above
+    // and the half-metre cells of the grain below — the scale a hillside is
+    // actually uneven at. Not on the map, which is a kilometre to the inch and
+    // would only look noisy for it.
+    if (!asMap) out.scaleToRef(1 + fbm(x / 26, z / 26, 11, 2) * 0.085, out);
   }
 
   // Trodden earth in town yards.
@@ -182,6 +190,83 @@ export function groundTone(
   }
 
   return out;
+}
+
+// --- grain --------------------------------------------------------------------
+
+/** Metres across one repeat of the ground grain. */
+const GRAIN_TILE = 8;
+/** Texels per metre in it. */
+const GRAIN_PX = 64;
+
+/**
+ * The ground's grain: cells, generated at runtime.
+ *
+ * Everything else in the world is voxels now, and the ground was the one
+ * surface left reading as a smooth wash between two-metre facets. It cannot be
+ * voxels itself — the height is a pure function the server also walks on, and
+ * quantising it would put what you see and what you collide with a step apart
+ * — so instead the *colour* is celled, and the geometry is left alone.
+ *
+ * Two scales, both aligned to the world rather than to the mesh, so the cells
+ * do not swim when a chunk streams in and do not break at a chunk edge:
+ * half-metre patches you can read as ground, and eighth-metre grain inside
+ * them matching the scenery. Nothing is loaded — it is drawn into a canvas
+ * from the same `hash2` the rest of the world is built with, so it is the same
+ * ground on every machine.
+ *
+ * The texture only multiplies, so it can only darken; the mean it comes out at
+ * is handed back for the material to divide out, or every field in the game
+ * would go dim.
+ */
+function groundGrain(scene: Scene): { texture: DynamicTexture; mean: number } {
+  const size = GRAIN_TILE * GRAIN_PX;
+  const texture = new DynamicTexture("groundGrain", { width: size, height: size }, scene, true);
+  texture.wrapU = Texture.WRAP_ADDRESSMODE;
+  texture.wrapV = Texture.WRAP_ADDRESSMODE;
+
+  const context = texture.getContext() as unknown as CanvasRenderingContext2D;
+  const image = context.createImageData(size, size);
+  const data = image.data;
+
+  const coarse = Math.round(GRAIN_PX * 0.5);
+  const fine = Math.round(GRAIN_PX / 8);
+  const cells = size / coarse;
+  const grains = size / fine;
+  let total = 0;
+
+  for (let y = 0; y < size; y++) {
+    // Wrapped cell indices, so the tile joins itself seamlessly.
+    const cy = Math.floor(y / coarse) % cells;
+    const fy = Math.floor(y / fine) % grains;
+    for (let x = 0; x < size; x++) {
+      const cx = Math.floor(x / coarse) % cells;
+      const fx = Math.floor(x / fine) % grains;
+      const patch = hash2(cx, cy, 0x9e37) / 4294967296;
+      const grain = hash2(fx, fy, 0x85eb) / 4294967296;
+      let value = 0.88 + (patch - 0.5) * 0.15 + (grain - 0.5) * 0.1;
+      // One patch in thirty is a stone or a scrape of bare earth. It is the
+      // thing that stops a meadow reading as graph paper.
+      if ((hash2(cx, cy, 0x2f1d) & 63) < 2) value *= 0.8;
+      value = Math.max(0, Math.min(1, value));
+      total += value;
+      // A grey multiplier can only ever darken; letting the channels drift
+      // apart lets a patch go warmer or cooler as well, which is the
+      // difference between grass that is dry in places and grass that is
+      // merely dim in places. Small, because it has to sit under every
+      // palette in the game without arguing with any of them.
+      const warm = (hash2(cx, cy, 0x77a1) / 4294967296 - 0.5) * 0.1;
+      const k = (y * size + x) * 4;
+      data[k] = Math.round(Math.min(1, value * (1 + warm)) * 255);
+      data[k + 1] = Math.round(Math.min(1, value * (1 + warm * 0.3)) * 255);
+      data[k + 2] = Math.round(Math.min(1, value * (1 - warm)) * 255);
+      data[k + 3] = 255;
+    }
+  }
+
+  context.putImageData(image, 0, 0);
+  texture.update(false);
+  return { texture, mean: total / (size * size) };
 }
 
 // --- meshes ------------------------------------------------------------------
@@ -248,6 +333,10 @@ function gridMesh(
   const positions = new Float32Array(triangles * 9);
   const normals = new Float32Array(triangles * 9);
   const vertexColours = new Float32Array(triangles * 12);
+  // In world metres over the grain's tile, not in the mesh's own space: the
+  // pattern then belongs to the ground rather than to the chunk, and two
+  // chunks meeting have no seam between them.
+  const uvs = new Float32Array(triangles * 6);
   let v = 0;
 
   // Positions are local to the mesh's origin (x0, z0): smaller numbers, so the
@@ -278,6 +367,8 @@ function gridMesh(
       vertexColours[v * 4 + 1] = g;
       vertexColours[v * 4 + 2] = b;
       vertexColours[v * 4 + 3] = 1;
+      uvs[v * 2] = (x0 + verts[k * 3]!) / GRAIN_TILE;
+      uvs[v * 2 + 1] = (z0 + verts[k * 3 + 2]!) / GRAIN_TILE;
       v++;
     }
   };
@@ -337,6 +428,7 @@ function gridMesh(
   data.positions = positions;
   data.normals = normals;
   data.colors = vertexColours;
+  data.uvs = uvs;
   const indices = new Uint32Array(triangles * 3);
   for (let k = 0; k < indices.length; k++) indices[k] = k;
   data.indices = indices;
@@ -375,8 +467,13 @@ export class TerrainStreamer {
   ) {
     this.palette = groundPalette(ostra);
     this.material = new StandardMaterial("terrainMaterial", scene);
-    this.material.diffuseColor = Color3.White();
     this.material.specularColor = Color3.Black();
+    const grain = groundGrain(scene);
+    this.material.diffuseTexture = grain.texture;
+    // The texture can only darken, so the mean it came out at is divided back
+    // out here. Anything else and every field in the game loses a tenth of its
+    // light the moment the grain is switched on.
+    this.material.diffuseColor = new Color3(1, 1, 1).scaleInPlace(1 / grain.mean);
 
     // Only worth it where the Ostra is much bigger than the detailed radius.
     if (ostra.size > TERRAIN_RADIUS * 2.5) this.buildHorizon();

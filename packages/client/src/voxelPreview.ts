@@ -11,18 +11,23 @@ import { Scene } from "@babylonjs/core/scene.js";
 import { getOstra, heightAt, PLAYER_SIZE, settlementsIn } from "@mmo/shared";
 import { flatMaterial, hexColour } from "./lowpoly.js";
 import { Animator, buildEnemyRig, buildPlayerRig } from "./rigs.js";
-import { buildSettlement, buildVillager, PROP_MODELS } from "./settlement.js";
 import { SceneryStreamer } from "./scenery.js";
-import { CHUNK } from "./terrain.js";
+import { buildSettlement, buildVillager, PROP_MODELS } from "./settlement.js";
+import { TERRAIN_RADIUS, TerrainStreamer } from "./terrain.js";
 import { voxelMaterial, voxelMesh } from "./voxel.js";
 
 /**
  * A bench for the art, not part of the game.
  *
  * Served at /voxel-preview.html by the client's own dev server, with no
- * account, no room and no world — the point is to look at one body at a time
- * with the lighting the game actually uses, and to keep the thing it replaced
- * standing next to it so the comparison is honest.
+ * account, no room and no server. Everything in it is the real thing at its
+ * real place: Daso where Daso stands on Terra, its ground through the real
+ * terrain streamer, its trees through the real scenery streamer. Mocking any
+ * of that up would only prove the mock-up looks right.
+ *
+ * The two things that are staged are the ones you cannot otherwise get side by
+ * side: every creature in a row, and the old box player standing next to the
+ * voxel one.
  */
 
 const canvas = document.getElementById("preview") as HTMLCanvasElement;
@@ -31,11 +36,13 @@ engine.useReverseDepthBuffer = true;
 const scene = new Scene(engine);
 scene.clearColor = new Color4(0.075, 0.09, 0.11, 1);
 
-const camera = new ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.6, 3.4, new Vector3(0, 0.6, 0), scene);
+const camera = new ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.6, 12, new Vector3(0, 1, 0), scene);
 camera.attachControl(canvas, true);
 camera.wheelDeltaPercentage = 0.02;
 camera.lowerRadiusLimit = 1;
-camera.upperRadiusLimit = 12;
+camera.upperRadiusLimit = 400;
+camera.minZ = 0.25;
+camera.maxZ = 14000;
 
 // The same two lights, at the same strengths, as scene.ts.
 const ambient = new HemisphericLight("ambient", new Vector3(0, 1, 0), scene);
@@ -44,8 +51,20 @@ const sun = new DirectionalLight("sun", new Vector3(-0.55, -0.85, -0.4), scene);
 sun.intensity = 0.8;
 sun.diffuse = new Color3(1, 0.96, 0.87);
 
-const ground = MeshBuilder.CreateGround("ground", { width: 40, height: 40 }, scene);
-ground.material = flatMaterial(scene, "ground", 0x4a5a3c);
+const terra = getOstra("terra");
+const daso = settlementsIn(terra)[0]!;
+const HOME = { x: daso.x, z: daso.z + daso.radius + 14 };
+const ground = (x: number, z: number): number => heightAt(x, z, terra.terrain);
+
+// Real ground and real scenery, streamed the way the game streams them. The
+// scenery streamer is the terrain's chunk listener, exactly as in scene.ts.
+const scenery = new SceneryStreamer(scene, terra);
+const terrain = new TerrainStreamer(scene, terra, scenery);
+terrain.prime(HOME.x, HOME.z, TERRAIN_RADIUS);
+scenery.update(HOME.x, HOME.z);
+
+buildSettlement(scene, terra, daso);
+for (const villager of daso.villagers ?? []) buildVillager(scene, terra, villager);
 
 const COLOUR = 0x4a6fa5;
 
@@ -84,57 +103,35 @@ function buildBoxPlayer(): TransformNode {
 }
 
 const old = buildBoxPlayer();
-old.position.x = -0.75;
+old.position.set(HOME.x - 1.4, ground(HOME.x - 1.4, HOME.z), HOME.z);
 
 const voxel = buildPlayerRig(scene, COLOUR);
-voxel.root.position.x = 0.75;
+voxel.root.position.set(HOME.x, ground(HOME.x, HOME.z), HOME.z);
 
-// Daso itself, off to one side. Buildings and villagers are only honest when
-// they are the real ones at their real sizes, so the bench builds the actual
-// settlement out of the actual Ostra rather than a mock-up of one.
-const terra = getOstra("terra");
-const daso = settlementsIn(terra)[0];
-if (daso) {
-  const town = buildSettlement(scene, terra, daso);
-  // Brought to the origin and dropped to the bench's flat ground.
-  town.position.set(-daso.x + 16, -heightAt(daso.x, daso.z, terra.terrain), -daso.z - 22);
-  for (const villager of daso.villagers ?? []) {
-    const npc = buildVillager(scene, terra, villager);
-    npc.position.addInPlace(town.position);
-  }
-}
-
-// A patch of real wilds, through the real streamer, so the uniform per-instance
-// scaling is exercised rather than described. Chunks are loaded by hand because
-// there is no terrain here to stream against.
-const scenery = new SceneryStreamer(scene, terra);
-const WOOD = { x: -1180, z: 260 };
-const wc = { x: Math.floor(WOOD.x / CHUNK), z: Math.floor(WOOD.z / CHUNK) };
-for (let cz = wc.z - 2; cz <= wc.z + 2; cz++) {
-  for (let cx = wc.x - 2; cx <= wc.x + 2; cx++) scenery.onChunkLoaded(cx, cz);
-}
-scenery.update(WOOD.x, WOOD.z);
-
-// Every creature, in a row, each walking on the spot so the gait and the rig
-// swap are both under the eye at once.
+// Every creature, in a row behind them, each walking on the spot.
 const KINDS = ["zombie", "spider", "wolf", "boar", "wretch", "wisp", "golem"] as const;
 const creatures = KINDS.map((kind, i) => {
   const rig = buildEnemyRig(scene, kind);
-  rig.root.position.set(-6 + i * 2, 0, -3.4);
+  const x = HOME.x - 7 + i * 2.4;
+  const z = HOME.z + 7;
+  rig.root.position.set(x, ground(x, z), z);
   return { kind, rig, animator: new Animator(rig) };
 });
 
-// The town props, in a row behind the two bodies, at the scale they are
-// actually seen from.
+// The town props, in a row beside them, at the scale they are actually seen.
 const propMaterial = voxelMaterial(scene, "props");
 let slot = 0;
 for (const [name, model] of Object.entries(PROP_MODELS)) {
   const mesh = voxelMesh(scene, name, model, "base");
+  const x = HOME.x - 4 + slot * 1.4;
+  const z = HOME.z + 3.4;
   mesh.material = propMaterial;
-  mesh.position.set(-3.2 + slot * 1.3, 0, 2.6);
+  mesh.position.set(x, ground(x, z), z);
   if (name === "log") mesh.rotation.y = Math.PI / 2;
   slot++;
 }
+
+camera.target.set(HOME.x, ground(HOME.x, HOME.z) + 1.2, HOME.z);
 
 // The real animator, walking the voxel body in a circle: the rig swap is only
 // safe if every joint the poses reach for is still where it was.
@@ -142,41 +139,31 @@ const animator = new Animator(voxel);
 let walking = true;
 scene.onBeforeRenderObservable.add(() => {
   const now = performance.now();
-  const spin = now / 4000;
-  old.rotation.y = spin;
+  old.rotation.y = now / 4000;
+
   // Standing still still feeds the animator — it has to be told where the body
   // is every frame to work out that it has stopped and settle into the idle.
   const angle = walking ? now / 1400 : 0;
-  const x = walking ? 0.75 + Math.sin(angle) * 0.9 : 0.75;
-  const z = walking ? Math.cos(angle) * 0.9 : 0;
-  if (!walking) {
-    voxel.root.position.set(x, 0, z);
-    voxel.root.rotation.y = spin;
-    animator.update(now, x, z);
-    return;
-  }
-  voxel.root.position.set(x, 0, z);
-  voxel.root.rotation.y = angle + Math.PI / 2;
+  const x = HOME.x + (walking ? Math.sin(angle) * 2.2 : 0);
+  const z = HOME.z + (walking ? Math.cos(angle) * 2.2 : 0);
+  voxel.root.position.set(x, ground(x, z), z);
+  voxel.root.rotation.y = walking ? angle + Math.PI / 2 : now / 4000;
   animator.update(now, x, z);
-});
 
-// Creatures walk on the spot: the animator reads speed from how far the body
-// moved, so they are fed a position that creeps forward and is reset.
-scene.onBeforeRenderObservable.add(() => {
-  const now = performance.now();
-  for (const { rig, animator } of creatures) {
-    rig.root.rotation.y = Math.sin(now / 2600) * 0.9;
-    animator.update(now, now / 400, 0);
+  for (const c of creatures) {
+    c.rig.root.rotation.y = Math.sin(now / 2600) * 0.9;
+    c.animator.update(now, now / 400, 0);
   }
 });
 
 (window as unknown as { setWalking: (on: boolean) => void }).setWalking = (on: boolean): void => {
   walking = on;
-  if (!on) voxel.root.position.set(0.75, 0, 0);
 };
 
 engine.runRenderLoop(() => scene.render());
 window.addEventListener("resize", () => engine.resize());
 
 // So the harness can be driven from the console when the pane pauses rAF.
-(window as unknown as { preview: unknown }).preview = { scene, engine, camera, voxel, old, creatures, wood: WOOD };
+(window as unknown as { preview: unknown }).preview = {
+  scene, engine, camera, voxel, old, creatures, terrain, scenery, home: HOME, ground,
+};

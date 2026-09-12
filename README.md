@@ -1149,6 +1149,22 @@ sine waves was fine over 80 m and would have tiled visibly over 8 km.) Height
 is **derived** from the final x/z each step rather than integrated, so there is
 no vertical velocity to drift out of sync.
 
+The ground is the one surface that is not voxels, and cannot be: the height is
+a pure function the server walks on too, so quantising it would put what you
+see and what you collide with a step apart. Its **colour** is celled instead.
+A grain texture is generated into a canvas at boot from the same `hash2` as the
+rest of the world — half-metre patches you read as ground, eighth-metre grain
+inside them matching the scenery, and one patch in thirty a stone or a scrape.
+Its UVs are world metres rather than mesh-local, so the pattern belongs to the
+ground and not to the chunk, and two chunks meeting have no seam. Because a
+texture can only ever darken, the mean it comes out at is divided back out of
+the material, or every field would lose a tenth of its light. The channels
+drift slightly apart per patch, which is what lets a patch read as *drier*
+rather than merely dimmer. Between the kilometre-wide dry bands and those
+half-metre cells there is now a third scale — clumps a few metres across —
+because that is the size a hillside is actually uneven at. The map skips it:
+at a kilometre to the inch it would only look noisy.
+
 Flat zones blend the hills away under a settlement or waystone, levelled to
 whatever the natural ground is at their centre, and mountains are kept 320 m
 clear of them — a town should never have a cliff for a back wall. The visible
