@@ -65,6 +65,9 @@ export function createCharacter(
     xp: 0,
     quests: { active: {}, done: [] },
     gold: 0,
+    // None woken: the stone they spawn beside wakes on their first tick, the
+    // same way every other one does.
+    waystones: [],
     inventory: [],
     equipment: {},
     createdAt: now,

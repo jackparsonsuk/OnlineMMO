@@ -106,6 +106,30 @@ html, body {
 #status.error { color: #ff9384; border-color: rgb(255 123 114 / 45%); }
 
 /* Where the eye already is when walking: just above the ability bar. */
+/* Standing at a woken stone. Above the Gate prompt's line, because at the
+   Gate Circle you can be inside a Gate ring and at a stone at once. */
+#waystone-prompt {
+  position: fixed;
+  bottom: 244px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 6px 13px;
+  border-radius: var(--radius);
+  border: 1px solid rgb(159 216 255 / 35%);
+  background: var(--glass);
+  box-shadow: var(--shade);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#waystone-prompt[hidden] { display: none; }
+#waystone-prompt b { color: #cfe9f7; font-style: italic; font-weight: 600; }
+#waystone-prompt span { font-size: 11.5px; color: #8b98a5; }
+
 #gate-prompt {
   position: fixed;
   bottom: 208px;
@@ -1055,12 +1079,12 @@ kbd {
 
 /* While the screen has the camera, the rest of the HUD steps back. */
 #compass, #minimap, #actionbar, #corner, #target-frame, #party, #chat, #castbar,
-#nametags, #gate-prompt, #speech, #vitals, #quest-tracker {
+#nametags, #gate-prompt, #waystone-prompt, #speech, #vitals, #quest-tracker {
   transition: opacity 300ms ease;
 }
 
 body.portrait :is(#compass, #minimap, #actionbar, #corner, #target-frame, #castbar,
-  #nametags, #gate-prompt, #speech, #vitals, #quest-tracker) {
+  #nametags, #gate-prompt, #waystone-prompt, #speech, #vitals, #quest-tracker) {
   opacity: 0;
   pointer-events: none;
 }
@@ -1509,7 +1533,12 @@ body.portrait :is(#compass, #minimap, #actionbar, #corner, #target-frame, #castb
   border: 1px solid rgb(230 237 243 / 16%);
   background: rgb(13 17 23 / 94%);
   box-shadow: 0 18px 60px rgb(0 0 0 / 55%);
-  pointer-events: none;
+  /* It takes the mouse whenever it is open — it is only ever open with the
+     pointer released. Without this, the wheel and drag handlers on the canvas
+     never fired and the hint told you to scroll and pan a map that would not:
+     zoom worked in the dev picker alone, because that is where the rule used
+     to be turned on. */
+  pointer-events: auto;
   z-index: 5;
 }
 
@@ -1531,7 +1560,55 @@ body.portrait :is(#compass, #minimap, #actionbar, #corner, #target-frame, #castb
   background: #12161c;
 }
 
-.worldmap-hint { margin-top: 6px; font-size: 11px; color: #7f8c99; text-align: right; }
+.worldmap-hint {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #7f8c99;
+}
+
+#worldmap-across { font-weight: 600; color: #c6d2de; font-variant-numeric: tabular-nums; }
+
+/* The legend. Each glyph is the canvas symbol built out of CSS, so what you
+   read here is the thing you see on the map. */
+#worldmap-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 8px;
+  font-size: 10.5px;
+  color: #9aa7b4;
+}
+
+#worldmap-legend span { display: flex; align-items: center; gap: 5px; }
+
+#worldmap-legend i {
+  width: 9px;
+  height: 9px;
+  flex: none;
+}
+
+#worldmap-legend .lg-you {
+  clip-path: polygon(50% 0, 100% 100%, 50% 72%, 0 100%);
+  background: #fff;
+}
+#worldmap-legend .lg-town { border-radius: 1px; background: #ffc46b; }
+#worldmap-legend .lg-stone {
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  box-shadow: inset 0 0 0 1px #9fd8ff;
+}
+#worldmap-legend .lg-stone.woken { background: #9fd8ff; box-shadow: none; }
+#worldmap-legend .lg-ruin { width: 6px; height: 9px; background: #cdbb8c; }
+#worldmap-legend .lg-gate { border-radius: 50%; background: #79a355; }
+#worldmap-legend .lg-area { border-radius: 50%; border: 1px dashed rgb(230 210 170 / 70%); }
+#worldmap-legend .lg-quest {
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  background: #f7d66e;
+}
+#worldmap-legend .lg-elite { border-radius: 50%; background: #e8c23f; box-shadow: 0 0 0 1px #1a1408; }
 
 /* Waystone labels read as landmarks, not as people. */
 .nametag.waystone {
@@ -1595,13 +1672,13 @@ body.portrait :is(#compass, #minimap, #actionbar, #corner, #target-frame, #castb
 #dev .dev-rarities button { padding: 4px 2px; font-size: 11px; color: var(--rarity); border-color: color-mix(in srgb, var(--rarity) 45%, transparent); }
 
 /* The world map, while it is choosing somewhere to go. */
-#worldmap.picking { pointer-events: auto; border-color: rgb(255 180 80 / 60%); }
+#worldmap.picking { border-color: rgb(255 180 80 / 60%); }
 #worldmap.picking #worldmap-canvas { cursor: crosshair; }
 #worldmap.picking .worldmap-hint { color: #ffd79a; }
 
 /* Screenshots without the furniture. */
 body.no-hud :is(#compass, #minimap, #actionbar, #corner, #target-frame, #party, #chat, #castbar,
-  #nametags, #gate-prompt, #speech, #vitals, #quest-tracker, #zone-banner) {
+  #nametags, #gate-prompt, #waystone-prompt, #speech, #vitals, #quest-tracker, #zone-banner) {
   display: none;
 }
 
@@ -1770,7 +1847,7 @@ body.no-hud :is(#compass, #minimap, #actionbar, #corner, #target-frame, #party, 
 #quest-tracker li.done { color: #6b7682; text-decoration: line-through; }
 #quest-tracker li.ready { color: #6dcf7e; list-style: "» "; }
 
-#quest-dialog, #quest-log, #vendor {
+#quest-dialog, #quest-log, #vendor, #travel {
   position: fixed;
   top: 50%;
   left: 50%;
@@ -1789,9 +1866,9 @@ body.no-hud :is(#compass, #minimap, #actionbar, #corner, #target-frame, #party, 
   pointer-events: auto;
 }
 
-#quest-dialog[hidden], #quest-log[hidden], #vendor[hidden] { display: none; }
+#quest-dialog[hidden], #quest-log[hidden], #vendor[hidden], #travel[hidden] { display: none; }
 
-#quest-dialog header, #quest-log header, #vendor header {
+#quest-dialog header, #quest-log header, #vendor header, #travel header {
   position: sticky;
   top: 0;
   display: flex;
@@ -1803,10 +1880,10 @@ body.no-hud :is(#compass, #minimap, #actionbar, #corner, #target-frame, #party, 
   background: rgb(20 18 14 / 98%);
 }
 
-#quest-dialog header b, #quest-log header b, #vendor header b { font-size: 15px; color: #f0d98a; }
+#quest-dialog header b, #quest-log header b, #vendor header b, #travel header b { font-size: 15px; color: #f0d98a; }
 #quest-log header span { font-size: 11px; color: #8b98a5; }
 #vendor header .gold { font-size: 12px; font-weight: 600; color: #f0c83c; }
-#quest-dialog header button, #quest-log header button, #vendor header button {
+#quest-dialog header button, #quest-log header button, #vendor header button, #travel header button {
   margin-left: auto; width: 26px; height: 26px; border-radius: 6px;
   border: 1px solid rgb(230 237 243 / 14%); background: none; color: #9aa7b4; font-size: 17px; cursor: pointer;
 }
@@ -1886,6 +1963,37 @@ h3 .quest-level { margin-left: 10px; padding-left: 0; }
 #vendor footer { position: sticky; bottom: -16px; display: flex; justify-content: flex-end; margin: 12px -18px -16px; padding: 10px 18px 14px; background: rgb(12 13 16 / 98%); }
 #vendor footer button { padding: 7px 14px; font-size: 13px; font-weight: 600; border-color: rgb(240 200 60 / 60%); background: rgb(240 200 60 / 16%); }
 #vendor footer button.confirm { border-color: #ff7b72; background: rgb(255 123 114 / 14%); color: #ffb3a8; }
+
+/* --- waystone travel --------------------------------------------------------- */
+
+/* Cooler than the quest and vendor windows, which are gold: a waystone's rune
+   is the blue that marks it everywhere else. */
+#travel { border-color: rgb(159 216 255 / 28%); }
+#travel header { border-bottom-color: rgb(159 216 255 / 15%); }
+#travel header b { color: #cfe9f7; font-style: italic; }
+#travel header span { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: #7f8c99; }
+
+.travel-rows { display: flex; flex-direction: column; gap: 4px; }
+
+.travel-row {
+  display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px;
+  border: 1px solid rgb(230 237 243 / 10%); background: rgb(230 237 243 / 4%);
+  color: #e6edf3; font: inherit; text-align: left; cursor: pointer;
+}
+
+.travel-row:hover:not(:disabled) { border-color: rgb(159 216 255 / 55%); background: rgb(159 216 255 / 8%); }
+.travel-row:disabled { cursor: default; opacity: 0.55; }
+.travel-row i { font-style: normal; font-size: 11px; color: #9fd8ff; }
+.travel-row span { display: flex; flex-direction: column; min-width: 0; }
+.travel-row b { font-size: 13px; font-weight: 600; }
+.travel-row small { font-size: 10.5px; }
+.travel-row em { margin-left: auto; padding-left: 10px; font-style: normal; font-size: 11.5px; color: #8b98a5; white-space: nowrap; }
+/* Where you are standing: named, not offered. */
+.travel-row.here { opacity: 1; border-style: dashed; border-color: rgb(159 216 255 / 35%); }
+.travel-row.here em { color: #9fd8ff; }
+
+.travel-note { margin: 10px 0 0; font-size: 11.5px; color: #7f8c99; }
+.travel-note.warn { color: #ffb3a8; }
 
 #quest-log section { padding: 8px 0 12px; border-bottom: 1px solid rgb(230 237 243 / 8%); }
 #quest-log section p { margin: 0 0 4px; color: #c6d2de; }

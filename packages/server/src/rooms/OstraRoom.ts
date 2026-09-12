@@ -74,6 +74,12 @@ import {
   regionOf,
   respawnPoint,
   scaledArchetype,
+  findWaystone,
+  isAttuned,
+  waystoneArrival,
+  waystoneKey,
+  WAYSTONE_ATTUNE_RANGE,
+  WAYSTONE_USE_RANGE,
   sceneryIndex,
   slotsFor,
   spellDamage,
@@ -208,6 +214,9 @@ interface Session {
   god: boolean;
   quests: QuestLog;
   gold: number;
+  /** Waystones woken, as `waystoneKey` keys — across every Ostra, because
+   *  this is the character's list and it is saved whole. */
+  waystones: string[];
   /** When their recent chat lines were sent, for the flood limit. */
   chatTimes: number[];
 }
@@ -456,6 +465,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const session = this.sessions.get(client.sessionId);
       if (session && typeof message?.id === "string") parties.kick(session.characterId, message.id);
     });
+    this.onMessage("waystoneTravel", (client, message: { id?: unknown }) =>
+      this.onWaystoneTravel(client, message?.id));
     this.onMessage("chat", (client, message: { text?: unknown; channel?: unknown }) =>
       this.onChat(client, message?.text, message?.channel));
     // Cheats for testing. Registered at all only outside production, so no
@@ -540,6 +551,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         this.updateCamps(now);
         this.updateElites(now);
         this.questVisits();
+        this.wakeWaystones();
       }
       this.recordTick(performance.now() - started);
     }, TICK_RATE);
@@ -655,6 +667,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       god: false,
       quests: { active: { ...character.quests.active }, done: [...character.quests.done] },
       gold: character.gold,
+      waystones: [...character.waystones],
       chatTimes: [],
     });
     this.announcePresence(client.sessionId);
@@ -795,6 +808,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         equipment: session.equipment,
         quests: session.quests,
         gold: session.gold,
+        waystones: session.waystones,
       });
     }
 
@@ -1316,6 +1330,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       equipment: session.equipment,
       quests: session.quests,
       gold: session.gold,
+      waystones: session.waystones,
     });
   }
 
@@ -1530,6 +1545,65 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       }
       if (changed) this.sendQuests(sessionId, session);
     }
+  }
+
+  // --- waystones -----------------------------------------------------------------
+
+  /**
+   * Wake any waystone a player has walked up to.
+   *
+   * Attunement is the unlock: you can only travel to stones you have stood
+   * at, so the map opens up as you walk it rather than all at once. Checked
+   * on the slow tick beside quest visits — a stone is 16 m wide to this and
+   * nobody crosses that in a thirtieth of a second.
+   */
+  private wakeWaystones(): void {
+    if (this.ostra.waystones.length === 0) return;
+    for (const [sessionId, session] of this.sessions) {
+      const player = this.state.players.get(sessionId);
+      if (!player || session.transferring || player.health === 0) continue;
+      const woke: string[] = [];
+      for (const stone of this.ostra.waystones) {
+        if (isAttuned(this.ostra, stone.id, session.waystones)) continue;
+        if (Math.hypot(player.x - stone.x, player.z - stone.z) > WAYSTONE_ATTUNE_RANGE) continue;
+        session.waystones.push(waystoneKey(this.ostra.id, stone.id));
+        woke.push(stone.name);
+      }
+      if (woke.length > 0) this.sendWaystones(sessionId, session, woke);
+    }
+  }
+
+  private sendWaystones(sessionId: string, session: Session, woke: readonly string[] = []): void {
+    this.clients.getById(sessionId)?.send("waystones", { waystones: session.waystones, woke });
+  }
+
+  /**
+   * Travel from the stone you are standing at to one you have woken.
+   *
+   * Free, and instant: Terra takes fourteen minutes to cross at a sprint, and
+   * charging for the alternative would only mean walking. What it costs is
+   * having been there — and being out of a fight, so it is never an escape.
+   *
+   * The stone you leave from does not have to be woken (you are standing in
+   * front of it; there is nothing left to discover) but it does have to be a
+   * stone: this is a waystone network, not a recall.
+   */
+  private onWaystoneTravel(client: Client, id: unknown): void {
+    const session = this.sessions.get(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    if (!session || !player || session.transferring || player.health === 0) return;
+    if (Date.now() < session.combatUntil) return;
+
+    const to = findWaystone(this.ostra, id);
+    if (!to || !isAttuned(this.ostra, to.id, session.waystones)) return;
+
+    const here = this.ostra.waystones.find((stone) =>
+      Math.hypot(player.x - stone.x, player.z - stone.z) <= WAYSTONE_USE_RANGE);
+    if (!here || here.id === to.id) return;
+
+    const arrival = waystoneArrival(to);
+    this.teleport(client, session, player, arrival.x, arrival.z, false);
+    client.send("travelled", { id: to.id, name: to.name });
   }
 
   /** Send to everyone whose player is within EVENT_RANGE of a point. */
@@ -2426,6 +2500,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         equipment: session.equipment,
         quests: session.quests,
         gold: session.gold,
+        waystones: session.waystones,
       });
 
       // With an auth context, so the reserved seat carries the account — see

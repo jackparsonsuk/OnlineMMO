@@ -1228,13 +1228,67 @@ and grass are thin instances, one draw call per kind. Fog and a sky dome fade
 the far ground into the sky; the depth buffer is reversed, because a normal one
 runs out of precision long before eight kilometres.
 
-**You can find your way.** A minimap (north up), a compass strip with bearings
-to landmarks, and a world map on **M** that paints itself in tiles in the
-background from the same `groundTone` as the terrain. The world map zooms on
-the scroll wheel about the point under the cursor, up to 24 times, and drags
-to pan; zoomed well in it draws from the minimap's detailed tiles rather than
-stretching its own. Hunting areas are named on it. Waystones have light
-columns that show above the haze.
+**You can find your way.** A minimap (north up, with an N on the rim to say
+so), a compass strip with bearings to landmarks, and a world map on **M** that
+paints itself in tiles in the background from the same `groundTone` as the
+terrain. The world map zooms on the scroll wheel about the point under the
+cursor, up to 24 times, and drags to pan. Waystones have light columns that
+show above the haze.
+
+A map of eight kilometres is only worth opening if it answers the questions a
+player actually has, so it carries four things beyond the ground:
+
+- **A legend.** Every glyph on the map, named, under it. A dozen symbols
+  nobody has been taught is a puzzle, not an instrument.
+- **A scale bar, and the view's width** ("8.0 km across"). Without them
+  nothing says whether two places are a stroll apart or a quarter of an hour,
+  and at 24× zoom the very same picture means 300 m.
+- **Every region's level band**, under its name, coloured against your own
+  level by the same `difficultyOf` that colours a nameplate. That one line is
+  the whole answer to "can I go there yet", which is the only question a
+  levelling player has about a far-off place.
+- **Names placed by priority.** Fourteen stones, two towns, eight ruins, nine
+  regions, the hunting grounds and whatever your quests want are far too many
+  names for one screen. Glyphs are all drawn first, then names in order —
+  regions, quests, towns and stones, then ruins — and a name whose box would
+  overlap one already drawn is dropped rather than printed on top of it. Ruin
+  and hunting-ground names wait for 1.6× and 2.2× zoom. Region names are drawn
+  before the marker that says where you are, so the one region you most want
+  named is not the one that loses.
+
+Zoomed well in it draws detail from the minimap's fine tiles rather than
+stretching its own, over the coarse whole-Ostra tiles as an underlay — a
+detailed tile costs real time to paint, and a blurry map is worth a great deal
+more than a black one while you wait. Whichever cache the map is drawing from
+is the one that gets the painting budget.
+
+### Waystones, and travel between them
+
+Fourteen standing stones, each a point some road has to pass through. They are
+landmarks first — on the maps, on the compass, lit by a column visible over
+the haze — and they are where you wake after dying.
+
+They are also the fast travel network, and **walking to one is what unlocks
+it**. Come within `WAYSTONE_ATTUNE_RANGE` (16 m) of a stone and it wakes to
+you; stand within `WAYSTONE_USE_RANGE` (9 m) of any stone and **E** offers
+every stone you have woken, nearest first, with its region and level band.
+Travel is instant and free: Terra takes fourteen minutes to cross at a sprint,
+and charging for the alternative would only mean walking. What it costs is
+having been there.
+
+Because every stone is on a road, the network you have walked is the network
+you can use, and the map opens up as you explore rather than all at once. The
+stone you leave from does not have to be woken — you are standing in front of
+it, there is nothing left to discover — but it does have to be a stone: this
+is a waystone network, not a recall.
+
+The server is the authority on all of it. It wakes stones on the same slow
+tick as quest visits (a stone is 16 m wide to that check, and nobody crosses
+that in a thirtieth of a second), refuses travel in combat or while dead, and
+the woken list is persisted per character as `waystoneKey` keys — `terra:north`
+and the like, because stone ids are only unique within an Ostra. The travel
+window checks combat too, and greys itself out: a request that vanishes
+without explanation is worse than a button that says why.
 
 The size is one number (`TERRA_SIZE` in `ostras.ts`); everything above scales
 with it.
@@ -1314,7 +1368,6 @@ build next live in [TODO.md](TODO.md).
 - **Abilities are learned by levelling, not found.** The lore says spells come
   from scrolls and books and that the Library Ostracon holds them all; a caster
   class should probably learn that way rather than at set levels.
-- **No fast travel.** Waystones are where you wake, not where you can go.
 - **Distant trees pop in** at ~330 m, where the detailed chunks end; the
   horizon mesh has darker ground under woods but no trees.
 - **Player-vs-player is possible but untested.** Nothing stops a swing landing on

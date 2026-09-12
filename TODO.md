@@ -96,8 +96,6 @@ smaller entries below; those are the first step towards them.
 
 ## The world
 
-- **Fast travel between waystones you have visited.** Needs discovery persisted
-  per character. Waystones are already landmarks and respawn points.
 - **Check the towns against the vault.** Fanshona — its lake, dock, Weighhouse,
   Lantern House and everyone in it — was invented for the game. So were Daso's
   smithy, storehouse and cart shed and the people added with them (Mott,
@@ -211,7 +209,8 @@ smaller entries below; those are the first step towards them.
 - **Postgres store.** SQLite means one process per realm; `CharacterStore` exists
   so this is a swap, not a rewrite.
 - **Minimap zoom** and waypoints you can place on the world map. (The world
-  map zooms and pans now.)
+  map zooms and pans, and carries a legend, a scale and every region's level
+  band.)
 - **Hunting grounds for the rest of Terra.** Four areas with variants round
   Daso (`variants.ts`); Fanshona's quests and every region past the Westwood
   still ask for whole kinds, so they get no map mark. One area and variant

@@ -34,7 +34,23 @@
     <div id="worldmap" hidden>
       <div id="worldmap-title"></div>
       <canvas id="worldmap-canvas"></canvas>
-      <div class="worldmap-hint">Scroll to zoom · drag to move · <kbd>M</kbd> or <kbd>Esc</kbd> to close</div>
+      <!-- What every symbol means. A map of eight kilometres full of glyphs
+           nobody has been taught is a puzzle, not an instrument. -->
+      <div id="worldmap-legend">
+        <span><i class="lg-you"></i>You</span>
+        <span><i class="lg-town"></i>Town</span>
+        <span><i class="lg-stone woken"></i>Waystone &mdash; woken</span>
+        <span><i class="lg-stone"></i>&hellip;asleep</span>
+        <span><i class="lg-ruin"></i>Ruin</span>
+        <span><i class="lg-gate"></i>Gate</span>
+        <span><i class="lg-area"></i>Hunting ground</span>
+        <span><i class="lg-quest"></i>Quest</span>
+        <span><i class="lg-elite"></i>Elite</span>
+      </div>
+      <div class="worldmap-hint">
+        <b id="worldmap-across"></b>
+        <span id="worldmap-help">Scroll to zoom &middot; drag to move &middot; <kbd>M</kbd> or <kbd>Esc</kbd> to close</span>
+      </div>
     </div>
 
     <!-- Arriving somewhere: its name, big, then gone. -->
@@ -48,6 +64,8 @@
     <div id="party" hidden></div>
 
     <div id="gate-prompt" hidden></div>
+    <!-- Standing at a woken waystone: its name, and that E is a road. -->
+    <div id="waystone-prompt" hidden></div>
 
     <div id="speech" hidden>
       <span id="speech-who"></span>
@@ -122,6 +140,7 @@
           <dt><kbd>P</kbd></dt><dd>Party — or click a player</dd>
           <dt><kbd>Enter</kbd></dt><dd>Chat</dd>
           <dt>A Gate</dt><dd>Walk into its ring to travel</dd>
+          <dt>A waystone</dt><dd>Walk up to it to wake it &middot; <kbd>E</kbd> to travel between woken stones</dd>
         </dl>
         <button type="button" data-close>Into the world</button>
         <p><kbd>H</kbd> shows this again</p>

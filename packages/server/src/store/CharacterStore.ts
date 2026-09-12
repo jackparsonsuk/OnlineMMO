@@ -39,6 +39,9 @@ export interface CharacterRecord {
   /** Quests under way and done. */
   quests: QuestLog;
   gold: number;
+  /** Waystones woken, as `waystoneKey` keys across every Ostra — what fast
+   *  travel is allowed to reach. */
+  waystones: string[];
   createdAt: number;
   lastSeenAt: number;
 }
@@ -53,6 +56,7 @@ export type CharacterPosition =
     equipment: Equipment;
     quests: QuestLog;
     gold: number;
+    waystones: string[];
   };
 
 /**

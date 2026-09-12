@@ -52,7 +52,10 @@ import {
   settlementsIn,
   TICK_RATE,
   type VillagerDefinition,
+  type WaystoneDefinition,
   type WorldState,
+  isAttuned,
+  WAYSTONE_USE_RANGE,
 } from "@mmo/shared";
 import type { Sound, SoundBoard } from "./audio.js";
 import { CombatText } from "./combatText.js";
@@ -105,6 +108,12 @@ export interface OstraSession {
   selfPosition(): { x: number; y: number; z: number };
   /** The villager close enough to talk to, if any. */
   nearestVillager(): VillagerDefinition | undefined;
+  /** The waystone you are standing at, if any — E travels from it. */
+  nearestWaystone(): WaystoneDefinition | undefined;
+  /** Which stones this character has woken, for the prompt and the maps. */
+  setWaystones(attuned: readonly string[]): void;
+  /** Your level: what the world map's region bands are read against. */
+  setLevel(level: number): void;
   /** Mark villagers' nametags with what they have for you ("!", "?", "…"). */
   setQuestMarkers(markerFor: (id: string) => string): void;
   /** Where your quests want you, for the maps and the compass. */
@@ -1202,8 +1211,14 @@ export function createSession(
   const waystones = ostra.waystones.map((stone) => {
     const key = `waystone:${stone.id}`;
     nametags.add(key, stone.name, 0x9fd8ff, "waystone");
-    return { key, x: stone.x, z: stone.z, y: heightAt(stone.x, stone.z, ostra.terrain) };
+    return { stone, key, x: stone.x, z: stone.z, y: heightAt(stone.x, stone.z, ostra.terrain) };
   });
+
+  /** Which stones are woken, as the server last said. The maps dim the rest,
+   *  and the prompt says whether this one is a door yet. */
+  let attuned: readonly string[] = [];
+  /** The stone you are standing at, this frame. */
+  let atStone: (typeof waystones)[number] | undefined;
 
   const nametagTargets: NametagTarget[] = [];
   const blips: MapBlip[] = [];
@@ -1567,6 +1582,22 @@ export function createSession(
       }
       hud.setSpeech(closest?.name, closest?.line, closest?.id !== undefined);
       nearby = closest;
+
+      // The stone underfoot, and what it offers: a door once it is woken,
+      // and before that only the news that walking up to it woke it.
+      atStone = undefined;
+      let stoneRange = WAYSTONE_USE_RANGE;
+      for (const stone of waystones) {
+        const range = Math.hypot(stone.x - x, stone.z - z);
+        if (range < stoneRange) {
+          stoneRange = range;
+          atStone = stone;
+        }
+      }
+      hud.setWaystonePrompt(atStone && isAttuned(ostra, atStone.stone.id, attuned)
+        ? atStone.stone.name
+        : undefined);
+
       cartographer.update(x, z, facingYaw(), blips, targetBearing);
     }
 
@@ -1709,6 +1740,12 @@ export function createSession(
     selfRig: () => players.get(room.sessionId)?.rig,
     selfPosition,
     nearestVillager: () => nearby,
+    nearestWaystone: () => atStone?.stone,
+    setWaystones: (keys) => {
+      attuned = keys;
+      cartographer.setAttuned(keys);
+    },
+    setLevel: (value) => cartographer.setLevel(value),
     setQuestMarkers,
     pickOnMap: (picker) => cartographer.setPicker(picker),
     get picking() { return cartographer.picking; },

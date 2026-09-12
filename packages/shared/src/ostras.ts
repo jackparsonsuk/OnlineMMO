@@ -801,6 +801,62 @@ export function waystoneArrival(stone: WaystoneDefinition): { x: number; z: numb
 }
 
 /**
+ * How close you must come for a waystone to wake to you.
+ *
+ * Generous on purpose, and every stone is a point some road must pass through
+ * (see TERRA_ROADS), so walking the roads is what opens up travel: the
+ * network you have actually walked is the network you can use. A stone you
+ * have to hunt for the exact footing of would be a puzzle, not a landmark.
+ */
+export const WAYSTONE_ATTUNE_RANGE = 16;
+
+/** How close you must stand to travel from one — inside the ring of cleared
+ *  ground around it, so "at the stone" is never a matter of opinion. */
+export const WAYSTONE_USE_RANGE = 9;
+
+/**
+ * A character's woken stones are kept as "<ostra>:<stone>" keys.
+ *
+ * Waystone ids are only unique within an Ostra — Terra has a "north" and
+ * Ascendant may yet — and one character's list spans every world they have
+ * walked, so the key has to carry which world each stone is in.
+ */
+export function waystoneKey(ostraId: OstraId, stoneId: string): string {
+  return `${ostraId}:${stoneId}`;
+}
+
+export function findWaystone(ostra: OstraDefinition, id: unknown): WaystoneDefinition | undefined {
+  return typeof id === "string" ? ostra.waystones.find((stone) => stone.id === id) : undefined;
+}
+
+/** Has this character woken that stone? */
+export function isAttuned(ostra: OstraDefinition, stoneId: string, attuned: readonly string[]): boolean {
+  return attuned.includes(waystoneKey(ostra.id, stoneId));
+}
+
+/** The stones of `ostra` this character has woken, in the table's order —
+ *  which runs from the Gate Circle outwards, so the list reads as a journey. */
+export function attunedIn(ostra: OstraDefinition, attuned: readonly string[]): WaystoneDefinition[] {
+  return ostra.waystones.filter((stone) => isAttuned(ostra, stone.id, attuned));
+}
+
+/** A save's woken stones made sane: keys this build still has a stone for,
+ *  each at most once. A stone a later build removes simply drops out. */
+export function sanitiseWaystones(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const keys: string[] = [];
+  for (const value of raw) {
+    if (typeof value !== "string" || keys.includes(value)) continue;
+    const cut = value.indexOf(":");
+    const ostraId = value.slice(0, cut);
+    if (!isOstraId(ostraId)) continue;
+    if (!findWaystone(getOstra(ostraId), value.slice(cut + 1))) continue;
+    keys.push(value);
+  }
+  return keys;
+}
+
+/**
  * Where to wake after dying at (x, z): the nearest waystone's arrival point,
  * or the Ostra's spawn if it has none.
  */

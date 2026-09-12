@@ -1,10 +1,13 @@
 import {
+  DIFFICULTY_COLOUR,
+  difficultyOf,
   getOstra,
   heightAt,
   levelAt,
   regionOf,
   roadPaths,
   settlementsIn,
+  waystoneKey,
   type OstraDefinition,
 } from "@mmo/shared";
 import { groundPalette, groundTone, type GroundPalette } from "./terrain.js";
@@ -22,6 +25,14 @@ import { Color3 } from "@babylonjs/core/Maths/math.js";
  *  - a compass strip with bearings to landmarks;
  *  - a world map on M, which paints itself in tiles in the background so it
  *    is ready by the time anyone asks for it.
+ *
+ * A map of eight kilometres is only useful if it answers questions, so the
+ * world map carries the three a player actually has: what is this symbol (a
+ * legend), how far is that (a scale bar, and the view's width in the hint),
+ * and can I survive there (every region's level band, coloured against your
+ * own level the way a nameplate is). Labels are placed in priority order and
+ * a label that would sit on top of one already drawn is dropped instead —
+ * eight kilometres of names at once was a wall of text.
  *
  * North is +Z and east is +X, which puts Daso — "Terra's west" in the lore —
  * on the left of the map, where a reader would look for it.
@@ -59,6 +70,13 @@ interface Landmark {
   z: number;
   kind: "waystone" | "settlement" | "gate" | "ruin";
   colour: string;
+  /**
+   * The waystone at this place, if there is one — its own id for a waystone,
+   * and the town's stone for a settlement that has one. Towns draw one glyph
+   * for the place rather than two on top of each other, so the town's glyph
+   * is what has to say whether its stone is woken.
+   */
+  stone?: string;
 }
 
 /** Pixels per tile edge. Tiles are painted one at a time between frames. */
@@ -154,6 +172,40 @@ const COMPASS_POINTS: Array<[number, string]> = [
   [0, "N"], [45, "NE"], [90, "E"], [135, "SE"], [180, "S"], [225, "SW"], [270, "W"], [315, "NW"],
 ];
 
+/** One line of a world-map label: what it says, in what colour, in what font. */
+interface LabelLine {
+  text: string;
+  colour: string;
+  font: string;
+}
+
+const REGION_FONT = "italic 600 15px ui-serif, Georgia, serif";
+const BAND_FONT = "600 11px ui-sans-serif, system-ui, sans-serif";
+const LANDMARK_FONT = "600 12px ui-sans-serif, system-ui, sans-serif";
+const QUEST_FONT = "italic 600 12px ui-serif, Georgia, serif";
+const AREA_FONT = "italic 11px ui-serif, Georgia, serif";
+/** Enough for the tallest of the fonts above, plus a little air. */
+const LABEL_LINE_HEIGHT = 14;
+
+/**
+ * Zoom at which the lesser names appear.
+ *
+ * Fourteen stones, two towns, eight ruins, the hunting grounds, nine regions
+ * and whatever your quests want are far too many names for one screen of
+ * eight kilometres. The places you steer by are always named; the rest wait
+ * until you have zoomed in and asked about that corner specifically.
+ */
+const RUIN_LABEL_ZOOM = 1.6;
+const AREA_LABEL_ZOOM = 2.2;
+
+/** Round distances a scale bar is allowed to be. */
+const SCALE_STEPS = [25, 50, 100, 200, 500, 1000, 2000, 4000];
+
+/** "700 m", "1.4 km" — the same rounding the compass uses. */
+function distanceWord(metres: number): string {
+  return metres >= 1000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`;
+}
+
 export class Cartographer {
   private readonly ostra: OstraDefinition;
   private readonly local: TileCache;
@@ -167,8 +219,10 @@ export class Cartographer {
   private readonly worldTitle = document.getElementById("worldmap-title") as HTMLElement;
   private lastInfo = "";
   private compassMarks: HTMLElement[] = [];
-  private readonly worldHint = document.querySelector("#worldmap .worldmap-hint") as HTMLElement;
+  private readonly worldHint = document.getElementById("worldmap-help") as HTMLElement;
+  private readonly worldAcross = document.getElementById("worldmap-across") as HTMLElement;
   private readonly defaultHint: string;
+  private shownAcross = "";
   /** Development: while set, a click on the world map is a place, not nothing. */
   private picker: ((x: number, z: number) => void) | undefined;
   private readonly onPickMove = (event: MouseEvent) => this.describePick(event);
@@ -189,6 +243,12 @@ export class Cartographer {
   private questCompass: HTMLElement[] = [];
   private lastX = 0;
   private lastZ = 0;
+  /** Stones this character has woken, by id in this Ostra. */
+  private attuned = new Set<string>();
+  /** The player's level, for colouring every region's band against it. */
+  private level = 1;
+  /** Label boxes already drawn this frame, for the overlap test. */
+  private placed: Array<{ x: number; y: number; w: number; h: number }> = [];
 
   constructor(ostra: OstraDefinition) {
     this.ostra = ostra;
@@ -198,15 +258,25 @@ export class Cartographer {
     this.world = new TileCache(ostra, palette, Math.max(0.12, ostra.size / 520), 4096);
 
     const settlements = settlementsIn(ostra);
+    /** Which town each stone stands in, if any. A town's own waystone is the
+     *  town, as far as a map is concerned — drawing both put Daso on the map
+     *  twice — so the town's glyph inherits the stone. */
+    const townStone = new Map<string, string>();
     for (const stone of ostra.waystones) {
-      // A town's own waystone is the town, as far as a map is concerned —
-      // drawing both put Daso on the map twice.
-      const inTown = settlements.some((s) => Math.hypot(s.x - stone.x, s.z - stone.z) < s.radius + 60);
-      if (inTown) continue;
-      this.landmarks.push({ name: stone.name, x: stone.x, z: stone.z, kind: "waystone", colour: "#9fd8ff" });
+      const town = settlements.find((s) => Math.hypot(s.x - stone.x, s.z - stone.z) < s.radius + 60);
+      if (town) {
+        townStone.set(town.id, stone.id);
+        continue;
+      }
+      this.landmarks.push({
+        name: stone.name, x: stone.x, z: stone.z, kind: "waystone", colour: "#9fd8ff", stone: stone.id,
+      });
     }
     for (const settlement of settlements) {
-      this.landmarks.push({ name: settlement.name, x: settlement.x, z: settlement.z, kind: "settlement", colour: "#ffc46b" });
+      this.landmarks.push({
+        name: settlement.name, x: settlement.x, z: settlement.z, kind: "settlement", colour: "#ffc46b",
+        ...(townStone.has(settlement.id) ? { stone: townStone.get(settlement.id)! } : {}),
+      });
     }
     for (const ruin of ostra.ruins) {
       this.landmarks.push({ name: ruin.name, x: ruin.x, z: ruin.z, kind: "ruin", colour: "#cdbb8c" });
@@ -237,6 +307,21 @@ export class Cartographer {
     window.addEventListener("mouseup", this.onDragEnd);
   }
 
+  /** Which waystones this character has woken: a woken stone is a door, and
+   *  the map draws it as a solid diamond rather than an empty one. */
+  setAttuned(attuned: readonly string[]): void {
+    this.attuned = new Set(
+      this.ostra.waystones
+        .filter((stone) => attuned.includes(waystoneKey(this.ostra.id, stone.id)))
+        .map((stone) => stone.id),
+    );
+  }
+
+  /** Your level, which is what every region's band is read against. */
+  setLevel(level: number): void {
+    this.level = level;
+  }
+
   /** Where your quests want you. Replaces the last set. */
   setQuestMarks(marks: QuestMark[]): void {
     this.questMarks = marks;
@@ -258,6 +343,19 @@ export class Cartographer {
   /** Metres of the Ostra across the world map at the current zoom. */
   private get viewMetres(): number {
     return this.ostra.size / this.zoom;
+  }
+
+  /**
+   * Which painted cache the world map draws its detail from at this zoom:
+   * zoomed well in, the minimap's fine tiles take over from the world map's
+   * own, which would only be stretched.
+   *
+   * `update` asks too, so the cache actually being drawn from is the one that
+   * gets the painting budget.
+   */
+  private get detailCache(): TileCache {
+    const size = Math.max(1, this.worldCanvas.width);
+    return this.viewMetres / size < this.world.mpp / 2.5 ? this.local : this.world;
   }
 
   /** Keep the view over the Ostra: never scrolled off into nothing. */
@@ -421,7 +519,12 @@ export class Cartographer {
     this.updateInfo(x, z);
     if (this.worldOpen) {
       this.drawWorld(x, z, heading, blips);
-      this.world.work(10);
+      // Whichever cache the map is drawing from gets the budget. Handing it
+      // to the coarse one unconditionally spent it on tiles that were long
+      // since finished, while the detailed tiles a zoomed-in view actually
+      // needed waited behind the minimap's 4 ms — which is why zooming right
+      // in used to sit on black ground for half a minute.
+      this.detailCache.work(12);
     } else {
       // Paint the world map in the background, a little per frame.
       this.world.work(1.5);
@@ -463,7 +566,7 @@ export class Cartographer {
       const px = (landmark.x - left) / mpp;
       const py = (top - landmark.z) / mpp;
       if (px < -6 || py < -6 || px > size + 6 || py > size + 6) continue;
-      drawLandmark(ctx, landmark, px, py, 1);
+      drawLandmark(ctx, landmark, px, py, 1, this.woken(landmark));
     }
 
     // Quests: areas and points where they are, and anything beyond the
@@ -499,6 +602,18 @@ export class Cartographer {
     }
 
     drawArrow(ctx, size / 2, size / 2, heading, 7);
+
+    // North, on the rim. The minimap never rotates, which is worth saying
+    // once in the corner rather than leaving anyone to work out from the
+    // terrain that the top of the circle is always north.
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "700 10px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillText("N", size / 2 + 1, 10);
+    ctx.fillStyle = "rgba(230,237,243,0.85)";
+    ctx.fillText("N", size / 2, 9);
+    ctx.textBaseline = "alphabetic";
   }
 
   private drawTiles(
@@ -539,17 +654,21 @@ export class Cartographer {
     }
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    // The view: the whole Ostra at zoom 1, and closer from there. Zoomed well
-    // in, the minimap's detailed tiles take over from the world map's, which
-    // would only be stretched.
     const mpp = this.viewMetres / size;
-    const cache = mpp < this.world.mpp / 2.5 ? this.local : this.world;
-    const scale = cache.mpp / mpp;
+    const cache = this.detailCache;
     const left = this.centreX - this.viewMetres / 2;
     const top = this.centreZ + this.viewMetres / 2;
     ctx.fillStyle = "#12161c";
     ctx.fillRect(0, 0, size, size);
-    this.drawTiles(ctx, cache, left, top, size, size, scale);
+    // The coarse whole-Ostra tiles underneath, always: they were painted
+    // during the loading screen, so there is ground under everything from the
+    // first frame. Zoomed in they are stretched and soft, and the detailed
+    // tiles above them sharpen the picture as they arrive — a blurry map is
+    // worth a great deal more than a black one.
+    if (cache !== this.world) {
+      this.drawTiles(ctx, this.world, left, top, size, size, this.world.mpp / mpp);
+    }
+    this.drawTiles(ctx, cache, left, top, size, size, cache.mpp / mpp);
 
     const toPx = (wx: number, wz: number): [number, number] => [(wx - left) / mpp, (top - wz) / mpp];
 
@@ -564,19 +683,35 @@ export class Cartographer {
       ctx.stroke();
     }
 
+    // Every glyph is drawn first and every name afterwards, so a name can
+    // never land on top of a symbol — and so the names can be placed in
+    // priority order, which is what keeps eight kilometres of them readable.
     ctx.textAlign = "center";
-    ctx.font = "italic 600 15px ui-serif, Georgia, serif";
+    this.placed = [];
+    const labels: Array<{ lines: LabelLine[]; x: number; y: number }> = [];
+
+    // Region names and their level bands are drawn straight away rather than
+    // queued: they are the backdrop everything else is read against, and the
+    // band — coloured against your own level the way a nameplate is — is the
+    // whole answer to "can I go there yet". Drawing them before the marker
+    // that says where you are is deliberate; otherwise the one region you
+    // most want named, the one you are standing in, is the one that loses.
     for (const region of this.ostra.regions) {
       const [rx, ry] = toPx(region.x, region.z + 260);
-      ctx.fillStyle = "rgba(0,0,0,0.45)";
-      ctx.fillText(region.name.toUpperCase(), rx + 1, ry + 1);
-      ctx.fillStyle = "rgba(255,248,230,0.72)";
-      ctx.fillText(region.name.toUpperCase(), rx, ry);
+      const band = this.ostra.wilds ? region.levels : undefined;
+      this.drawLabel(ctx, [
+        { text: region.name.toUpperCase(), colour: "rgba(255,248,230,0.78)", font: REGION_FONT },
+        ...(band ? [{
+          text: `levels ${band[0]}–${band[1]}`,
+          colour: DIFFICULTY_COLOUR[difficultyOf(Math.round((band[0] + band[1]) / 2), this.level)],
+          font: BAND_FONT,
+        }] : []),
+      ], rx, ry);
     }
 
-    // Hunting grounds, named, whether or not a quest wants you there — the
-    // place you go to find Pathstalkers should be findable without one.
-    ctx.font = "italic 11px ui-serif, Georgia, serif";
+    // Hunting grounds, ringed whether or not a quest wants you there — the
+    // place you go to find Pathstalkers should be findable without one. Their
+    // names are the first thing to give way when the map is crowded.
     for (const area of this.ostra.areas ?? []) {
       const [ax, ay] = toPx(area.x, area.z);
       const radius = Math.max(4, area.radius / mpp);
@@ -585,35 +720,40 @@ export class Cartographer {
       ctx.strokeStyle = "rgba(230, 210, 170, 0.35)";
       ctx.lineWidth = 1;
       ctx.stroke();
-      ctx.fillStyle = "rgba(0,0,0,0.6)";
-      ctx.fillText(area.name, ax + 1, ay + radius + 13);
-      ctx.fillStyle = "rgba(240, 228, 200, 0.85)";
-      ctx.fillText(area.name, ax, ay + radius + 12);
+      if (this.zoom >= AREA_LABEL_ZOOM) {
+        labels.push({
+          x: ax, y: ay + radius + 13,
+          lines: [{ text: area.name, colour: "rgba(240, 228, 200, 0.85)", font: AREA_FONT }],
+        });
+      }
     }
 
-    ctx.font = "600 12px ui-sans-serif, system-ui, sans-serif";
     for (const landmark of this.landmarks) {
       const [px, py] = toPx(landmark.x, landmark.z);
-      drawLandmark(ctx, landmark, px, py, 1.4);
+      drawLandmark(ctx, landmark, px, py, 1.4, this.woken(landmark));
+      // A Gate is named by the world it opens on, which the zone banner and
+      // the walk-up prompt both say better than a word on a map would.
       if (landmark.kind === "gate") continue;
-      ctx.fillStyle = "rgba(0,0,0,0.65)";
-      ctx.fillText(landmark.name, px + 1, py - 9);
-      ctx.fillStyle = landmark.kind === "settlement" ? "#ffe2a8" : landmark.kind === "ruin" ? "#e8dcc0" : "#e6edf3";
-      ctx.fillText(landmark.name, px, py - 10);
+      if (landmark.kind === "ruin" && this.zoom < RUIN_LABEL_ZOOM) continue;
+      labels.push({
+        x: px, y: py - 10,
+        lines: [{
+          text: landmark.name,
+          colour: landmark.kind === "settlement" ? "#ffe2a8" : landmark.kind === "ruin" ? "#e8dcc0" : "#e6edf3",
+          font: LANDMARK_FONT,
+        }],
+      });
     }
 
-    // Quests, over the land and under the markers.
-    ctx.font = "italic 600 12px ui-serif, Georgia, serif";
     for (const mark of this.questMarks) {
       const [qx, qy] = toPx(mark.x, mark.z);
       const radius = Math.max(mark.kind === "area" ? 8 : 0, (mark.radius ?? 0) / mpp);
       drawQuestMark(ctx, mark, qx, qy, radius, 1.4);
-      ctx.fillStyle = "rgba(0,0,0,0.7)";
-      ctx.fillText(mark.label, qx + 1, qy - radius - 7);
-      ctx.fillStyle = "#f7e3a0";
-      ctx.fillText(mark.label, qx, qy - radius - 8);
+      labels.push({
+        x: qx, y: qy - radius - 8,
+        lines: [{ text: mark.label, colour: "#f7e3a0", font: QUEST_FONT }],
+      });
     }
-    ctx.font = "600 12px ui-sans-serif, system-ui, sans-serif";
 
     // Your target, and every living elite — gold, ringed, a little larger.
     for (const blip of blips) {
@@ -630,8 +770,110 @@ export class Cartographer {
       }
     }
 
+    // You: a ring under the arrow, because on a map of the whole Ostra a
+    // nine-pixel arrow is one speck among a dozen other specks.
     const [px, py] = toPx(x, z);
+    ctx.beginPath();
+    ctx.arc(px, py, 13, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255,255,255,0.5)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
     drawArrow(ctx, px, py, heading, 9);
+    // A box over you that nothing draws in, so no name sits on your head.
+    this.placed.push({ x: px - 15, y: py - 15, w: 30, h: 30 });
+
+    // Quest marks, then towns and stones, then ruins: the order they were
+    // queued in, which is the order that survives a crowded map.
+    for (const label of labels) this.drawLabel(ctx, label.lines, label.x, label.y);
+
+    this.drawScale(ctx, size, mpp);
+
+    // How much world is on screen. The scale bar answers "how far is that";
+    // this answers "how much of the map am I looking at", which is the other
+    // half of not being lost in a zoomed-in corner.
+    const across = `${distanceWord(this.viewMetres)} across`;
+    if (across !== this.shownAcross) {
+      this.shownAcross = across;
+      this.worldAcross.textContent = across;
+    }
+  }
+
+  /** Is this landmark's waystone woken? Undefined where there is no stone. */
+  private woken(landmark: Landmark): boolean | undefined {
+    return landmark.stone === undefined ? undefined : this.attuned.has(landmark.stone);
+  }
+
+  /**
+   * Draw a stack of lines centred on (x, y) — unless the block would overlap
+   * one already drawn, in which case it is dropped.
+   *
+   * Dropping a name is much kinder than printing it over another: a map with
+   * a name missing is still a map, and the name comes back the moment you
+   * zoom in far enough for it to have room.
+   */
+  private drawLabel(ctx: CanvasRenderingContext2D, lines: LabelLine[], x: number, y: number): void {
+    let width = 0;
+    for (const line of lines) {
+      ctx.font = line.font;
+      width = Math.max(width, ctx.measureText(line.text).width);
+    }
+    // A label whose anchor is off the canvas is not drawn at all: half a word
+    // clinging to the edge reads as a mistake, not as information.
+    const size = ctx.canvas.width;
+    if (x < 0 || y < 0 || x > size || y > size) return;
+    const box = {
+      x: x - width / 2 - 2,
+      y: y - LABEL_LINE_HEIGHT,
+      w: width + 4,
+      h: lines.length * LABEL_LINE_HEIGHT + 2,
+    };
+    for (const other of this.placed) {
+      if (box.x < other.x + other.w && box.x + box.w > other.x
+        && box.y < other.y + other.h && box.y + box.h > other.y) return;
+    }
+    this.placed.push(box);
+    lines.forEach((line, index) => {
+      const ly = y + index * LABEL_LINE_HEIGHT;
+      ctx.font = line.font;
+      ctx.fillStyle = "rgba(0,0,0,0.7)";
+      ctx.fillText(line.text, x + 1, ly + 1);
+      ctx.fillStyle = line.colour;
+      ctx.fillText(line.text, x, ly);
+    });
+  }
+
+  /**
+   * A bar and a round distance, bottom left.
+   *
+   * Without one, nothing on the map says whether two places are a stroll
+   * apart or a quarter of an hour — and at twenty-four times zoom the very
+   * same picture means two hundred metres instead of eight kilometres.
+   */
+  private drawScale(ctx: CanvasRenderingContext2D, size: number, mpp: number): void {
+    // The largest round distance that still fits the quarter of the canvas it
+    // is given, rather than the first one over it — which drew a "4 km" bar
+    // half the map wide.
+    const want = size * 0.28 * mpp;
+    const metres = SCALE_STEPS.filter((step) => step <= want).pop() ?? SCALE_STEPS[0]!;
+    const length = metres / mpp;
+    const x = 14;
+    const y = size - 16;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, y - 5); ctx.lineTo(x, y); ctx.lineTo(x + length, y); ctx.lineTo(x + length, y - 5);
+    ctx.strokeStyle = "rgba(0,0,0,0.55)";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.textAlign = "center";
+    ctx.font = LANDMARK_FONT;
+    ctx.fillStyle = "rgba(0,0,0,0.7)";
+    ctx.fillText(distanceWord(metres), x + length / 2 + 1, y - 8);
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.fillText(distanceWord(metres), x + length / 2, y - 9);
+    ctx.restore();
   }
 
   private drawCompass(x: number, z: number, heading: number, targetBearing: number | undefined): void {
@@ -787,7 +1029,23 @@ function drawRimNotch(ctx: CanvasRenderingContext2D, x: number, y: number, angle
   ctx.restore();
 }
 
-function drawLandmark(ctx: CanvasRenderingContext2D, landmark: Landmark, x: number, y: number, scale: number): void {
+/**
+ * A landmark's glyph: a diamond for a waystone, a house for a town, broken
+ * walls for a ruin, a disc for a Gate.
+ *
+ * `woken` says whether the waystone here has been walked to — solid means you
+ * can travel to it, hollow means you cannot yet. A town shows its own stone
+ * the same way, as a small diamond beside the roof, because a town and its
+ * stone share one glyph (see `Landmark.stone`).
+ */
+function drawLandmark(
+  ctx: CanvasRenderingContext2D,
+  landmark: Landmark,
+  x: number,
+  y: number,
+  scale: number,
+  woken?: boolean,
+): void {
   ctx.save();
   ctx.translate(x, y);
   ctx.fillStyle = landmark.colour;
@@ -798,11 +1056,43 @@ function drawLandmark(ctx: CanvasRenderingContext2D, landmark: Landmark, x: numb
     const s = 4 * scale;
     ctx.moveTo(0, -s); ctx.lineTo(s * 0.7, 0); ctx.lineTo(0, s); ctx.lineTo(-s * 0.7, 0);
     ctx.closePath();
-  } else if (landmark.kind === "settlement") {
+    ctx.stroke();
+    // Asleep: the outline in its own colour and nothing inside it, so the
+    // stone is still plainly there and plainly not yet a door.
+    if (woken) ctx.fill();
+    else {
+      ctx.strokeStyle = landmark.colour;
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+  if (landmark.kind === "settlement") {
     const s = 4.5 * scale;
     ctx.rect(-s, -s * 0.4, s * 2, s * 1.4);
     ctx.moveTo(-s * 1.2, -s * 0.4); ctx.lineTo(0, -s * 1.4); ctx.lineTo(s * 1.2, -s * 0.4);
-  } else if (landmark.kind === "ruin") {
+    ctx.stroke();
+    ctx.fill();
+    // The town's own waystone, beside the roof.
+    if (woken !== undefined) {
+      const d = 2.4 * scale;
+      ctx.beginPath();
+      ctx.moveTo(s * 1.9, -s * 0.9 - d); ctx.lineTo(s * 1.9 + d * 0.7, -s * 0.9);
+      ctx.lineTo(s * 1.9, -s * 0.9 + d); ctx.lineTo(s * 1.9 - d * 0.7, -s * 0.9);
+      ctx.closePath();
+      ctx.strokeStyle = "#9fd8ff";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      if (woken) {
+        ctx.fillStyle = "#9fd8ff";
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+    return;
+  }
+  if (landmark.kind === "ruin") {
     const s = 3.6 * scale;
     ctx.rect(-s, -s * 0.2, s * 0.6, s * 1.2);
     ctx.rect(s * 0.4, -s, s * 0.6, s * 2);

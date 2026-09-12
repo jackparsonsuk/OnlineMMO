@@ -27,6 +27,8 @@ export class Hud {
   private stats = document.getElementById("stats") as HTMLElement;
   private help = document.getElementById("help") as HTMLElement;
   private gatePrompt = document.getElementById("gate-prompt") as HTMLElement;
+  private waystonePrompt = document.getElementById("waystone-prompt") as HTMLElement;
+  private waystoneShown: string | undefined;
   private speech = document.getElementById("speech") as HTMLElement;
   private speechWho = document.getElementById("speech-who") as HTMLElement;
   private speechLine = document.getElementById("speech-line") as HTMLElement;
@@ -149,6 +151,19 @@ export class Hud {
   setGatePrompt(label: string | undefined): void {
     this.gatePrompt.textContent = label ?? "";
     this.gatePrompt.hidden = label === undefined;
+  }
+
+  /**
+   * The woken waystone you are standing at, and how to use it. Only touches
+   * the DOM when the stone changes — you stand at one for whole seconds.
+   */
+  setWaystonePrompt(name: string | undefined): void {
+    if (name === this.waystoneShown) return;
+    this.waystoneShown = name;
+    this.waystonePrompt.hidden = name === undefined;
+    if (name === undefined) return;
+    this.waystonePrompt.innerHTML = `<b></b><span><kbd>E</kbd> travel</span>`;
+    (this.waystonePrompt.querySelector("b") as HTMLElement).textContent = name;
   }
 
   /**

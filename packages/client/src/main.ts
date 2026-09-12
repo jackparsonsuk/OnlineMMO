@@ -30,6 +30,7 @@ import { DevMenu, type EliteStatus } from "./devtools.js";
 import { PartyUI, type PartyRoster } from "./party.js";
 import { questMarksFor } from "./questMarks.js";
 import { QuestUI } from "./questUI.js";
+import { TravelUI } from "./travelUI.js";
 import { VendorUI } from "./vendorUI.js";
 import { showTitleScreen } from "./titleScreen.js";
 import { Hud } from "./hud.js";
@@ -91,6 +92,10 @@ const vendorUI = new VendorUI({
   sellAll: (vendor) => sendToRoom?.("vendorSellAll", { vendor }),
 });
 
+const travelUI = new TravelUI({
+  travel: (id) => sendToRoom?.("waystoneTravel", { id }),
+});
+
 const partyUI = new PartyUI({
   invite: (name) => sendToRoom?.("partyInvite", { name }),
   inviteSession: (sessionId) => sendToRoom?.("partyInvite", { sessionId }),
@@ -122,7 +127,7 @@ const mouseLook = new MouseLook(
 
 function anyWindowOpen(): boolean {
   return characterScreen.isOpen || (session?.mapOpen ?? false) || questUI.isOpen || vendorUI.isOpen
-    || partyUI.isOpen || hud.helpOpen || !gameMenu.hidden || chat.isOpen
+    || travelUI.isOpen || partyUI.isOpen || hud.helpOpen || !gameMenu.hidden || chat.isOpen
     || !(document.getElementById("title") as HTMLElement).hidden;
 }
 
@@ -152,8 +157,10 @@ function applyProgress(nextLevel: number, xp: number, gained: number): void {
   hud.setXp(level, xp);
   hud.xpGain(gained);
   characterScreen.setLevel(level);
+  session?.setLevel(level);
   questUI.setLevel(level);
   vendorUI.setLevel(level);
+  travelUI.setLevel(level);
   if (level === before) return;
   refreshQuestMarkers();
   // One banner per level crossed, each with what it taught.
@@ -161,6 +168,13 @@ function applyProgress(nextLevel: number, xp: number, gained: number): void {
     hud.levelUp(reached, spellsLearnedAt(classId, reached).map((id) => SPELLS[id].name));
   }
   if (gained > 0) audio.play("levelUp", 1);
+}
+
+/** The woken stones, from the server: the travel window's list, and which
+ *  diamonds the maps draw as doors. */
+function applyWaystones(attuned: string[]): void {
+  travelUI.setAttuned(attuned);
+  session?.setWaystones(attuned);
 }
 
 function applyQuests(log: QuestLog | undefined, gold: number | undefined): void {
@@ -195,13 +209,18 @@ window.addEventListener("keydown", (event) => {
       devMenu?.toggle();
       break;
     case "KeyE": {
+      // A villager wins over a stone: Daso's and Fanshona's stones stand in
+      // town, and someone with work for you is the rarer thing to be beside.
       const villager = session?.nearestVillager();
+      const stone = session?.nearestWaystone();
       if (villager?.vendor) {
         questUI.close();
         vendorUI.open(villager);
       } else if (villager) {
         vendorUI.close();
         questUI.talkTo(villager);
+      } else if (stone) {
+        travelUI.open(stone);
       }
       break;
     }
@@ -237,6 +256,7 @@ window.addEventListener("keydown", (event) => {
       else if (hud.helpOpen) hud.toggleHelp(false);
       else if (session?.mapOpen) session.toggleMap();
       else if (partyUI.isOpen) partyUI.setOpen(false);
+      else if (travelUI.close()) break;
       else if (vendorUI.close()) break;
       else if (questUI.close()) break;
       else if (characterScreen.isOpen) characterScreen.setOpen(false);
@@ -324,6 +344,7 @@ interface ProfileMessage {
   equipment: Equipment;
   quests?: QuestLog;
   gold?: number;
+  waystones?: string[];
 }
 
 /** What the server sends when a player steps into a Gate. */
@@ -415,6 +436,7 @@ function frame(now: number): void {
     const self = session.selfPosition();
     questUI.update(self.x, self.z);
     vendorUI.update(self.x, self.z);
+    travelUI.update(self.x, self.z, room?.state.players.get(room.sessionId)?.inCombat ?? false);
   }
 }
 
@@ -443,6 +465,9 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   // A new Ostra is new villagers; mark them from what we already know.
   questUI.close();
   vendorUI.close();
+  // A new Ostra has its own stones; the profile that follows says which of
+  // them this character has woken.
+  travelUI.setOstra(ostra);
   refreshQuestMarkers();
 
   // Class, XP, bag and gear are private to this player, so they arrive as a
@@ -464,6 +489,18 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
     hud.setPower(characterScreen.power);
     applyQuests(payload.quests, payload.gold);
     vendorUI.setProfile(payload.inventory ?? [], payload.gold ?? 0, level, classId);
+    applyWaystones(payload.waystones ?? []);
+  });
+  // A stone woken by walking up to it: the news, and a new door on the maps.
+  next.onMessage("waystones", (payload: { waystones: string[]; woke: string[] }) => {
+    applyWaystones(payload.waystones ?? []);
+    for (const name of payload.woke ?? []) {
+      hud.announce("Waystone woken", name, "You can travel here from any stone", false);
+      audio.play("pickup");
+    }
+  });
+  next.onMessage("travelled", (payload: { name: string }) => {
+    hud.flash(payload.name, "#9fd8ff");
   });
   next.onMessage("sold", (payload: { count: number; gold: number }) => {
     hud.flash(`Sold ${payload.count} item${payload.count === 1 ? "" : "s"} for ${payload.gold} gold`, "#f0c83c");
