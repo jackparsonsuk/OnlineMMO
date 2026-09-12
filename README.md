@@ -174,15 +174,68 @@ labels are not occluded by geometry: you can read a name through a rock.
 
 ## Art style
 
-Low poly, and that means two things that have to go together: very few
-triangles, and **flat** shading so each triangle reads as its own facet. A coarse
-mesh with smooth normals just looks badly made; the same mesh faceted looks
-deliberate. `packages/client/src/lowpoly.ts` holds the whole style — materials
-with no specular highlight, and every model built from primitives at runtime.
+**Voxels.** Every body, prop, building and tree is a grid of cells, meshed at
+load. `packages/client/src/voxel.ts` holds the whole style.
 
-Nothing is loaded from a model file. There is no exporter in the pipeline, and a
-creature's proportions sit next to the numbers the simulation uses, so a spider
-cannot be drawn wider than the circle it collides with.
+It was low poly before, and the problem was not the polygons: it was that a
+creature was a handful of stretched boxes — the wolf was thirteen — which is
+not an art style so much as the absence of one. Voxels keep the one thing that
+approach got right and fix the one it got wrong. **Nothing is still loaded from
+a model file:** a voxel model is data in a source file, so there is no exporter
+in the pipeline, no asset to download, no loading screen, and a creature's
+proportions still sit next to the numbers the simulation uses — a spider cannot
+be drawn wider than the circle it collides with. But where a box could only
+ever be a box, a grid can have a jaw, an ear, a strap and a notch.
+
+Three techniques do the work, and they have to go together:
+
+- **Resolution.** `VOXEL` is 1/32 m, so a player is 51 cells tall and a leg is
+  6x12x6. The number that matters is the smallest part, not the total: at
+  1/16 m a head is five cells and five cells cannot hold a face.
+- **Ambient occlusion**, baked into the vertex colours at mesh time from each
+  corner's three neighbours. This is the signature voxel look and it costs
+  nothing at runtime. It is also why `bevel` is worth its one cell — the new
+  faces it makes are all concave, so the occlusion does the shaping.
+- **Speckle**: three or four shades of one hue scattered over a surface, so
+  fur and bark have grain instead of reading as painted plastic.
+
+Colours travel in the **vertex data**, so one flat white material serves any
+number of models — a whole town is a handful of draw calls, and a body is one
+material rather than the four or five it used to have (two where something on
+it glows, since the flash on a hit is a change to the material).
+
+**Greedy meshing** is what makes it affordable: interior faces are thrown away
+and what is left is merged into the largest rectangles sharing a colour *and*
+the same four corner AO values. A player is ~3,100 triangles across 7 meshes —
+fewer draw calls than the 10 boxes it replaced.
+
+Two things fall out of that and both cost real frames if you forget them:
+
+- **Speckle is the expensive technique.** Two neighbouring cells of different
+  colours cannot merge, so scatter is cheap on a body and ruinous on a wall. A
+  log at 0.45 came out at 10,500 triangles; the golem's chest at 0.45 was
+  28,000. Grain has to thin as a surface grows, and architecture gets none at
+  all — walls and roofs use *structured* grain (courses, planks, studs, thatch
+  bundles) which merges into long strips almost for free. Detailing both faces
+  of a wall doubled every building in the game to draw stone on the inside of a
+  room nobody can enter, so panels are detailed on one face and turned.
+- **Big things get bigger cells.** A ten-metre pine at 1/32 m is thirteen
+  million cells. Scenery uses 1/8 m and rocks 1/16 m — you look at a tree from
+  twenty metres and a face from three, so a voxel four times larger subtends
+  the same angle. The grain matches; the grid does not.
+
+Scenery instances are scaled **uniformly**, or the cells would come out as
+bricks. That works because the generator rolls a tree's height and its trunk
+radius from one number, so scaling by the radius makes the drawn trunk exactly
+the circle the server stops you against and leaves the height within a few
+percent. Rocks are the exception — their height runs 0.8 to 1.3 of their radius
+— so they get three templates of different squatness, picked by the same roll.
+
+Buildings cannot be solid grids: Daso's hall would be fifteen million cells. A
+wall's inside is never seen, so each face is a slab six cells thick.
+
+`lowpoly.ts` remains for the things that are not surfaces — cast arcs, ground
+items, the sky — and for the flat, unshiny material everything shares.
 
 ### Day and night
 

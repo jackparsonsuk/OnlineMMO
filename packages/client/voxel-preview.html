@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ostracon — voxel preview</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #10141a; }
+      canvas { width: 100%; height: 100%; display: block; outline: none; }
+      #labels {
+        position: fixed; left: 0; right: 0; bottom: 12px;
+        font: 13px/1.5 system-ui, sans-serif; color: #cfd6de; text-align: center;
+        text-shadow: 0 1px 3px #000; pointer-events: none;
+      }
+      #labels b { color: #fff; }
+    </style>
+  </head>
+  <body>
+    <canvas id="preview"></canvas>
+    <div id="labels">
+      <b>left</b>: the boxes we have &middot; <b>right</b>: voxel at 1/32 m &middot; drag to orbit, scroll to zoom
+    </div>
+    <script type="module" src="/src/voxelPreview.ts"></script>
+  </body>
+</html>

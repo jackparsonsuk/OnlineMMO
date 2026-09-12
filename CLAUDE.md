@@ -17,7 +17,13 @@ npm run host         # build, run production locally, and tunnel it for friends
 ```
 
 - Client: http://localhost:5173 (Vite). Server: ws/http on :2567.
-- `.claude/launch.json` has `server` and `client` entries for the preview tools.
+- `.claude/launch.json` has `server`, `client` and `voxel-preview` entries for
+  the preview tools. The last is the art bench: `npx vite packages/client --port
+  5174`, then `/voxel-preview.html`. It needs no server, no account and no
+  world — it builds the real Daso, a patch of real wilds through the real
+  scenery streamer, every creature walking, and the old box player beside the
+  new one. It is not in the production build; nothing imports it but its own
+  page.
 - Don't test against http://localhost:2567 in a browser during development: the
   server serves whatever stale `packages/client/dist` exists.
 
@@ -65,7 +71,8 @@ packages/client/src/
   party.ts           party frames, the party window (P), invites
   terrain.ts         chunk streamer + horizon mesh + groundTone
   scenery.ts         thin-instanced trees/rocks/grass per chunk
-  rigs.ts            procedural animated bodies (Animator)
+  voxel.ts           the art style: voxel models, greedy mesher, per-cell AO
+  rigs.ts            procedural animated bodies (Animator), built from voxels
   daylight.ts        the day/night cycle, from the wall clock
   effects.ts combatText.ts audio.ts map.ts hud.ts nametags.ts scene.ts
 ```
@@ -97,6 +104,9 @@ packages/client/src/
   `style` drives AI and effects), a rig and pose in `rigs.ts`, an entry in
   `IMPACT_COLOUR`/`WINDUP_SOUND` in `session.ts`, and region `creatures` weights
   in `ostras.ts`. The compiler flags most of these via `Record<EnemyKind, …>`.
+  Build its parts with `sculpt` — give the same centres and sizes in metres a
+  box would have had and it returns the model and the anchor that hangs it back
+  on the joint. Keep `speckle` sparse on anything large; see README, Art style.
 
 ## Gotchas already paid for
 

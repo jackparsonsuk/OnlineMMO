@@ -1,7 +1,6 @@
 import { Color3, Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.js";
 import { Mesh } from "@babylonjs/core/Meshes/mesh.js";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder.js";
-import { VertexBuffer } from "@babylonjs/core/Buffers/buffer.js";
+import type { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial.js";
 import "@babylonjs/core/Meshes/thinInstanceMesh.js";
 import type { Scene } from "@babylonjs/core/scene.js";
 import {
@@ -19,7 +18,7 @@ import {
   type RegionDefinition,
   type SceneryItem,
 } from "@mmo/shared";
-import { flatMaterial } from "./lowpoly.js";
+import { build, tint, voxelMaterial, voxelMesh, VOXEL, type VoxelModel } from "./voxel.js";
 import { CHUNK, chunkKey, type ChunkListener, unkey } from "./terrain.js";
 
 /**
@@ -42,15 +41,28 @@ const GRASS_RADIUS = 110;
 const GRASS_PER_CHUNK = 90;
 
 type TreePool = "pineDark" | "pineLight" | "oakDark" | "oakLight" | "birch" | "dead";
-type RockPool = "rockGrey" | "rockRed" | "rockDark";
+type RockPool =
+  | "rockGrey0" | "rockGrey1" | "rockGrey2"
+  | "rockRed0" | "rockRed1" | "rockRed2"
+  | "rockDark0" | "rockDark1" | "rockDark2";
 type GrassPool = "grass" | "dry" | "heather" | "reeds" | "ash";
 type PoolKind = TreePool | RockPool | GrassPool;
 
 const TREE_POOLS: readonly (TreePool | RockPool)[] = [
-  "pineDark", "pineLight", "oakDark", "oakLight", "birch", "dead", "rockGrey", "rockRed", "rockDark",
+  "pineDark", "pineLight", "oakDark", "oakLight", "birch", "dead",
+  "rockGrey0", "rockGrey1", "rockGrey2",
+  "rockRed0", "rockRed1", "rockRed2",
+  "rockDark0", "rockDark1", "rockDark2",
 ];
+
+/** How squat each of the three rock templates is, as height over radius. */
+const ROCK_SQUAT = [0.85, 1.05, 1.25] as const;
 const GRASS_POOLS: readonly GrassPool[] = ["grass", "dry", "heather", "reeds", "ash"];
-const ROCK_POOL: Record<RegionDefinition["rock"], RockPool> = { grey: "rockGrey", red: "rockRed", dark: "rockDark" };
+const ROCK_POOL: Record<RegionDefinition["rock"], readonly RockPool[]> = {
+  grey: ["rockGrey0", "rockGrey1", "rockGrey2"],
+  red: ["rockRed0", "rockRed1", "rockRed2"],
+  dark: ["rockDark0", "rockDark1", "rockDark2"],
+};
 
 /** One mesh, drawn once per matrix, fed from per-chunk lists. */
 class InstancePool {
@@ -102,146 +114,197 @@ class InstancePool {
   }
 }
 
-/** Paint every vertex of a part one colour, so parts can be merged into one
- *  mesh and still read as bark and leaves. */
-function paint(mesh: Mesh, colour: Color3): Mesh {
-  const count = mesh.getTotalVertices();
-  const colours = new Float32Array(count * 4);
-  for (let i = 0; i < count; i++) {
-    colours[i * 4] = colour.r;
-    colours[i * 4 + 1] = colour.g;
-    colours[i * 4 + 2] = colour.b;
-    colours[i * 4 + 3] = 1;
-  }
-  mesh.setVerticesData(VertexBuffer.ColorKind, colours);
+/**
+ * Trees, rocks and grass, as voxel models.
+ *
+ * Two things had to change to get here. Templates used to be built at unit
+ * height and scaled *non-uniformly* per instance — (radius, height, radius)
+ * for a tree, (radius, height * 0.62, radius * 0.92) for a rock — which is
+ * fine for a smooth cone and fatal for voxels, because it stretches every cell
+ * into a brick. Every instance is now scaled uniformly, so a cell stays a cube.
+ *
+ * That works because the generator drives a tree's height and its trunk radius
+ * from the same roll: a pine is 7-12 m tall with a 0.45-0.70 m trunk, so the
+ * ratio only moves by a tenth across the whole range. Scaling by the RADIUS
+ * makes the drawn trunk match the collision circle exactly — which is the one
+ * that matters, since it is what the server stops you against — and leaves the
+ * height within a few percent of what the generator asked for. Rocks are not
+ * proportional (0.8 to 1.3 of their radius), so they get three templates of
+ * different squatness instead, chosen by the same roll.
+ *
+ * And they are drawn on a coarser grid: SCENERY_CELL rather than VOXEL. A ten
+ * metre pine at 1/32 m is thirteen million cells, and pointless — you look at a
+ * tree from twenty metres and a face from three, so a voxel four times bigger
+ * on it subtends the same angle. The grain matches; the grid does not.
+ */
+const SCENERY_CELL = 1 / 8;
+const ROCK_CELL = 1 / 16;
+
+/** Template trunk radius per species, in metres. An instance is scaled by
+ *  `item.radius / this`, so the drawn trunk is the collision circle. */
+const TEMPLATE_TRUNK: Record<TreePool, number> = {
+  pineDark: 0.575, pineLight: 0.575, oakDark: 0.7, oakLight: 0.7, birch: 0.425, dead: 0.525,
+};
+
+const BARK = 0x4f3a26;
+const BARK_OAK = 0x5a4128;
+
+/** Cells for a length in metres, on the scenery grid. */
+const sc = (metres: number): number => Math.round(metres / SCENERY_CELL);
+
+/** Babylon colour back to the packed integer the voxel palette wants. */
+const packed = (colour: Color3): number =>
+  (Math.round(colour.r * 255) << 16) | (Math.round(colour.g * 255) << 8) | Math.round(colour.b * 255);
+
+/** Shared plumbing: one flat vertex-coloured material for everything that
+ *  grows, and a mesh standing on its base. */
+let sceneryMaterial: StandardMaterial | undefined;
+function sceneryMesh(scene: Scene, name: string, model: VoxelModel, cell: number): Mesh {
+  const mesh = voxelMesh(scene, name, model, "base", cell);
+  sceneryMaterial ??= voxelMaterial(scene, "scenery");
+  mesh.material = sceneryMaterial;
   return mesh;
 }
 
-function merge(name: string, parts: Mesh[], scene: Scene): Mesh {
-  const merged = Mesh.MergeMeshes(parts, true, true) ?? new Mesh(name, scene);
-  merged.name = name;
-  merged.convertToFlatShadedMesh();
-  merged.useVertexColors = true;
-  merged.material = flatMaterial(scene, `${name}Material`, Color3.White());
-  return merged;
-}
-
-/** Templates are built at unit height with a trunk radius of TRUNK, then
- *  scaled per tree so the drawn trunk matches its collision circle. */
-const TRUNK = 0.07;
-
+/** A conifer: a bare trunk and three tiers of needles, each a stepped cone. */
 function buildPine(scene: Scene, name: string, leaf: Color3): Mesh {
-  const bark = Color3.FromHexString("#4f3a26");
-  const trunk = MeshBuilder.CreateCylinder("t", {
-    height: 0.32, diameterTop: TRUNK * 1.3, diameterBottom: TRUNK * 2, tessellation: 5,
-  }, scene);
-  trunk.position.y = 0.16;
-  const tiers = [
-    { width: 0.8, height: 0.44, y: 0.5, shade: 0.82 },
-    { width: 0.6, height: 0.38, y: 0.68, shade: 1 },
-    { width: 0.4, height: 0.3, y: 0.85, shade: 1.14 },
-  ].map((tier) => {
-    const cone = MeshBuilder.CreateCylinder("c", {
-      height: tier.height, diameterTop: 0, diameterBottom: tier.width, tessellation: 7,
-    }, scene);
-    cone.position.y = tier.y;
-    return paint(cone, leaf.scale(tier.shade));
+  const leafRgb = packed(leaf);
+  const w = sc(6.6);
+  const h = sc(9.5);
+  const model = build(w, h, w, (v) => {
+    const mid = w / 2;
+    v.cylinder(mid, mid, sc(0.575), 0, sc(3.4), BARK);
+    v.speckle(BARK, 121, [tint(BARK, 0.82), tint(BARK, 1.18)], 0.3);
+    // Three tiers, each a cone stepped a cell at a time — which is what a
+    // voxel conifer is, and it reads better than a smooth one ever did.
+    const tiers = [
+      { y: 2.4, height: 3.4, radius: 3.3, shade: 0.82 },
+      { y: 4.6, height: 3.0, radius: 2.5, shade: 1.0 },
+      { y: 6.6, height: 2.9, radius: 1.6, shade: 1.16 },
+    ];
+    for (const tier of tiers) {
+      const steps = sc(tier.height);
+      for (let k = 0; k < steps; k++) {
+        const r = sc(tier.radius) * (1 - k / steps);
+        if (r < 0.6) continue;
+        v.cylinder(mid, mid, r, sc(tier.y) + k, 1, tint(leafRgb, tier.shade));
+      }
+    }
+    v.speckle(leafRgb, 122, [tint(leafRgb, 0.84), tint(leafRgb, 1.14)], 0.22);
   });
-  return merge(name, [paint(trunk, bark), ...tiers], scene);
+  return sceneryMesh(scene, name, model, SCENERY_CELL);
 }
 
+/** A broadleaf: a short thick trunk under a lumpy crown. */
 function buildOak(scene: Scene, name: string, leaf: Color3): Mesh {
-  const bark = Color3.FromHexString("#5a4128");
-  const trunk = MeshBuilder.CreateCylinder("t", {
-    height: 0.48, diameterTop: TRUNK * 1.4, diameterBottom: TRUNK * 2, tessellation: 6,
-  }, scene);
-  trunk.position.y = 0.24;
-  const crown = MeshBuilder.CreateIcoSphere("c", { radius: 0.4, subdivisions: 1 }, scene);
-  crown.position.y = 0.64;
-  crown.scaling.y = 0.78;
-  const lobe = MeshBuilder.CreateIcoSphere("l", { radius: 0.27, subdivisions: 1 }, scene);
-  lobe.position.set(0.2, 0.76, 0.06);
-  const lobe2 = MeshBuilder.CreateIcoSphere("l2", { radius: 0.24, subdivisions: 1 }, scene);
-  lobe2.position.set(-0.17, 0.72, -0.12);
-  return merge(name, [
-    paint(trunk, bark),
-    paint(crown, leaf),
-    paint(lobe, leaf.scale(1.12)),
-    paint(lobe2, leaf.scale(0.9)),
-  ], scene);
+  const leafRgb = packed(leaf);
+  const w = sc(7.0);
+  const h = sc(8.2);
+  const model = build(w, h, w, (v) => {
+    const mid = w / 2;
+    v.cylinder(mid, mid, sc(0.7), 0, sc(4.6), BARK_OAK);
+    // Two boughs out of the fork, so the crown has something holding it up.
+    for (const [dx, dz] of [[-1, 0.6], [1, -0.6]] as const) {
+      v.fill(Math.round(mid + dx * sc(0.8)), sc(3.2), Math.round(mid + dz * sc(0.8)), 3, sc(1.4), 3, BARK_OAK);
+    }
+    v.speckle(BARK_OAK, 123, [tint(BARK_OAK, 0.82), tint(BARK_OAK, 1.18)], 0.3);
+    // Rounder than it is wide. An ellipsoid flatter than about 1.4 to 1 stops
+    // reading as a canopy and starts reading as a mushroom cap.
+    v.ellipsoid(mid, sc(5.5), mid, sc(3.0), sc(2.5), sc(3.0), leafRgb);
+    v.ellipsoid(mid + sc(1.7), sc(6.3), mid + sc(0.5), sc(1.9), sc(1.7), sc(1.9), tint(leafRgb, 1.12));
+    v.ellipsoid(mid - sc(1.5), sc(4.9), mid - sc(1.1), sc(1.8), sc(1.6), sc(1.8), tint(leafRgb, 0.88));
+    v.speckle(leafRgb, 124, [tint(leafRgb, 0.84), tint(leafRgb, 1.16)], 0.24);
+  });
+  return sceneryMesh(scene, name, model, SCENERY_CELL);
 }
 
 /** Pale bark with dark bands, a narrow crown. Brightwater and the fens. */
 function buildBirch(scene: Scene): Mesh {
-  const trunk = MeshBuilder.CreateCylinder("t", {
-    height: 0.62, diameterTop: TRUNK * 1.1, diameterBottom: TRUNK * 1.7, tessellation: 5,
-  }, scene);
-  trunk.position.y = 0.31;
-  const band = MeshBuilder.CreateCylinder("b", {
-    height: 0.04, diameter: TRUNK * 1.75, tessellation: 5,
-  }, scene);
-  band.position.y = 0.22;
-  const crown = MeshBuilder.CreateIcoSphere("c", { radius: 0.3, subdivisions: 1 }, scene);
-  crown.position.y = 0.74;
-  crown.scaling.set(0.8, 1.2, 0.8);
-  const crown2 = MeshBuilder.CreateIcoSphere("c2", { radius: 0.2, subdivisions: 1 }, scene);
-  crown2.position.set(0.1, 0.55, -0.06);
-  return merge("birch", [
-    paint(trunk, Color3.FromHexString("#ddd8c8")),
-    paint(band, Color3.FromHexString("#3a3530")),
-    paint(crown, Color3.FromHexString("#8cb05a")),
-    paint(crown2, Color3.FromHexString("#7aa24e")),
-  ], scene);
+  const w = sc(5.0);
+  const h = sc(8.0);
+  const bark = 0xddd8c8;
+  const leafRgb = 0x8cb05a;
+  const model = build(w, h, w, (v) => {
+    const mid = w / 2;
+    v.cylinder(mid, mid, sc(0.425), 0, sc(5.6), bark);
+    // The bands, which are the whole point of a birch.
+    for (const y of [1.1, 2.3, 3.1, 4.4]) v.cylinder(mid, mid, sc(0.46), sc(y), 1, 0x3a3530);
+    v.speckle(bark, 125, [tint(bark, 0.92), tint(bark, 1.04)], 0.2);
+    v.ellipsoid(mid, sc(6.2), mid, sc(2.1), sc(2.4), sc(2.1), leafRgb);
+    v.ellipsoid(mid + sc(0.9), sc(4.9), mid - sc(0.5), sc(1.4), sc(1.2), sc(1.4), tint(leafRgb, 0.88));
+    v.speckle(leafRgb, 126, [tint(leafRgb, 0.84), tint(leafRgb, 1.16)], 0.24);
+  });
+  return sceneryMesh(scene, "birch", model, SCENERY_CELL);
 }
 
 /** Bare, charred, crooked: Ashfall and the high moor. */
 function buildDead(scene: Scene): Mesh {
-  const wood = Color3.FromHexString("#3e3530");
-  const trunk = MeshBuilder.CreateCylinder("t", {
-    height: 0.8, diameterTop: TRUNK * 0.7, diameterBottom: TRUNK * 2, tessellation: 5,
-  }, scene);
-  trunk.position.y = 0.4;
-  const limbs = [
-    { y: 0.55, z: 0.5, x: 0.14, len: 0.36 },
-    { y: 0.68, z: -0.6, x: -0.12, len: 0.3 },
-    { y: 0.8, z: 0.3, x: -0.06, len: 0.22 },
-  ].map((l) => {
-    const limb = MeshBuilder.CreateCylinder("l", {
-      height: l.len, diameterTop: TRUNK * 0.3, diameterBottom: TRUNK * 0.8, tessellation: 4,
-    }, scene);
-    limb.position.set(l.x, l.y, 0);
-    limb.rotation.z = l.z;
-    return paint(limb, wood.scale(1.1));
-  });
-  return merge("dead", [paint(trunk, wood), ...limbs], scene);
-}
-
-function buildRock(scene: Scene, name: string, stone: Color3): Mesh {
-  const rock = MeshBuilder.CreateIcoSphere("rock", { radius: 1, subdivisions: 1 }, scene);
-  // Knock the vertices about, so it is a stone rather than a gem. Fixed
-  // offsets by index — every rock is the same shape, rotated and squashed
-  // differently, which is plenty.
-  const positions = rock.getVerticesData(VertexBuffer.PositionKind);
-  if (positions) {
-    for (let i = 0; i < positions.length; i += 3) {
-      const wobble = 0.78 + ((hash2(Math.round(positions[i]! * 100), Math.round(positions[i + 2]! * 100), 3) & 255) / 255) * 0.4;
-      positions[i] = positions[i]! * wobble;
-      positions[i + 1] = positions[i + 1]! * wobble;
-      positions[i + 2] = positions[i + 2]! * wobble;
+  const w = sc(4.2);
+  const h = sc(6.25);
+  const wood = 0x3e3530;
+  const model = build(w, h, w, (v) => {
+    const mid = w / 2;
+    // A trunk that leans as it climbs, rather than a straight post.
+    for (let y = 0; y < h; y++) {
+      const lean = Math.round((y / h) * sc(0.7));
+      const r = sc(0.525) * (1 - (y / h) * 0.55);
+      if (r < 0.5) break;
+      v.cylinder(mid + lean, mid, r, y, 1, wood);
     }
-    rock.updateVerticesData(VertexBuffer.PositionKind, positions);
-  }
-  return merge(name, [paint(rock, stone)], scene);
+    // Three limbs, each stepped outward and up.
+    const limbs = [{ y: 3.4, dx: 1, dz: 0 }, { y: 4.3, dx: -1, dz: 0.5 }, { y: 5.0, dx: 0.3, dz: -1 }];
+    for (const limb of limbs) {
+      for (let k = 0; k < sc(1.6); k++) {
+        v.fill(
+          Math.round(mid + limb.dx * k), sc(limb.y) + Math.round(k * 0.7), Math.round(mid + limb.dz * k),
+          2, 2, 2, tint(wood, 1.12),
+        );
+      }
+    }
+    v.speckle(wood, 127, [tint(wood, 0.8), tint(wood, 1.24)], 0.3);
+  });
+  return sceneryMesh(scene, "dead", model, SCENERY_CELL);
 }
 
-function buildTuft(scene: Scene, name: string, colour: Color3, height: number): Mesh {
-  const blades = [-1, 0, 1].map((i) => {
-    const blade = MeshBuilder.CreateBox("b", { width: 0.07, height, depth: 0.07 }, scene);
-    blade.position.set(i * 0.09, height / 2, (i === 0 ? 0.05 : -0.03));
-    blade.rotation.z = i * 0.3;
-    return paint(blade, colour.scale(i === 0 ? 1.1 : 0.92));
+/**
+ * A boulder, at one of three squatnesses. Rocks are the one kind whose height
+ * is not proportional to its radius, so rather than stretch the cells the
+ * streamer picks the template whose proportions already match.
+ */
+function buildRock(scene: Scene, name: string, stone: Color3, squat: number): Mesh {
+  const stoneRgb = packed(stone);
+  const r = Math.round(1 / ROCK_CELL);
+  const h = Math.max(4, Math.round(r * squat));
+  const model = build(r * 2, h, r * 2, (v) => {
+    v.ellipsoid(r, h * 0.55, r, r - 0.5, h * 0.62, (r - 0.5) * 0.94, stoneRgb);
+    // Knocked about by a hash of the cell, so it is a stone and not an egg.
+    for (let z = 0; z < r * 2; z++) {
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < r * 2; x++) {
+          if (v.at(x, y, z) === 0) continue;
+          if ((hash2(x * 31 + y, z * 17 - y, 0x5a1d) & 15) === 0) v.clear(x, y, z, 1, 1, 1);
+        }
+      }
+    }
+    v.speckle(stoneRgb, 128, [tint(stoneRgb, 0.84), tint(stoneRgb, 1.14)], 0.2);
   });
-  return merge(name, blades, scene);
+  return sceneryMesh(scene, name, model, ROCK_CELL);
+}
+
+/** A tuft: three blades leaning apart. Grass is the most numerous thing in the
+ *  world, so it stays as cheap as it looks. */
+function buildTuft(scene: Scene, name: string, colour: Color3, height: number): Mesh {
+  const rgb = packed(colour);
+  const h = Math.max(4, Math.round(height / VOXEL));
+  const model = build(9, h, 7, (v) => {
+    for (const [x, z, lean, scale] of [[0, 2, 1, 0.8], [3, 0, 0, 1], [6, 3, -1, 0.72]] as const) {
+      const tall = Math.max(2, Math.round(h * scale));
+      for (let y = 0; y < tall; y++) {
+        v.fill(x + Math.round((y / tall) * lean * 2), y, z, 2, 1, 2, tint(rgb, y > tall * 0.6 ? 1.12 : 0.9));
+      }
+    }
+  });
+  return sceneryMesh(scene, name, model, VOXEL);
 }
 
 export class SceneryStreamer implements ChunkListener {
@@ -266,9 +329,16 @@ export class SceneryStreamer implements ChunkListener {
       oakLight: new InstancePool(buildOak(scene, "oakLight", Color3.FromHexString("#5a8a3c"))),
       birch: new InstancePool(buildBirch(scene)),
       dead: new InstancePool(buildDead(scene)),
-      rockGrey: new InstancePool(buildRock(scene, "rockGrey", Color3.FromHexString(palette.edge).scale(1.15))),
-      rockRed: new InstancePool(buildRock(scene, "rockRed", Color3.FromHexString("#a8603c"))),
-      rockDark: new InstancePool(buildRock(scene, "rockDark", Color3.FromHexString("#45403c"))),
+      ...(Object.fromEntries(
+        ([
+          ["rockGrey", Color3.FromHexString(palette.edge).scale(1.15)],
+          ["rockRed", Color3.FromHexString("#a8603c")],
+          ["rockDark", Color3.FromHexString("#45403c")],
+        ] as const).flatMap(([base, colour]) =>
+          ROCK_SQUAT.map((squat, i) =>
+            [`${base}${i}`, new InstancePool(buildRock(scene, `${base}${i}`, colour, squat))] as const),
+        ),
+      ) as Record<RockPool, InstancePool>),
       grass: new InstancePool(buildTuft(scene, "grass", grass.scale(0.9), 0.5)),
       dry: new InstancePool(buildTuft(scene, "dry", Color3.FromHexString("#c2ad62"), 0.55)),
       heather: new InstancePool(buildTuft(scene, "heather", Color3.FromHexString("#8a5a7a"), 0.35)),
@@ -362,17 +432,24 @@ export class SceneryStreamer implements ChunkListener {
     const shade = (hash2(Math.floor(item.x * 10), Math.floor(item.z * 10), 5) & 1) === 0;
     let kind: PoolKind;
     if (item.kind === "rock") {
-      kind = ROCK_POOL[item.tint ?? "grey"];
-      this.scale.set(item.radius, item.height * 0.62, item.radius * 0.92);
-      this.position.set(item.x, y + item.height * 0.12, item.z);
+      // Which of the three squatnesses this stone is: its height over its
+      // radius, which the generator rolls between 0.8 and 1.3.
+      const ratio = item.height / item.radius;
+      const band = ratio < 0.95 ? 0 : ratio < 1.15 ? 1 : 2;
+      kind = ROCK_POOL[item.tint ?? "grey"][band]!;
+      // Uniform, so the cells stay cubes. The template is a unit radius.
+      this.scale.setAll(item.radius);
+      this.position.set(item.x, y - item.height * 0.08, item.z);
     } else {
-      kind = item.kind === "pine" ? (shade ? "pineDark" : "pineLight")
+      const tree: TreePool = item.kind === "pine" ? (shade ? "pineDark" : "pineLight")
         : item.kind === "oak" ? (shade ? "oakDark" : "oakLight")
         : item.kind;
-      // Width from the trunk's collision radius; sunk a little so the root
-      // never floats on a slope.
-      const width = item.radius / TRUNK;
-      this.scale.set(width, item.height, width);
+      kind = tree;
+      // Uniform, from the trunk's collision radius: the drawn trunk is then
+      // exactly the circle the server stops you against, and the height comes
+      // out within a few percent because the generator rolls both from one
+      // number. Sunk a little so the root never floats on a slope.
+      this.scale.setAll(item.radius / TEMPLATE_TRUNK[tree]);
       this.position.set(item.x, y - 0.2, item.z);
     }
     Quaternion.RotationYawPitchRollToRef(item.yaw, 0, 0, this.rotation);

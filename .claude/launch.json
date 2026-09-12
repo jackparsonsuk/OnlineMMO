@@ -12,6 +12,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:client"],
       "port": 5173
+    },
+    {
+      "name": "voxel-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "packages/client", "--port", "5174", "--strictPort"],
+      "port": 5174
     }
   ]
 }

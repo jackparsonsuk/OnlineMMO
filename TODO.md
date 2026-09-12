@@ -54,7 +54,6 @@ smaller entries below; those are the first step towards them.
   still belong, now that combat has one character level.
 - **Mounts.** Terra takes fourteen minutes to cross at a sprint.
 - **Pets.**
-- **Graphics redo.**
 - **More chat.** Say and party are in (`chat.ts`); an Ostra-wide channel,
   whispers, and the moderation below — mute and report first, since there
   is nothing today but a length cap and a flood limit.
@@ -112,7 +111,8 @@ smaller entries below; those are the first step towards them.
 - **Distant trees.** Trees appear at ~330 m where detailed chunks end; thicker
   haze now fades them in, but the horizon mesh has no trees and the far hills
   are hazier for it. Billboards or a coarse tree LOD on the horizon would let
-  the fog thin out again.
+  the fog thin out again. A voxel tree at a coarser cell is most of an LOD
+  already — the templates only differ by the number passed to `voxelMesh`.
 - **Lamplight at night.** Lanterns and windows glow but light nothing; a few
   point lights in town (mind the four-lights-per-material limit) would pool
   light on the street.
@@ -160,7 +160,9 @@ smaller entries below; those are the first step towards them.
 - **Souls.** Very rare; one slot that affects everything else; grows with the
   player; replacing one costs what it had become. The slot is on the screen,
   empty.
-- **Gear drawn on the body.** Helms, plate, the actual weapon in hand.
+- **Gear drawn on the body.** Helms, plate, the actual weapon in hand. Much
+  cheaper now: a helm is a small voxel model parented to the head joint, the
+  way the player's sword already hangs off `blade`.
 - **Sort and filter the pack**, and compare a ring against the weaker of the two
   you wear rather than whichever slot is first.
 - **Balance pass.** Budgets, Vigour's health, armour's curve, the XP curve,
@@ -196,8 +198,9 @@ smaller entries below; those are the first step towards them.
 
 ## Client and tech
 
-- **Draw calls.** Every creature rig is ~10 meshes; a busy fight is several
-  hundred draw calls. Merging each rig's static parts would cut it sharply.
+- **Draw calls.** Better than it was — a voxel body is 7 meshes on one
+  material rather than 10 on five — but a busy fight is still a few hundred.
+  Merging each rig's static parts would cut it further.
 - **Settings.** Key rebinding, volume, view distance, and invert-Y (mouse
   sensitivity is on the Esc menu already).
 - **A class that dodges on right-click.** `ClassDefinition.guard` is there
