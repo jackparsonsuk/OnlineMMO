@@ -287,6 +287,214 @@ export const QUESTS: Record<string, QuestDefinition> = {
     rewards: { gold: 30, xpShare: 0.8, choices: 3, rarity: "uncommon" },
   },
 
+  // --- the outposts ------------------------------------------------------------------
+  // The work between Daso and Fanshona, levels 5-21 (see `settlements.ts`,
+  // outposts). Each hold has a hunting ground, an errand, a named thing to
+  // put down, and a letter that walks you on to the next.
+
+  // Westroad Waypost, on the road to the Gate Circle (5-10).
+  "tamsin-circle": {
+    id: "tamsin-circle", title: "The Cold Field", giver: "tamsin", turnIn: "tamsin", level: 7,
+    requires: [],
+    summary: "Put down the Circlebound Risen on the Cold Field, east of the Gate Circle, for Warden Tamsin.",
+    offer: "Since the Gates woke, the dead round the Circle don't lie still. There's a field east of the stones where the frost "
+      + "never lifts, and they walk it in rows, like they're waiting for orders. Eight of them. Don't let them get round you.",
+    progress: "East of the stones, where the grass is white. Eight.",
+    complete: "Eight fewer. There'll be more by the new moon — there always are — but the road's quieter for it.",
+    objectives: [{ kind: "kill", creature: "zombie", variant: "circlebound", count: 8, label: "Circlebound Risen put down" }],
+    rewards: { gold: 22, xpShare: 0.7, choices: 3, rarity: "uncommon" },
+  },
+  "oren-satchels": {
+    id: "oren-satchels", title: "What the Pilgrims Dropped", giver: "oren", turnIn: "oren", level: 6,
+    requires: [],
+    summary: "Gather the satchels Oren's company dropped by the road towards the Gate Circle.",
+    offer: "There were nine of us. We ran from the Circle, and we dropped everything to run faster. "
+      + "Our satchels are still lying out by the road, most of the way back to the stones. Letters, mostly. Bring what you can.",
+    progress: "By the road, towards the stones. We weren't careful where we dropped them.",
+    complete: "That's Maddoc's hand. And Aud's. ...They'll want these back. The ones who can still want things.",
+    objectives: [{
+      kind: "gather", thing: "pilgrimSatchel", count: 6, x: -303, z: 15, radius: 30, label: "Pilgrims' satchels gathered",
+    }],
+    rewards: { gold: 16, xpShare: 0.55, choices: 2, rarity: "uncommon" },
+  },
+  "bask-tuskers": {
+    id: "bask-tuskers", title: "Tusks for the Axle-Pins", giver: "bask", turnIn: "bask", level: 6,
+    requires: [],
+    summary: "Take tusks from the Roadtuskers on Tusker Meadow, towards Daso, for Bask's cart.",
+    offer: "Iron snaps in the cold. Boar tusk doesn't. The Roadtuskers on the meadow back towards Daso have tusks like "
+      + "tent pegs — bring me five good ones and I'll have wheels again by morning. Mind the charge. Step aside, don't step back.",
+    progress: "The meadow west of here. Step aside when they put their heads down.",
+    complete: "Hard as horn. Harder. Here — something for your trouble, and a ride, if you're ever going my way.",
+    objectives: [{ kind: "collect", from: "boar", variant: "roadtusker", count: 5, chance: 0.5, label: "Good tusks" }],
+    rewards: { gold: 18, xpShare: 0.6, choices: 2, rarity: "uncommon" },
+  },
+  "tamsin-lodge": {
+    id: "tamsin-lodge", title: "Word to the Greywood", giver: "tamsin", turnIn: "corvin", level: 10,
+    requires: ["tamsin-circle"],
+    summary: "Carry Warden Tamsin's report to Huntmaster Corvin at Greywood Lodge, far to the north-west.",
+    offer: "Corvin at the Greywood Lodge needs to know what's walking round the Circle; if it's reached his woods, he'll want "
+      + "to be ready. Take him this. North from Daso up the Greywood track, past the old watchtower. He'll have work for you.",
+    progress: "North from Daso, past Greywood Watch. The lodge is by the stone.",
+    complete: "Tamsin's hand, and nothing good in it. The same's happening here, only with teeth. Sit — eat — then we'll talk.",
+    objectives: [],
+    rewards: { gold: 20, xpShare: 0.6, choices: 2, rarity: "uncommon" },
+  },
+  "tamsin-fenwatch": {
+    id: "tamsin-fenwatch", title: "Word to the Fens", giver: "tamsin", turnIn: "sabine", level: 13,
+    requires: ["tamsin-circle"],
+    summary: "Carry word of the Circle to Warden Sabine at Fenwatch, south in the Lowfen.",
+    offer: "Sabine keeps the watch over the meres, down the south road past the South Stone. She asked to hear if anything "
+      + "changed at the Circle. Everything has. When you're ready for the fens, take her this.",
+    progress: "The south road, all the way down to the Lowfen Stone. Fenwatch is beside it.",
+    complete: "The Circle too? Then it isn't just the water. Stay a while — the meres could use a strong arm.",
+    objectives: [],
+    rewards: { gold: 24, xpShare: 0.6, choices: 2, rarity: "uncommon" },
+  },
+
+  // Greywood Lodge (10-15).
+  "corvin-greypelts": {
+    id: "corvin-greypelts", title: "Greypelts at the Edge", giver: "corvin", turnIn: "corvin", level: 11,
+    requires: [],
+    summary: "Thin the Greypelts on the Howling Edge, east of Greywood Lodge, for Huntmaster Corvin.",
+    offer: "There's a pack on the edge of the wood east of here — Greypelts, we call them, and they've learned what a lodge "
+      + "full of meat smells like. Eight. They run in threes, so don't go in thinking you're fighting one.",
+    progress: "East, where the pines thin out. You'll hear them before you see them.",
+    complete: "Good pelts, too. The rest of the pack will think twice. Now — have you heard of the one they follow?",
+    objectives: [{ kind: "kill", creature: "wolf", variant: "greypelt", count: 8, label: "Greypelts killed" }],
+    rewards: { gold: 26, xpShare: 0.7, choices: 3, rarity: "uncommon" },
+  },
+  "nel-bitterroot": {
+    id: "nel-bitterroot", title: "Bitterroot", giver: "nel", turnIn: "nel", level: 11,
+    requires: [],
+    summary: "Gather bitterroot in the deep pines west of Greywood Lodge for Nel.",
+    offer: "Wolf-bite goes bad in a day without bitterroot, and I'm down to the last jar. It grows in the deep pines "
+      + "west of the lodge, where the light barely gets in. Six roots. It glows a little, the good stuff.",
+    progress: "West, in the thick of the pines. Pale green, where it's darkest.",
+    complete: "Oh, these are fat ones. Enough for a season of bites. Take something — and take a jar, you'll need it.",
+    objectives: [{
+      kind: "gather", thing: "bitterroot", count: 6, x: -2740, z: 2054, radius: 34, label: "Bitterroot gathered",
+    }],
+    rewards: { gold: 22, xpShare: 0.6, choices: 2, rarity: "uncommon" },
+  },
+  "hald-watch": {
+    id: "hald-watch", title: "Nobody on the Watch", giver: "hald", turnIn: "hald", level: 12,
+    requires: [],
+    summary: "Go to Greywood Watch, south-east along the track, and see why its fire has gone out.",
+    offer: "There's always been a fire on Greywood Watch. Always. Three nights now it's been dark. My brother keeps it. "
+      + "Walk down the track and look. Just look.",
+    progress: "South-east, down the track towards Daso. The tower by the road.",
+    complete: "The pack, round the tower. And no sign of him. ...No. I'll hear it from Corvin, if it's anything worse.",
+    objectives: [{ kind: "visit", x: -1900, z: 1450, radius: 18, label: "Reach Greywood Watch" }],
+    rewards: { gold: 20, xpShare: 0.5, choices: 2, rarity: "uncommon" },
+  },
+  "corvin-greymuzzle": {
+    id: "corvin-greymuzzle", title: "Old Greymuzzle", giver: "corvin", turnIn: "corvin", level: 14,
+    requires: ["corvin-greypelts"],
+    summary: "Slay Old Greymuzzle, the alpha of the Greywood, by Greywood Watch.",
+    offer: "The Greypelts follow one old wolf. Grey to the eyes, big as a pony, and it's been round Greywood Watch all month. "
+      + "It calls the pack when it's hurt. Take friends, or take a lot of bitterroot. Bring me the muzzle.",
+    progress: "By the old watchtower. When it howls, the others come.",
+    complete: "I've hunted that wolf for eleven years. ...It's strange. I thought I'd feel better.",
+    objectives: [{ kind: "slay", elite: "greymuzzle", label: "Old Greymuzzle slain" }],
+    rewards: { gold: 40, xpShare: 1, choices: 3, rarity: "rare" },
+  },
+  "corvin-moor": {
+    id: "corvin-moor", title: "Up onto the Moor", giver: "corvin", turnIn: "garrick", level: 16,
+    requires: ["corvin-greypelts"],
+    summary: "Take Corvin's warning to Garrick at Moorhold, east across the moor past the Broken Crown.",
+    offer: "Garrick keeps the shepherds on the Highmoor. The moor track runs east from here past the Broken Crown — don't "
+      + "stop at the Crown. He'll want to know the wolves are moving. And he pays better than I do.",
+    progress: "East on the moor track, past the ring of stones. Don't stop at the Crown.",
+    complete: "Corvin's never sent anyone up here he didn't rate. Well. Let's see if he's right.",
+    objectives: [],
+    rewards: { gold: 28, xpShare: 0.7, choices: 2, rarity: "uncommon" },
+  },
+
+  // Fenwatch, over the Lowfen meres (13-18).
+  "sabine-galls": {
+    id: "sabine-galls", title: "Gall of the Black Reeds", giver: "sabine", turnIn: "sabine", level: 15,
+    requires: [],
+    summary: "Take gall-sacs from the Mire Wretches in the Black Reeds, west of Fenwatch, for Warden Sabine.",
+    offer: "The Mire Wretches in the Black Reeds carry a sac of what they spit. Boiled right, it keeps the meres' biting flies "
+      + "off the watch. Five good sacs. They hang back and spit — close on them fast and they'll stand and fight.",
+    progress: "West, in the black reeds. Close the distance, or dodge the lane.",
+    complete: "Ugh. Good. Very good. The flies will hate this, and so will I, and so will the whole watch for a week.",
+    objectives: [{ kind: "collect", from: "wretch", variant: "mire-wretch", count: 5, chance: 0.5, label: "Gall-sacs taken" }],
+    rewards: { gold: 30, xpShare: 0.7, choices: 3, rarity: "uncommon" },
+  },
+  "doss-lanterns": {
+    id: "doss-lanterns", title: "Lanterns in the Mere", giver: "doss", turnIn: "doss", level: 14,
+    requires: [],
+    summary: "Gather the drowned lanterns along the mere shore south-west of Fenwatch for Doss.",
+    offer: "The old abbey used to set lanterns round the meres, before it sank. They still wash up — still lit, some of them, "
+      + "which I don't like to think about. They fetch a fair price in Fanshona. Six. South-west along the shore.",
+    progress: "South-west, along the shore of the big mere. Look for the blue ones.",
+    complete: "Still warm. Every one. ...I'll sell them quick, I think.",
+    objectives: [{
+      kind: "gather", thing: "drownedLantern", count: 6, x: -386, z: -2630, radius: 34, label: "Drowned lanterns gathered",
+    }],
+    rewards: { gold: 26, xpShare: 0.6, choices: 2, rarity: "uncommon" },
+  },
+  "sabine-abbot": {
+    id: "sabine-abbot", title: "The Drowned Abbot", giver: "sabine", turnIn: "sabine", level: 18,
+    requires: ["sabine-galls"],
+    summary: "Slay the Drowned Abbot in the Sunken Hall, north-west of Fenwatch.",
+    offer: "The Wretches come from the Sunken Hall, and the Hall has a keeper. The Abbot. He went down with it, and he "
+      + "didn't stay down. He calls the drowned to him when he's hurt. End it, and the fens might settle.",
+    progress: "North-west, to the tower half under the water. Watch for the ones he calls.",
+    complete: "Listen. ...The meres are quiet. First time in a year. Thank you — from all of us who have to live next to them.",
+    objectives: [{ kind: "slay", elite: "abbot", label: "The Drowned Abbot slain" }],
+    rewards: { gold: 50, xpShare: 1, choices: 3, rarity: "rare" },
+  },
+
+  // Moorhold, on the Highmoor (15-21).
+  "garrick-heathrunners": {
+    id: "garrick-heathrunners", title: "The Heather Run", giver: "garrick", turnIn: "garrick", level: 17,
+    requires: [],
+    summary: "Hunt the Heathrunners on the Heather Run, west of Moorhold, for Garrick.",
+    offer: "The Heathrunners take a ewe a night off the high pasture west of here. Lean things, fast, the colour of the heather "
+      + "so you don't see them till they're on you. Eight. Keep your back to something.",
+    progress: "West, across the heather. Look for the grass moving against the wind.",
+    complete: "Eight. The flock will sleep tonight, which means Wynn will. Which means I will.",
+    objectives: [{ kind: "kill", creature: "wolf", variant: "heathrunner", count: 8, label: "Heathrunners killed" }],
+    rewards: { gold: 34, xpShare: 0.7, choices: 3, rarity: "uncommon" },
+  },
+  "wynn-spearshafts": {
+    id: "wynn-spearshafts", title: "Spears from the Old Fight", giver: "wynn", turnIn: "wynn", level: 16,
+    requires: [],
+    summary: "Gather old spearshafts from the battlefield below the Broken Crown for Wynn's fold.",
+    offer: "There was a battle below the Broken Crown, before anyone's grandmother. The spears are still lying in the heather, "
+      + "and old ash makes the best fence posts on the moor. Five. The dead there don't like you taking them, mind.",
+    progress: "South-west, below the ring of stones. In the heather, where the ground's grey.",
+    complete: "Ash, and seasoned three hundred years. The fold will outlast me. Don't tell the dead where they went.",
+    objectives: [{
+      kind: "gather", thing: "spearshaft", count: 5, x: -180, z: 1960, radius: 34, label: "Spearshafts gathered",
+    }],
+    rewards: { gold: 30, xpShare: 0.6, choices: 2, rarity: "uncommon" },
+  },
+  "garrick-crownless": {
+    id: "garrick-crownless", title: "The Crownless King", giver: "garrick", turnIn: "garrick", level: 20,
+    requires: ["garrick-heathrunners"],
+    summary: "Slay the Crownless King at the Broken Crown, west of Moorhold.",
+    offer: "The battle below the Crown had a king in it, and he lost, and his crown with it. He's up there still, with the court "
+      + "he was buried with. When the wind's right you can hear him giving orders. Take friends. Take all of them.",
+    progress: "The ring of stones west of here. He'll raise his court when he's hurt.",
+    complete: "The wind's just wind tonight. You've done a thing people on this moor will talk about when you're gone.",
+    objectives: [{ kind: "slay", elite: "crownless", label: "The Crownless King laid to rest" }],
+    rewards: { gold: 60, xpShare: 1, choices: 3, rarity: "rare" },
+  },
+  "garrick-fanshona": {
+    id: "garrick-fanshona", title: "Down to the Brightwater", giver: "garrick", turnIn: "maera", level: 21,
+    requires: ["garrick-heathrunners"],
+    summary: "Carry Garrick's wool tally down the high road to Maera, harbourmistress of Fanshona.",
+    offer: "Our wool goes down to Fanshona on the high road, east from here. Maera settles the tally. Take it — and stay, when "
+      + "you get there. The Brightwater's got its own troubles, and you've outgrown ours.",
+    progress: "East on the high road, down off the moor to the lake. You'll see the lamps.",
+    complete: "Garrick's tally, carried by hand? He must like you. Welcome to Fanshona. Everyone here has work, and none of it's dry.",
+    objectives: [],
+    rewards: { gold: 35, xpShare: 0.8, choices: 3, rarity: "uncommon" },
+  },
+
   // --- Fanshona -------------------------------------------------------------------
   "tobin-wretches": {
     id: "tobin-wretches", title: "Spit Through the Mesh", giver: "tobin", turnIn: "tobin", level: FANSHONA_LEVEL,

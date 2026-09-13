@@ -54,6 +54,33 @@ export const VARIANTS: Readonly<Record<string, CreatureVariant>> = {
     id: "silk-snatcher", kind: "spider", name: "Silk Snatcher",
     colour: 0x8c4a5c, scale: 1.08, health: 1.1, damage: 1.05,
   },
+
+  // The outposts' work (see `settlements.ts`, outposts).
+  // Tusker Meadow, between Daso and the Westroad Waypost: road-wise boars.
+  roadtusker: {
+    id: "roadtusker", kind: "boar", name: "Roadtusker",
+    colour: 0x8a5a3a, scale: 0.95, health: 0.95, damage: 1,
+  },
+  // The Cold Field, east of the Gate Circle: pale, frost-grey dead.
+  circlebound: {
+    id: "circlebound", kind: "zombie", name: "Circlebound Risen",
+    colour: 0x9aa0a8, scale: 1.05, health: 1.05, damage: 1.05,
+  },
+  // The Howling Edge, east of Greywood Lodge: big grey wolves at the treeline.
+  greypelt: {
+    id: "greypelt", kind: "wolf", name: "Greypelt",
+    colour: 0xa0a0a6, scale: 1.08, health: 1.1, damage: 1.05,
+  },
+  // The Black Reeds, west of Fenwatch: black-green, and bitter.
+  "mire-wretch": {
+    id: "mire-wretch", kind: "wretch", name: "Mire Wretch",
+    colour: 0x344a30, scale: 1.05, health: 1.05, damage: 1.05,
+  },
+  // The Heather Run, west of Moorhold: lean moor wolves the colour of heather.
+  heathrunner: {
+    id: "heathrunner", kind: "wolf", name: "Heathrunner",
+    colour: 0x7a5a6e, scale: 0.98, health: 1, damage: 1.1,
+  },
 };
 
 export function getVariant(id: string | undefined): CreatureVariant | undefined {

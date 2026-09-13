@@ -470,7 +470,184 @@ export const FANSHONA: SettlementDefinition = {
   ],
 };
 
+// --- outposts ---------------------------------------------------------------------
+
+/**
+ * Small holds along the way from Daso to Fanshona, each by a waystone.
+ *
+ * Daso's work runs out at about level 9 and Fanshona's starts at 23, and
+ * between them lay eight regions with nobody in them — so from level 8 there
+ * was nothing to do but fight whatever was nearest. These are where the
+ * middle levels' work comes from: a wardens' waypost on the Westroad (5-10),
+ * a hunters' lodge in the Greywood (10-15), a watch over the Lowfen meres
+ * (13-18), and a shepherds' hold on the Highmoor (15-21), whose last errand
+ * sends you down to Fanshona.
+ *
+ * A couple of buildings, a few people and their clutter, laid out like the
+ * towns in a frame turned to face their waystone, so every door looks at
+ * the way you came in. They sit on the natural ground rather than a levelled
+ * shelf: a flat zone changes the ground's height, which re-routes roads, and
+ * each site was picked for being flat already.
+ *
+ * NOTE: invented for the game, like Fanshona.
+ */
+function outpostFrame(x: number, z: number, stoneX: number, stoneZ: number): TownFrame {
+  return townFrame(x, z, Math.atan2(stoneX - x, stoneZ - z));
+}
+
+const westroad = outpostFrame(-663, -25, -700, -62);
+const WAYPOST_HALL = building(westroad, "waypost-hall", "The wardens' post", "cottage", -6, -5, 6, 4.8, 3.2, [0, 6]);
+const WAYPOST_SHED = building(westroad, "waypost-shed", "The carters' shelter", "shed", 6.5, -5, 6, 4.5, 3.2, [0, 6]);
+
+export const WESTROAD_WAYPOST: SettlementDefinition = {
+  id: "westroad-waypost",
+  name: "Westroad Waypost",
+  subtitle: "Wardens on the road to the Gate Circle",
+  x: -663, z: -25, radius: 14, woodland: false,
+  buildings: [WAYPOST_HALL, WAYPOST_SHED],
+  props: [
+    { kind: "lamp", ...westroad.at(-1, 3), yaw: 0 },
+    { kind: "crate", ...atDoor(WAYPOST_SHED, 1, -2.2) },
+    { kind: "crate", ...atDoor(WAYPOST_SHED, 1.2, -3) },
+    { kind: "barrel", ...atDoor(WAYPOST_HALL, 0.8, 2.4) },
+    { kind: "fence", ...westroad.at(-10, 2), yaw: westroad.turn + 1.5 },
+    { kind: "woodpile", ...westroad.at(10, 1), yaw: westroad.turn + 0.3 },
+  ],
+  villagers: [
+    {
+      id: "tamsin", name: "Warden Tamsin",
+      line: "Nobody walks the Westroad at night. Nobody sensible, anyway.",
+      ...atDoor(WAYPOST_HALL, 1.6, 0), colour: 0x4a5a7a,
+    },
+    {
+      id: "oren", name: "Oren, pilgrim",
+      line: "I came to see the Gates. I saw them. I'd rather not talk about it.",
+      ...westroad.at(-2, 5), yaw: looking(westroad, -2, 5, 0, 12), colour: 0xa89a78,
+    },
+    {
+      id: "bask", name: "Bask, carter",
+      line: "Lost a pin off the axle outside Daso. Lost the wheel shortly after.",
+      ...atDoor(WAYPOST_SHED, 1.8, 0.8), colour: 0x7a5a3a,
+    },
+  ],
+  trees: [],
+};
+
+const lodge = outpostFrame(-2350, 1944, -2350, 1900);
+const LODGE_HALL = building(lodge, "lodge-hall", "The hunters' lodge", "hall", -5, -5, 8, 5.5, 3.8, [0, 6]);
+const LODGE_SHED = building(lodge, "lodge-shed", "The skinning shed", "shed", 7, -4, 5, 4.2, 3, [0, 6]);
+
+export const GREYWOOD_LODGE: SettlementDefinition = {
+  id: "greywood-lodge",
+  name: "Greywood Lodge",
+  subtitle: "Hunters under the pines",
+  x: -2350, z: 1944, radius: 14, woodland: false,
+  buildings: [LODGE_HALL, LODGE_SHED],
+  props: [
+    { kind: "lamp", ...lodge.at(1, 3), yaw: 0 },
+    { kind: "woodpile", ...atDoor(LODGE_HALL, 1.2, 3.2) },
+    { kind: "barrel", ...atDoor(LODGE_SHED, 0.8, -1.8) },
+    { kind: "stump", ...lodge.at(4, 4), yaw: 0 },
+    { kind: "log", ...lodge.at(-9, 3), yaw: lodge.turn + 1.3 },
+  ],
+  villagers: [
+    {
+      id: "corvin", name: "Huntmaster Corvin",
+      line: "The Greywood gives, and the Greywood takes. Mostly it takes.",
+      ...atDoor(LODGE_HALL, 1.6, -1), colour: 0x5a6a4a,
+    },
+    {
+      id: "nel", name: "Nel, herbalist",
+      line: "Half of what grows under these pines will cure you. The other half is why you need curing.",
+      ...atDoor(LODGE_HALL, 1.6, 2.2), colour: 0x6a8a5a,
+    },
+    {
+      id: "hald", name: "Hald, lodgekeeper",
+      line: "Beds are straw, food is stew, and the door bars from the inside.",
+      ...lodge.at(-2, 6), yaw: looking(lodge, -2, 6, 0, 12), colour: 0x7a6a5a,
+    },
+    {
+      id: "fenna", name: "Fenna, fletcher", vendor: true,
+      line: "Arrows, knives, a spare buckle. I'll take whatever you've dragged in off the hill.",
+      ...atDoor(LODGE_SHED, 1.8, 0), colour: 0x8a7050,
+    },
+  ],
+  trees: [],
+};
+
+const fenwatch = outpostFrame(-116, -2500, -160, -2500);
+const FENWATCH_TOWER = building(fenwatch, "fenwatch-tower", "The watch-house", "stone", -5, -5, 5, 5, 4.4, [0, 6]);
+const FENWATCH_SHED = building(fenwatch, "fenwatch-shed", "The eel-shed", "shed", 6, -4, 5.5, 4, 3, [0, 6]);
+
+export const FENWATCH: SettlementDefinition = {
+  id: "fenwatch",
+  name: "Fenwatch",
+  subtitle: "A watch kept over the meres",
+  x: -116, z: -2500, radius: 14, woodland: false,
+  buildings: [FENWATCH_TOWER, FENWATCH_SHED],
+  props: [
+    { kind: "lamp", ...fenwatch.at(0, 3), yaw: 0 },
+    { kind: "lamp", ...fenwatch.at(-9, 2), yaw: 0 },
+    { kind: "barrel", ...atDoor(FENWATCH_SHED, 0.8, -2) },
+    { kind: "barrel", ...atDoor(FENWATCH_SHED, 1.2, -2.7) },
+    { kind: "crate", ...atDoor(FENWATCH_TOWER, 0.9, 2) },
+  ],
+  villagers: [
+    {
+      id: "sabine", name: "Warden Sabine",
+      line: "Keep to the tussocks. What looks like ground out there usually isn't.",
+      ...atDoor(FENWATCH_TOWER, 1.6, 0), colour: 0x4a6a6a,
+    },
+    {
+      id: "doss", name: "Doss, eel-catcher",
+      line: "Eels don't care what lives in the mere. I try to be more like the eels.",
+      ...atDoor(FENWATCH_SHED, 1.8, 0.6), colour: 0x5a6a50,
+    },
+  ],
+  trees: [],
+};
+
+const moorhold = outpostFrame(153, 2357, 180, 2350);
+const MOORHOLD_HOUSE = building(moorhold, "moorhold-house", "The hold", "stone", -5, -5, 6.5, 5, 3.6, [0, 6]);
+const MOORHOLD_FOLD = building(moorhold, "moorhold-fold", "The sheepfold", "shed", 6.5, -5, 6, 4.4, 2.8, [0, 6]);
+
+export const MOORHOLD: SettlementDefinition = {
+  id: "moorhold",
+  name: "Moorhold",
+  subtitle: "Shepherds on the Highmoor",
+  x: 153, z: 2357, radius: 14, woodland: false,
+  buildings: [MOORHOLD_HOUSE, MOORHOLD_FOLD],
+  props: [
+    { kind: "lamp", ...moorhold.at(0, 3), yaw: 0 },
+    { kind: "fence", ...moorhold.at(10, 1), yaw: moorhold.turn + 0.1 },
+    { kind: "fence", ...moorhold.at(10, -2), yaw: moorhold.turn + 0.1 },
+    { kind: "crate", ...atDoor(MOORHOLD_HOUSE, 0.9, -2.4) },
+  ],
+  villagers: [
+    {
+      id: "garrick", name: "Garrick, moorwarden",
+      line: "The wind up here carries voices. Most of them belong to nobody still living.",
+      ...atDoor(MOORHOLD_HOUSE, 1.6, 0), colour: 0x6a5a6a,
+    },
+    {
+      id: "wynn", name: "Wynn, shepherd",
+      line: "Lost four ewes to the heather this month. The heather, and what runs in it.",
+      ...atDoor(MOORHOLD_FOLD, 1.8, -0.8), colour: 0x8a7a6a,
+    },
+    {
+      id: "ulla", name: "Ulla, peddler", vendor: true,
+      line: "Up here I'm the only shop for a day in any direction. Prices reflect that. So does my buying.",
+      ...moorhold.at(-1.5, 6), yaw: looking(moorhold, -1.5, 6, 0, 12), colour: 0x7a5a4a,
+    },
+  ],
+  trees: [],
+};
+
 export const SETTLEMENTS: Record<string, SettlementDefinition> = {
   daso: DASO,
   fanshona: FANSHONA,
+  "westroad-waypost": WESTROAD_WAYPOST,
+  "greywood-lodge": GREYWOOD_LODGE,
+  fenwatch: FENWATCH,
+  moorhold: MOORHOLD,
 };

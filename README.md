@@ -1566,6 +1566,29 @@ were once built from rotated boxes with the tilt the wrong way round, and every
 house in the game wore a V. Houses get framed doors and windows, chimneys, and
 half-timbering; the halls and a fixed third of the houses have lamps lit.
 
+## The outposts
+
+Daso's work ran out at about level 9 and Fanshona's starts at 23, and the
+eight regions between held nobody at all, so from level 8 the only thing to do
+was fight whatever was nearest. Four small holds now stand along the way, each
+beside a waystone, each with a hunting ground of its own variant, a gathering
+errand, a named elite to put down, and a letter that walks you on:
+
+| Outpost | By | Levels | Work |
+| --- | --- | --- | --- |
+| **Westroad Waypost** | Westroad Stone | 5–10 | Circlebound Risen on the Cold Field, pilgrims' satchels by the road, Roadtusker tusks; letters on to the Greywood and the fens |
+| **Greywood Lodge** | Greywood Stone | 10–15 | Greypelts on the Howling Edge, bitterroot in the deep pines, Greywood Watch gone dark, Old Greymuzzle; on to the moor |
+| **Fenwatch** | Lowfen Stone | 13–18 | Mire Wretch gall in the Black Reeds, drowned lanterns on the mere shore, the Drowned Abbot |
+| **Moorhold** | Highmoor Stone | 15–21 | Heathrunners on the Heather Run, spearshafts from the old battlefield, the Crownless King; down to Fanshona |
+
+The Greywood Lodge and Moorhold each have a vendor. They are settlements like
+the towns — the same data, drawn by the same code, checked at boot by
+`settlementProblems` — but two buildings each, laid out in a frame turned to
+face their waystone. They sit on the natural ground rather than a levelled
+shelf, because a flat zone changes the height of the ground and every road
+routed over it; each site was chosen for already being flat, off the road and
+dry. Invented for the game, like Fanshona.
+
 ## Fanshona
 
 The second settlement, in Brightwater, Terra's lake country: a stone market

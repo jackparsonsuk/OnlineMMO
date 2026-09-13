@@ -43,6 +43,10 @@ export const GATHER_THINGS = {
   saltSack: { name: "Salt sack", look: "sack", colour: 0xd8c9a3, glow: 0xffe3a0 },
   heartwood: { name: "Blighted heartwood", look: "wood", colour: 0x5a4034, glow: 0xff7a5a },
   graveCandle: { name: "Grave-candle", look: "candle", colour: 0xe8dcc0, glow: 0xffc860 },
+  pilgrimSatchel: { name: "Pilgrim's satchel", look: "sack", colour: 0x9a7a52, glow: 0xffe0a0 },
+  bitterroot: { name: "Bitterroot", look: "herb", colour: 0x4a6a3a, glow: 0xd0ff9a },
+  drownedLantern: { name: "Drowned lantern", look: "candle", colour: 0x5a5a4a, glow: 0x9ad8ff },
+  spearshaft: { name: "Old spearshaft", look: "wood", colour: 0x7a6a50, glow: 0xffd28a },
 } as const satisfies Record<string, GatherThing>;
 
 export type GatherThingId = keyof typeof GATHER_THINGS;

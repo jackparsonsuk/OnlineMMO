@@ -27,11 +27,10 @@ smaller entries below; those are the first step towards them.
 - **The main story: reopening the Gates.** The lore says the Gates were shut;
   the story is unlocking them, one at a time, each opening a new Ostra. Locked
   Gates stand in the world as the goal you can see and cannot yet take.
-- **More quests.** The system is in (`quests.ts`) with nine quests in Daso
-  (level 3) and Fanshona (23). Levels 5–22 have none at all: quests for the
-  Heartland and every region between the two towns are the biggest hole in
-  levelling now, then a quest to each elite, repeatable bounties, and the Gate
-  story as a chain.
+- **More quests.** Daso (1–9), four outposts (Westroad Waypost, Greywood Lodge,
+  Fenwatch, Moorhold: 5–21) and Fanshona (23+). Still thin: Ashfall, Sunward and
+  Redstep have no giver of their own; the Tuskbreaker, the Ember and the Anvil's
+  Keeper have no quest; and there are no repeatable bounties or Gate story.
   The system has kill, slay, collect, visit and gather; it still lacks
   talk-to objectives, escorts and defend-a-place, quest items you carry and
   use at a place (burn a nest, light a beacon), and shared gather progress

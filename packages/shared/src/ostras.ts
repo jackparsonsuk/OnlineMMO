@@ -619,7 +619,7 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       lakes: TERRA_LAKES,
       sea: TERRA_SEA,
     },
-    settlements: ["daso", "fanshona"],
+    settlements: ["daso", "fanshona", "westroad-waypost", "greywood-lodge", "fenwatch", "moorhold"],
     // Gentle enough to learn the fight in. Level carries the danger further
     // out; this is the floor.
     difficulty: { damage: 0.6, health: 1 },
@@ -660,6 +660,27 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       {
         id: "silkstrand-hollow", name: "Silkstrand Hollow", x: -980, z: -250, radius: 45,
         variant: "silk-snatcher", level: 6, camps: 5, count: 3,
+      },
+      // The outposts' work, one ground each (see `settlements.ts`, outposts).
+      {
+        id: "tusker-meadow", name: "Tusker Meadow", x: -1063, z: 155, radius: 45,
+        variant: "roadtusker", level: 5, camps: 5, count: 2,
+      },
+      {
+        id: "cold-field", name: "The Cold Field", x: 190, z: 90, radius: 48,
+        variant: "circlebound", level: 7, camps: 5, count: 3,
+      },
+      {
+        id: "howling-edge", name: "The Howling Edge", x: -2030, z: 2004, radius: 48,
+        variant: "greypelt", level: 11, camps: 6, count: 3,
+      },
+      {
+        id: "black-reeds", name: "The Black Reeds", x: -616, z: -2600, radius: 45,
+        variant: "mire-wretch", level: 15, camps: 5, count: 2,
+      },
+      {
+        id: "heather-run", name: "The Heather Run", x: -287, z: 2357, radius: 48,
+        variant: "heathrunner", level: 16, camps: 5, count: 3,
       },
     ],
     wilds: {
