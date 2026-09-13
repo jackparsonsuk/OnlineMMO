@@ -80,7 +80,10 @@ smaller entries below; those are the first step towards them.
 - **Leaderboards.** Highest level, first to 100, most elites felled.
 - **A death penalty.** Dying costs a walk from the nearest waystone and nothing
   else, so danger has no weight.
-- **Music and ambience** — a theme per Ostra, a sound per region.
+- **More music, and ambience.** Music is composed per region and follows fights
+  (`music.ts`); still to come: night variations of each piece, an elite or boss
+  theme, a stinger when a quest completes, and ambience under it all — wind on
+  the moors, birds in the woods, water at the lakes, the town's noise.
 - **Bestiary.** Kill counts per creature, unlocking its lore and what it is weak
   to. Pairs with the lore journal.
 - **Transmog.** Wear one item's look over another's stats — comes after gear is

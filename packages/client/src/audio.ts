@@ -73,6 +73,65 @@ export class SoundBoard {
     return this.context;
   }
 
+  private music: { context: AudioContext; dry: GainNode; wet: GainNode; level: GainNode } | undefined;
+
+  /**
+   * Where music plays (see `music.ts`): its own level under the master, so
+   * muting silences it with everything else and the menu's slider moves it
+   * alone, and a reverb send — a hall's tail built from decaying noise, like
+   * every other sound here, since an impulse response is only a recording of
+   * one. Undefined until the context is running.
+   */
+  musicBus(): { context: AudioContext; dry: GainNode; wet: GainNode } | undefined {
+    const ctx = this.ensure();
+    if (!ctx || ctx.state !== "running" || !this.master) return undefined;
+    if (this.music) return this.music;
+
+    const level = ctx.createGain();
+    level.gain.value = this.musicVolume;
+    level.connect(this.master);
+    const dry = ctx.createGain();
+    dry.connect(level);
+
+    const seconds = 3.2;
+    const impulse = ctx.createBuffer(2, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate);
+    for (let channel = 0; channel < 2; channel++) {
+      const samples = impulse.getChannelData(channel);
+      for (let i = 0; i < samples.length; i++) {
+        const t = i / samples.length;
+        samples[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 3.2);
+      }
+    }
+    const reverb = ctx.createConvolver();
+    reverb.buffer = impulse;
+    const wet = ctx.createGain();
+    wet.connect(reverb).connect(level);
+
+    this.music = { context: ctx, dry, wet, level };
+    return this.music;
+  }
+
+  private musicVolume = SoundBoard.storedMusicVolume();
+  private static readonly MUSIC_KEY = "ostracon:music-volume";
+
+  private static storedMusicVolume(): number {
+    let stored: string | null = null;
+    try { stored = localStorage.getItem(SoundBoard.MUSIC_KEY); } catch { /* storage blocked */ }
+    const value = stored === null ? NaN : Number(stored);
+    return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0.6;
+  }
+
+  /** 0..1, kept per browser. */
+  get musicLevel(): number {
+    return this.musicVolume;
+  }
+
+  set musicLevel(value: number) {
+    this.musicVolume = Math.max(0, Math.min(1, value));
+    try { localStorage.setItem(SoundBoard.MUSIC_KEY, String(this.musicVolume)); } catch { /* storage blocked */ }
+    if (this.music) this.music.level.gain.setTargetAtTime(this.musicVolume, this.music.context.currentTime, 0.1);
+  }
+
   /**
    * @param volume 0..1, scaled further by distance by the caller.
    */

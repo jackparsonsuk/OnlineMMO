@@ -52,6 +52,7 @@ import { showTitleScreen } from "./titleScreen.js";
 import { Hud, type LevelGains } from "./hud.js";
 import { KeyboardInput } from "./input.js";
 import { MouseLook } from "./mouselook.js";
+import { Music } from "./music.js";
 import { applyOstra, createWorld } from "./scene.js";
 import { updateDaylight } from "./daylight.js";
 import { createSession, type OstraSession } from "./session.js";
@@ -82,6 +83,7 @@ const hud = new Hud();
 const world = createWorld(canvas);
 const keyboard = new KeyboardInput();
 const audio = new SoundBoard();
+const music = new Music(audio);
 hud.setMuted(audio.isMuted);
 hud.onToggleSound = () => audio.toggleMute();
 
@@ -362,7 +364,10 @@ function setMenu(open: boolean): void {
   gameMenu.hidden = !open;
   const sound = gameMenu.querySelector<HTMLButtonElement>("[data-act=sound]");
   if (sound) sound.textContent = audio.isMuted ? "Sound: off" : "Sound: on";
-  if (open) showSensitivity(true);
+  if (open) {
+    showSensitivity(true);
+    showMusic(true);
+  }
 }
 
 const sensitivityInput = gameMenu.querySelector<HTMLInputElement>("[data-set=sensitivity]") as HTMLInputElement;
@@ -376,6 +381,19 @@ function showSensitivity(fromGame: boolean): void {
 sensitivityInput.addEventListener("input", () => {
   mouseLook.sensitivity = Number(sensitivityInput.value);
   showSensitivity(false);
+});
+
+const musicInput = gameMenu.querySelector<HTMLInputElement>("[data-set=music]") as HTMLInputElement;
+
+function showMusic(fromGame: boolean): void {
+  if (fromGame) musicInput.value = String(audio.musicLevel);
+  const output = musicInput.parentElement?.querySelector("output");
+  if (output) output.textContent = Number(musicInput.value) === 0 ? "off" : `${Math.round(Number(musicInput.value) * 100)}%`;
+}
+
+musicInput.addEventListener("input", () => {
+  audio.musicLevel = Number(musicInput.value);
+  showMusic(false);
 });
 
 /** Set once signed in: what "Sign out" forgets. */
@@ -524,6 +542,7 @@ function frame(now: number): void {
   mouseLook.sync();
   if (session) {
     const self = session.selfPosition();
+    music.update(currentOstra, self.x, self.z, room?.state.players.get(room.sessionId)?.inCombat ?? false);
     questUI.update(self.x, self.z);
     vendorUI.update(self.x, self.z);
     travelUI.update(self.x, self.z, room?.state.players.get(room.sessionId)?.inCombat ?? false);

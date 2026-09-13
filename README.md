@@ -262,6 +262,34 @@ read as lit, never so dark you cannot see what is biting you. Dungeons keep
 their torchlight and ignore the clock. `setDayOffset(ms)` moves the clock for
 testing.
 
+### Music
+
+Composed as it plays (`music.ts`), because nothing is loaded — so there are no
+tracks, only a small composer. Each place has a **piece**: a key, a mode, a
+pace, how bright it sounds, and a round of four chords. The Westwood is a warm
+dorian, the Heartland an open mixolydian, the Greywood and the Highmoor slow
+aeolian over a low drone, Sunward a bright major, the Brightwater a lydian,
+Redstep and Ashfall phrygian, Lowfen dark and slow, a town a little livelier
+than the woods round it, and a dungeon almost nothing but a hum. Four voices
+play the round a little differently every time: a pad swelling across each
+bar, a bass under it, sparse plucked chord tones, and now and then a short tune
+stepping through the scale from a note of the chord. One round in five is
+played thin, pad and bass only, so it breathes. Everything goes through a
+reverb whose impulse is generated decaying noise.
+
+**It follows you.** Where you stand picks the piece (a town within 70 m of its
+edge, otherwise the region), and the change waits for the next bar line, so it
+turns rather than cuts. **In a fight** a second layer eases in a beat at a
+time — a drum on the beat, a skin on the offbeats, a driving bass on the same
+chords, the pace a little quicker — and eases out again when you are out of
+combat; a bar was too slow a step to answer the first blow.
+
+Notes are queued on the audio clock a third of a second ahead each frame, so a
+hitch never makes it stumble. Levels were set by rendering it offline and
+measuring: about −37 dB of RMS in quiet places and −34 dB in a fight, well under
+the sound of a blow. It has its own slider on the Esc menu (Music, kept per
+browser) and mutes with everything else.
+
 ## Enemies and AI
 
 Creatures are entirely server-driven. Clients predict their own movement and
