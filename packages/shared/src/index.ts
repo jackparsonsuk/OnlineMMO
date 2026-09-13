@@ -5,6 +5,7 @@ export * from "./dungeons.js";
 export * from "./elites.js";
 export * from "./enemies.js";
 export * from "./fishing.js";
+export * from "./gathering.js";
 export * from "./goods.js";
 export * from "./items.js";
 export * from "./levels.js";

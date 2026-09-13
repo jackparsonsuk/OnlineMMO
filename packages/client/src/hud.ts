@@ -189,14 +189,17 @@ export class Hud {
    * level it wants), wait, or — loudest — strike now. Only touches the DOM
    * when that changes.
    */
-  setFishPrompt(kind: "cast" | "tooLow" | "waiting" | "bite" | undefined, detail?: string): void {
+  setFishPrompt(kind: "cast" | "tooLow" | "waiting" | "bite" | "gather" | undefined, detail?: string): void {
     const key = kind === undefined ? undefined : `${kind}:${detail ?? ""}`;
     if (key === this.fishShown) return;
     this.fishShown = key;
     this.fishPrompt.hidden = kind === undefined;
     this.fishPrompt.className = kind ?? "";
     if (kind === undefined) return;
-    const text = kind === "cast" ? `<b></b><span><kbd>E</kbd> fish</span>`
+    // Something a quest wants picked up shares the spot: it is the same sort
+    // of "E does this, here" as the water.
+    const text = kind === "gather" ? `<b></b><span><kbd>E</kbd> gather</span>`
+      : kind === "cast" ? `<b></b><span><kbd>E</kbd> fish</span>`
       : kind === "tooLow" ? `<b></b><span>needed to fish here</span>`
         : kind === "waiting" ? `<span>Waiting for a bite · <kbd>E</kbd> reel in · move to stop</span>`
           : `<b>Something's biting!</b><span><kbd>Click</kbd> or <kbd>E</kbd> to strike</span>`;

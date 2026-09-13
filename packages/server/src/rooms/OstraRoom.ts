@@ -3,6 +3,9 @@ import {
   addXp,
   applyInput,
   armourReduction,
+  findGatherSpot,
+  GATHER_RANGE,
+  GATHER_RESPAWN_MS,
   levelGapEffect,
   BATTLE_CRY_HOLD_MS,
   buildingColliders,
@@ -238,6 +241,9 @@ interface Session {
   /** Development only: blows land but take no health. */
   god: boolean;
   quests: QuestLog;
+  /** Gather spots this player emptied, as `quest:objective:spot`, and when
+   *  each is back (GATHER_RESPAWN_MS). Not saved: a relog refills them. */
+  gathered: Map<string, number>;
   gold: number;
   /** Waystones woken, as `waystoneKey` keys — across every Ostra, because
    *  this is the character's list and it is saved whole. */
@@ -470,6 +476,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       this.onQuestAbandon(client, message?.quest));
     this.onMessage("questComplete", (client, message: { quest?: unknown; choice?: unknown }) =>
       this.onQuestComplete(client, message?.quest, message?.choice));
+    this.onMessage("gather", (client, message: { quest?: unknown; objective?: unknown; spot?: unknown }) =>
+      this.onGather(client, message?.quest, message?.objective, message?.spot));
     this.onMessage("vendorSell", (client, message: { vendor?: unknown; item?: unknown }) =>
       this.onVendorSell(client, message?.vendor, message?.item));
     this.onMessage("vendorSellAll", (client, message: { vendor?: unknown }) =>
@@ -710,6 +718,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       targetId: undefined,
       god: false,
       quests: { active: { ...character.quests.active }, done: [...character.quests.done] },
+      gathered: new Map(),
       gold: character.gold,
       waystones: [...character.waystones],
       goods: { ...character.goods },
@@ -1738,6 +1747,35 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       }
       if (changed) this.sendQuests(sessionId, session);
     }
+  }
+
+  /**
+   * Pick something up for a gather objective. The client names the spot; the
+   * spot's place comes from `gatherSpots`, the same function the client drew
+   * it from, and everything else is checked here: the quest is under way and
+   * not yet done, you are standing at it, alive, and it is not one you
+   * emptied in the last minute.
+   */
+  private onGather(client: Client, questId: unknown, objectiveIndex: unknown, spotIndex: unknown): void {
+    const session = this.sessions.get(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    const found = findGatherSpot(questId, objectiveIndex, spotIndex);
+    if (!session || !player || !found || player.health === 0 || session.transferring) return;
+    const { quest, spot } = found;
+    const objective = quest.objectives[objectiveIndex as number];
+    const progress = session.quests.active[quest.id];
+    if (!progress || objective?.kind !== "gather" || (objective.ostra ?? "terra") !== this.ostra.id) return;
+    const have = progress[objectiveIndex as number] ?? 0;
+    if (have >= objective.count) return;
+    if (Math.hypot(player.x - spot.x, player.z - spot.z) > GATHER_RANGE + 1) return;
+    const key = `${quest.id}:${objectiveIndex as number}:${spot.index}`;
+    const now = Date.now();
+    if ((session.gathered.get(key) ?? 0) > now) return;
+
+    session.gathered.set(key, now + GATHER_RESPAWN_MS);
+    progress[objectiveIndex as number] = have + 1;
+    client.send("gathered", { quest: quest.id, objective: objectiveIndex, spot: spot.index });
+    this.sendQuests(client.sessionId, session);
   }
 
   /** Visit objectives, checked with the camps: twice a second is plenty for

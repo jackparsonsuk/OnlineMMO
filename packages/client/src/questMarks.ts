@@ -67,6 +67,11 @@ export function questMarksFor(ostra: OstraDefinition, log: QuestLog, level: numb
             marks.push({ kind: "point", x: objective.x, z: objective.z, label: quest.title });
           }
           return;
+        case "gather":
+          if ((objective.ostra ?? "terra") === ostra.id) {
+            marks.push({ kind: "area", x: objective.x, z: objective.z, radius: objective.radius, label: quest.title });
+          }
+          return;
         case "slay": {
           const elite = ELITES.find((candidate) => candidate.id === objective.elite);
           if (!elite) return;

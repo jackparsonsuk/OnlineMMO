@@ -966,6 +966,20 @@ world can already tell apart:
 - **slay** one particular elite
 - **collect** N of something only some of a creature carry
 - **visit** a place
+- **gather** N of something lying about in a place
+
+**Gathering** is the first quest that is not a fight. Moonwort in a glade,
+salt sacks spilled along a road, heartwood from a blighted grove, candle stubs
+round a barrow: each lies about its circle, drawn with a glow and a thread of
+light in its colour, and **E** picks one up. Where they lie is a pure function
+of the quest (`gatherSpots` in `gathering.ts`) — on dry, gentle ground, clear
+of every tree and rock — so the client draws exactly what the server accepts
+and nothing is sent or saved. The server checks the quest is under way, you
+are within reach and alive, and that you have not emptied that spot in the
+last minute; a spot you picked is gone for you alone and grows back after
+`GATHER_RESPAWN_MS`, so two players on the same errand never race for the last
+sack. Only whoever has the quest sees them. Creatures may live there too —
+the Risen walk in Brenna's grove — but they are in the way, not the errand.
 
 **Where each quest wants you is on the maps and the compass**
 (`questMarks.ts`): the hunting area of a variant it asks for, highlighted in
@@ -1013,8 +1027,8 @@ The client decides nothing. Accept, abandon and complete are requests the room
 checks against the same rules: whether you can take it, whether you are within
 talking range of the right villager, whether it is done, and whether there is
 room in the bag. The log (`{ active, done }`) and gold are saved with the
-character. The first content is nine quests: a Daso chain (wolves, spiders,
-fangs, the driver missing on the Westroad), a long delivery that walks you to
+character. The first content is a Daso chain (wolves, spiders, fangs, the
+driver missing on the Westroad, and four gathering errands), a long delivery that walks you to
 Fanshona, and a Fanshona chain that ends with Old Caddo sending you after Mother
 Silt.
 

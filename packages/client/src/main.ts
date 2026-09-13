@@ -165,6 +165,14 @@ function refreshQuestMarkers(): void {
   const log = questUI.currentLog;
   session?.setQuestMarkers((id) => questMarker(id, log, level));
   // ...and on the maps and the compass, where each quest wants you.
+  // ...and in the world, whatever a gather objective still wants picked up.
+  const gathering: Array<{ quest: string; objective: number }> = [];
+  for (const [id, progress] of Object.entries(log.active)) {
+    getQuest(id)?.objectives.forEach((objective, index) => {
+      if (objective.kind === "gather" && (progress[index] ?? 0) < objective.count) gathering.push({ quest: id, objective: index });
+    });
+  }
+  session?.setGathering(gathering);
   if (currentOstra) {
     const marks = questMarksFor(currentOstra, log, level);
     session?.setQuestMarks(marks);
@@ -287,6 +295,8 @@ window.addEventListener("keydown", (event) => {
       } else if (villager) {
         vendorUI.close();
         questUI.talkTo(villager);
+      } else if (session?.gather()) {
+        // Picked something up for a quest.
       } else if (stone) {
         travelUI.open(stone);
       } else {

@@ -12,6 +12,11 @@ import {
 import {
   applyInput,
   buildingColliders,
+  GATHER_RANGE,
+  GATHER_RESPAWN_MS,
+  GATHER_THINGS,
+  gatherSpots,
+  getQuest,
   CLASSES,
   type ClassId,
   DIFFICULTY_COLOUR,
@@ -69,6 +74,7 @@ import { CombatText } from "./combatText.js";
 import { Effects, type ShardColour } from "./effects.js";
 import type { Hud } from "./hud.js";
 import type { KeyboardInput } from "./input.js";
+import { buildGatherable } from "./lowpoly.js";
 import { Cartographer, type MapBlip, type QuestMark } from "./map.js";
 import { Nametags, type NametagTarget, type NametagVariant } from "./nametags.js";
 import {
@@ -119,6 +125,10 @@ export interface OstraSession {
   nearestWaystone(): WaystoneDefinition | undefined;
   /** E at the water: cast a line, or strike at a bite. */
   fish(): void;
+  /** E beside something a quest wants picked up. Returns whether there was. */
+  gather(): boolean;
+  /** The gather objectives under way and still short, to draw their spots. */
+  setGathering(wanted: ReadonlyArray<{ quest: string; objective: number }>): void;
   /** Your Fishing level, for the prompt at the water's edge. */
   setFishingLevel(level: number): void;
   /** Which stones this character has woken, for the prompt and the maps. */
@@ -573,6 +583,82 @@ export function createSession(
     }
     fishAskedAt = performance.now();
     room.send("fishCast");
+  }
+
+  // --- gathering -------------------------------------------------------------
+  //
+  // Things a quest wants picked up (`gathering.ts`). Drawn only for whoever
+  // has the quest, only while its objective is short, and only in this Ostra;
+  // the spots are a pure function of the quest, so there is nothing to sync.
+
+  interface GatherView { key: string; quest: string; objective: number; spot: number; x: number; z: number; name: string; mesh: TransformNode }
+  const gatherViews = new Map<string, GatherView>();
+  /** Spots we emptied, and when each is back — the server's rule, mirrored so
+   *  a picked sprig vanishes on the frame it is picked. */
+  const gatheredUntil = new Map<string, number>();
+  let atGather: GatherView | undefined;
+
+  function setGathering(wanted: ReadonlyArray<{ quest: string; objective: number }>): void {
+    const keep = new Set<string>();
+    for (const { quest: questId, objective } of wanted) {
+      const quest = getQuest(questId);
+      const goal = quest?.objectives[objective];
+      if (!quest || goal?.kind !== "gather" || (goal.ostra ?? "terra") !== ostra.id) continue;
+      const thing = GATHER_THINGS[goal.thing];
+      for (const spot of gatherSpots(quest, objective)) {
+        const key = `${questId}:${objective}:${spot.index}`;
+        keep.add(key);
+        if (gatherViews.has(key)) continue;
+        const mesh = buildGatherable(scene, thing);
+        mesh.position.set(spot.x, spot.y, spot.z);
+        // Each turned its own way, so a glade of them is not a row of clones;
+        // and larger than life, because a sprig to scale is lost in the grass.
+        mesh.rotation.y = spot.index * 2.39996;
+        mesh.scaling.setAll(1.6);
+        gatherViews.set(key, { key, quest: questId, objective, spot: spot.index, x: spot.x, z: spot.z, name: thing.name, mesh });
+      }
+    }
+    for (const [key, view] of gatherViews) {
+      if (keep.has(key)) continue;
+      view.mesh.dispose(false, true);
+      gatherViews.delete(key);
+    }
+  }
+
+  /** E beside something to gather. Returns whether there was something. */
+  function gather(): boolean {
+    if (!atGather || !selfPlayer || selfPlayer.health === 0) return false;
+    room.send("gather", { quest: atGather.quest, objective: atGather.objective, spot: atGather.spot });
+    return true;
+  }
+
+  const offGathered = room.onMessage("gathered", (payload: { quest: string; objective: number; spot: number }) => {
+    const key = `${payload.quest}:${payload.objective}:${payload.spot}`;
+    gatheredUntil.set(key, performance.now() + GATHER_RESPAWN_MS);
+    const view = gatherViews.get(key);
+    if (view) {
+      view.mesh.setEnabled(false);
+      const y = view.mesh.position.y;
+      effects.impact(view.x, y + 0.4, view.z, 0, 0, "spark", false);
+    }
+    audio.play("pickup", 0.9);
+  });
+
+  /** Once a frame: hide what is picked, bring back what has grown again, and
+   *  find the nearest thing in reach. */
+  function updateGathering(now: number, x: number, z: number): void {
+    atGather = undefined;
+    let best = GATHER_RANGE;
+    for (const view of gatherViews.values()) {
+      const empty = (gatheredUntil.get(view.key) ?? 0) > now;
+      if (view.mesh.isEnabled() === empty) view.mesh.setEnabled(!empty);
+      if (empty) continue;
+      const range = Math.hypot(view.x - x, view.z - z);
+      if (range < best) {
+        best = range;
+        atGather = view;
+      }
+    }
   }
 
   const FISH_NAMES = (waters: string, name: string): string =>
@@ -1698,10 +1784,14 @@ export function createSession(
         ? atStone.stone.name
         : undefined);
 
+      updateGathering(now, x, z);
+
       // What E does at the water. Someone to talk to or a stone to use wins,
-      // as it does for the key.
+      // as it does for the key; something to gather wins over the water.
       if (selfPlayer.fishing !== FISHING_NONE) {
         hud.setFishPrompt(selfPlayer.fishing === FISHING_BITE ? "bite" : "waiting");
+      } else if (atGather && !nearby && selfPlayer.health > 0) {
+        hud.setFishPrompt("gather", atGather.name);
       } else if (nearby || atStone || selfPlayer.health === 0 || selfPlayer.inCombat) {
         hud.setFishPrompt(undefined);
       } else if (now >= fishPromptAt) {
@@ -1807,6 +1897,9 @@ export function createSession(
     offLevelUp();
     offHealed();
     offFishResult();
+    offGathered();
+    for (const view of gatherViews.values()) view.mesh.dispose(false, true);
+    gatherViews.clear();
     anglers.dispose();
     hud.setFishPrompt(undefined);
     cartographer.dispose();
@@ -1859,6 +1952,8 @@ export function createSession(
     nearestVillager: () => nearby,
     nearestWaystone: () => atStone?.stone,
     fish,
+    gather,
+    setGathering,
     setFishingLevel: (level) => { fishingLevel = level; },
     setWaystones: (keys) => {
       attuned = keys;

@@ -13,6 +13,7 @@
  *   slay     — one particular elite (see `elites.ts`)
  *   collect  — N of something that only some of a kind of creature carry
  *   visit    — stand at a place
+ *   gather   — pick N of something up off the ground in a place (`gathering.ts`)
  *
  * and a quest whose `turnIn` is someone other than its `giver` is a delivery:
  * finishing it means walking there.
@@ -28,6 +29,7 @@
 
 import type { ClassId } from "./classes.js";
 import type { EnemyKind } from "./enemies.js";
+import type { GatherThingId } from "./gathering.js";
 import { basesFor, encodeItem, type ItemKey, type Rarity } from "./items.js";
 import { LEVEL_SCALE, levelXpScale, MAX_LEVEL, xpToNext } from "./levels.js";
 import { hash2 } from "./noise.js";
@@ -46,7 +48,13 @@ export type QuestObjective =
   /** In `ostra` — Terra when absent. Every small Ostra and dungeon is built
    *  round its own origin, so coordinates alone would put the Gate Circle in
    *  the middle of the barrow's pillared hall. */
-  | { kind: "visit"; x: number; z: number; radius: number; label: string; ostra?: OstraId };
+  | { kind: "visit"; x: number; z: number; radius: number; label: string; ostra?: OstraId }
+  /** N of a thing lying about in a circle, picked up with E (`gathering.ts`).
+   *  `spots` is how many lie there at once, twice `count` when unset. */
+  | {
+    kind: "gather"; thing: GatherThingId; count: number; x: number; z: number; radius: number;
+    label: string; ostra?: OstraId; spots?: number;
+  };
 
 export interface QuestRewards {
   gold: number;
@@ -143,6 +151,64 @@ export const QUESTS: Record<string, QuestDefinition> = {
     complete: "Now that's a set. Hear that? That's a blade that'll go through ash like it's butter.",
     objectives: [{ kind: "collect", from: "wolf", variant: "pathstalker", count: 4, chance: 0.5, label: "Good wolf fangs" }],
     rewards: { gold: 15, xpShare: 0.6, choices: 3, rarity: "uncommon" },
+  },
+  // Errands with no fight in them — or none you have to pick. Something to do
+  // for someone other than hit a thing, and a walk out to somewhere.
+  "herla-moonwort": {
+    id: "herla-moonwort", title: "Moonwort for the Kitchen", giver: "herla", turnIn: "herla", level: 2,
+    requires: [],
+    summary: "Gather moonwort in the glade north-west of Daso for Herla's kitchen.",
+    offer: "My cook's down with the fen-shakes, and there's only one thing brings that fever down. Moonwort. "
+      + "It grows in the glade north-west of town — you'll know it, it catches the light like it's wet. Six sprigs.",
+    progress: "North-west of town, in the glade. It glows a little. You can't miss it, even in daylight.",
+    complete: "That's it, that's the smell. He'll be cursing me by supper. You've a better eye for it than my last three.",
+    objectives: [{
+      kind: "gather", thing: "moonwort", count: 6, x: -1530, z: -30, radius: 34, label: "Moonwort gathered",
+    }],
+    rewards: { gold: 8, xpShare: 0.45, choices: 2, rarity: "common" },
+  },
+  "ilda-sacks": {
+    id: "ilda-sacks", title: "Salt on the Road", giver: "ilda", turnIn: "ilda", level: 4,
+    requires: ["ilda-westroad"],
+    summary: "Recover the salt sacks spilled along the road north-east of Daso.",
+    offer: "I went back out along the road. The cart shed half its load before the horse came home — salt, "
+      + "sacks of it, all through the grass either side. Salt's worth more than the cart. "
+      + "Bring me back what isn't split.",
+    progress: "North-east of town, where the road bends. Watch the trees.",
+    complete: "Eight whole sacks. We'll eat this winter, then. Still no sign of him, was there? ...No.",
+    objectives: [{
+      kind: "gather", thing: "saltSack", count: 8, x: -1040, z: 68, radius: 36, label: "Salt sacks recovered",
+    }],
+    rewards: { gold: 14, xpShare: 0.6, choices: 2, rarity: "uncommon" },
+  },
+  "brenna-heartwood": {
+    id: "brenna-heartwood", title: "Wood That Won't Burn", giver: "brenna", turnIn: "brenna", level: 7,
+    requires: ["brenna-risen"],
+    summary: "Cut blighted heartwood from the dead grove south-west of the Gate Circle, where the Risen walk.",
+    offer: "The Risen on the ridge came out of a tree gone grey at the heart. I want to know why. "
+      + "South-west of the Gate Circle there's a whole grove dead like that, and more of them walking in it. "
+      + "Bring me five pieces of the heartwood. Don't breathe on it.",
+    progress: "South-west of the Circle, where the trees are grey. Five pieces. Mind what's walking.",
+    complete: "Cold. It's cold, in summer. Wood doesn't do that. I'll show Basan — he's been saying things about "
+      + "the barrow I didn't want to hear.",
+    objectives: [{
+      kind: "gather", thing: "heartwood", count: 5, x: -200, z: -550, radius: 40, label: "Blighted heartwood cut",
+    }],
+    rewards: { gold: 20, xpShare: 0.8, choices: 3, rarity: "uncommon" },
+  },
+  "basan-candles": {
+    id: "basan-candles", title: "Lights for the Barrow", giver: "basan", turnIn: "basan", level: 3,
+    requires: [],
+    summary: "Gather the grave-candles left round the Hollow Barrow, west of Daso.",
+    offer: "Folk used to leave candles round the barrow, for the ones inside. Nobody's lit one in years. "
+      + "The old stubs are still out there in the grass around the mound. Fetch me six — "
+      + "if I'm to send people down there, I'd like to have asked first.",
+    progress: "Round the mound, in the long grass. They'll catch the light. Don't go in yet.",
+    complete: "Six. I'll light them tonight, for what it's worth. And when you're stronger — the King. I'll ask you then.",
+    objectives: [{
+      kind: "gather", thing: "graveCandle", count: 6, x: -1720, z: -160, radius: 40, label: "Grave-candles gathered",
+    }],
+    rewards: { gold: 10, xpShare: 0.5, choices: 2, rarity: "common" },
   },
   "ilda-westroad": {
     id: "ilda-westroad", title: "The Empty Cart", giver: "ilda", turnIn: "ilda", level: DASO_LEVEL,
@@ -280,7 +346,7 @@ export function getQuest(id: unknown): QuestDefinition | undefined {
 
 /** How many of an objective finish it. */
 export function objectiveTarget(objective: QuestObjective): number {
-  return objective.kind === "kill" || objective.kind === "collect" ? objective.count : 1;
+  return objective.kind === "kill" || objective.kind === "collect" || objective.kind === "gather" ? objective.count : 1;
 }
 
 export function questReady(quest: QuestDefinition, progress: readonly number[] | undefined): boolean {

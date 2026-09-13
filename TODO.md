@@ -32,8 +32,10 @@ smaller entries below; those are the first step towards them.
   Heartland and every region between the two towns are the biggest hole in
   levelling now, then a quest to each elite, repeatable bounties, and the Gate
   story as a chain.
-  The system still lacks talk-to objectives, escorts, quest items you carry
-  and use, and shared progress within a party (once there are parties).
+  The system has kill, slay, collect, visit and gather; it still lacks
+  talk-to objectives, escorts and defend-a-place, quest items you carry and
+  use at a place (burn a nest, light a beacon), and shared gather progress
+  within a party.
 - **More dungeons.** The Hollow Barrow (7–10) is the first; the system is
   in (`dungeons.ts`, instanced per party). One per band of levels, each
   reached from its region — and the Ascendant and Barals could open with one

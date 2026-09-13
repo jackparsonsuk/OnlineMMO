@@ -4,7 +4,7 @@ import type { Mesh } from "@babylonjs/core/Meshes/mesh.js";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder.js";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.js";
 import type { Scene } from "@babylonjs/core/scene.js";
-import { RARITY, type Rarity, type Spell } from "@mmo/shared";
+import { RARITY, type GatherThing, type Rarity, type Spell } from "@mmo/shared";
 
 /**
  * The game's art style, in one place.
@@ -132,6 +132,111 @@ export function buildCastArc(scene: Scene, spell: Spell, colour: number): Transf
   sector.material = material;
 
   pivot.setEnabled(false);
+  return pivot;
+}
+
+/**
+ * Something a quest wants picked up (`gathering.ts`): a small model of the
+ * thing, over a soft glow in its colour and under a faint thread of light, so
+ * a sprig of moonwort in long grass is findable from the edge of the glade.
+ * Not an octahedron — that is loot, and loot is picked up by walking over it;
+ * these want E, so they must not look the same.
+ */
+export function buildGatherable(scene: Scene, thing: GatherThing): TransformNode {
+  const pivot = new TransformNode("gatherable", scene);
+  const body = flatMaterial(scene, `gather:${thing.name}`, thing.colour);
+  const glow = hexColour(thing.glow);
+  const lit = new StandardMaterial(`gatherGlow:${thing.name}`, scene);
+  lit.diffuseColor = Color3.Black();
+  lit.specularColor = Color3.Black();
+  lit.emissiveColor = glow;
+  lit.disableLighting = true;
+
+  const part =<T extends Mesh>(mesh: T, material: StandardMaterial): T => {
+    mesh.material = material;
+    mesh.isPickable = false;
+    mesh.parent = pivot;
+    return mesh;
+  };
+
+  switch (thing.look) {
+    case "herb": {
+      // A clump of blades leaning out, and a pale flower head that glows.
+      for (let i = 0; i < 5; i++) {
+        const blade = part(facet(MeshBuilder.CreateCylinder("herbBlade", {
+          height: 0.42, diameterTop: 0, diameterBottom: 0.1, tessellation: 3,
+        }, scene)), body);
+        const angle = (i / 5) * Math.PI * 2;
+        blade.position.set(Math.sin(angle) * 0.08, 0.2, Math.cos(angle) * 0.08);
+        blade.rotation.set(Math.cos(angle) * 0.45, 0, -Math.sin(angle) * 0.45);
+      }
+      const flower = part(MeshBuilder.CreatePolyhedron("herbFlower", { type: 0, size: 0.07 }, scene), lit);
+      flower.position.y = 0.46;
+      break;
+    }
+    case "sack": {
+      const sack = part(facet(MeshBuilder.CreateSphere("sack", { diameter: 0.6, segments: 2 }, scene)), body);
+      sack.scaling.set(1, 0.8, 0.85);
+      sack.position.y = 0.24;
+      const neck = part(facet(MeshBuilder.CreateCylinder("sackNeck", {
+        height: 0.2, diameterTop: 0.2, diameterBottom: 0.12, tessellation: 5,
+      }, scene)), body);
+      neck.position.y = 0.55;
+      const tie = part(MeshBuilder.CreateTorus("sackTie", { diameter: 0.15, thickness: 0.04, tessellation: 6 }, scene), lit);
+      tie.position.y = 0.5;
+      break;
+    }
+    case "wood": {
+      const log = part(facet(MeshBuilder.CreateCylinder("heartwood", {
+        height: 0.7, diameter: 0.26, tessellation: 6,
+      }, scene)), body);
+      log.rotation.z = Math.PI / 2;
+      log.position.y = 0.14;
+      // The grey heart, showing at the cut ends: that is what glows.
+      for (const side of [-1, 1]) {
+        const heart = part(MeshBuilder.CreateDisc("heartwoodCore", { radius: 0.08, tessellation: 6 }, scene), lit);
+        heart.rotation.y = (side * Math.PI) / 2;
+        heart.position.set(side * 0.356, 0.14, 0);
+      }
+      break;
+    }
+    case "candle": {
+      for (const [dx, dz, h] of [[0, 0, 0.3], [0.13, 0.06, 0.2], [-0.09, 0.1, 0.16]] as const) {
+        const stub = part(facet(MeshBuilder.CreateCylinder("candle", { height: h, diameter: 0.09, tessellation: 6 }, scene)), body);
+        stub.position.set(dx, h / 2, dz);
+        const flame = part(MeshBuilder.CreatePolyhedron("candleFlame", { type: 1, size: 0.035 }, scene), lit);
+        flame.scaling.y = 1.8;
+        flame.position.set(dx, h + 0.06, dz);
+      }
+      break;
+    }
+  }
+
+  const halo = part(MeshBuilder.CreateDisc("gatherHalo", { radius: 0.75, tessellation: 14 }, scene), new StandardMaterial(`gatherHalo:${thing.name}`, scene));
+  halo.rotation.x = Math.PI / 2;
+  halo.position.y = 0.04;
+  const haloMaterial = halo.material as StandardMaterial;
+  haloMaterial.diffuseColor = Color3.Black();
+  haloMaterial.specularColor = Color3.Black();
+  haloMaterial.emissiveColor = glow;
+  haloMaterial.alpha = 0.5;
+  haloMaterial.disableLighting = true;
+  haloMaterial.backFaceCulling = false;
+
+  // Tall enough to see over grass and a camp's worth of bodies from the edge
+  // of the place; thin enough not to read as a legendary's pillar.
+  const thread = part(MeshBuilder.CreateCylinder("gatherThread", {
+    height: 4.5, diameterTop: 0.02, diameterBottom: 0.18, tessellation: 6,
+  }, scene), new StandardMaterial(`gatherThread:${thing.name}`, scene));
+  thread.position.y = 2.3;
+  const threadMaterial = thread.material as StandardMaterial;
+  threadMaterial.diffuseColor = Color3.Black();
+  threadMaterial.specularColor = Color3.Black();
+  threadMaterial.emissiveColor = glow;
+  threadMaterial.alpha = 0.4;
+  threadMaterial.disableLighting = true;
+  threadMaterial.backFaceCulling = false;
+
   return pivot;
 }
 
