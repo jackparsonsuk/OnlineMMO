@@ -103,7 +103,8 @@ handshake, so both sides predict on exactly the same `dt`.
 Circle-vs-circle push-out, resolved inside `applyInput` so client and server run
 the identical code. **A player collides only with what both sides know
 exactly**: scenery (each Ostra's `obstacles`, the generated trees and rocks),
-buildings and dungeon rock, the ground, and water too deep to wade. So your own movement predicts
+buildings and dungeon rock, the ground, ground too steep to climb, and water
+too deep to wade. So your own movement predicts
 perfectly — you never see a correction walking into a rock or a wall.
 
 **Players pass through other players and through creatures**, as in WoW. They
@@ -1265,6 +1266,84 @@ mesh is built from the same function and flat-shaded, coloured through vertex
 colours: grass by height, drier patches, darker under woods, stone where steep,
 snow on peaks, dirt on roads.
 
+### Hills, mountains, and the valleys between
+
+For a long time Terra was, in effect, a table. Measured: half the ground was
+flatter than 3%, the typical rise and fall within 300 m was 7 m, and the
+highest ground inside the rim was 97 m. The layers *said* 7.5 m hills and 95 m
+mountains, but fractal noise uses a fraction of its nominal range — two
+octaves sit between about 0.3 and 0.7 — so the hills really moved ±2.5 m, and
+the mountain mask was tested raw against its coverage and almost never let a
+range reach full height. And a 1 km haze hid what little there was.
+
+Now the typical rise and fall within 300 m is about 45 m, the tallest peaks
+near 500 m, and roughly an eighth of Terra is steeper than 45°. What does it:
+
+- **Real hills** (`hills` 45 m over 380 m, four octaves) on broad basins and
+  uplands (`continent` 80 m over 2.2 km), scaled per region by `relief` — the
+  Westwood and the Heartland at 0.6, so the first hours are rolling woodland,
+  and the moor, the Greywood and the mesas well above 1.
+- **Mountain massifs** (`mountains`, 280 m): a ridged multifractal (`massif`,
+  `noise.ts`'s `ridgedMulti`) over a warped plane. Each octave's detail is
+  weighted by the ridge beneath it, so crests grow spurs and broken tops while
+  valley floors stay smooth, and the warp makes ranges branch rather than loop.
+  The plain ridged noise it replaced was an even tangle of worms. The mask is
+  spread over its real range first, and brought in over a wide band and
+  squared, so a range rises out of foothills; brought in narrowly, every massif
+  stood behind a rampart of cliff.
+- **Ranges along the region borders** (`borders`, `borderRange`), so each
+  region is a country of its own with high ground round it, as a zone in a big
+  game is. They follow their own, wilder warp of the region centres — Terra's
+  nine centres sit near a three-by-three grid, and ranges on the true borders
+  were a grid of embankments — and a ridged crest that sinks away to hills in
+  long stretches of its own accord. A border is the mean of its two regions'
+  `walls`, so the home regions are fenced gently.
+- **Valleys along the roads** (`valleys`). Mountains, border ranges and the
+  mesas' terraces all fall away within a few hundred metres of the straight
+  line between each pair of a road's places (and of a line out to each ruin no
+  road reaches). This is what makes it all work: every waystone, town and ruin
+  hangs off a road, so every one stays in walkable low country; roads are routed
+  afterwards and keep to the valleys because the going is cheapest there; and
+  the massifs end up standing in the middle of the road network's loops, with
+  the wildest country beyond the roads, towards the rim. An earlier attempt cut
+  passes only where roads crossed a border, and left waystones inside massifs at
+  the bottom of craters — the flat zones had cleared the mountains round them.
+- **Blends that never jump.** Lift, relief and mountain strength used to be
+  blended between the nearest two regions only, and wherever the runner-up
+  changed hands near a three-way junction the ground stepped. Invisible on
+  seven-metre hills; a line of cliffs once a moor stood thirty metres up.
+  `regionWeights` now fades every region out over REGION_BLEND beyond its own
+  border, and the border ranges take the greatest over every neighbour, for the
+  same reason. Region borders also wander more (REGION_WARP, two sizes), so
+  regions stopped being tiles.
+
+**Steep ground stops you.** A step that climbs steeper than `MAX_CLIMB_GRADE`
+(1:1, 45°) is refused inside `moveBody`, judged over the step itself. Going
+down is never refused — mountains should keep you out, not keep you in. The
+same machinery as the sea's depth limit: a pure function of position, so the
+client predicts it exactly (at a 150 ms round trip, walking into a cliff and
+along it gave no corrections at all), and a refused step keeps whichever of its
+x and z halves is allowed, or is turned along the slope, so you slide along a
+cliff foot instead of sticking. Creatures are stopped the same way.
+
+**What keeps it honest.** Roads are never routed up anything steeper than 0.6
+between grid cells, and `roadProblems()` walks every road a metre at a time at
+boot and logs `[road]` if any stretch is steeper than anyone can climb or runs
+through deep water — so a road you can walk end to end is also the proof that
+what it joins can be reached. Camps are not placed on slopes over 0.45, trees
+not on cliffs over 0.8, and waystones, ruins and the two towns blend back to the
+hills over 60–130 m, not 26–50, so none sits on a shelf with banks you cannot
+climb. Nudging the land meant re-pinning Fanshona's lake road once more, and
+exposed a tree ring whose gap across north (-22° to 10°) only ever honoured its
+eastern half.
+
+**Seeing it.** The haze thinned from 0.0018 to 0.0012 so a range stays in sight
+for a kilometre and a half, and the horizon mesh went from 64 m quads to 32 m:
+a 64 m facet across a 400 m mountain cut each ridge into a few slabs, and a
+mountain range is mostly its skyline. It costs about 0.6 s to build on arrival
+and a few milliseconds each time a detailed chunk streams in and its quads are
+cut out of the horizon.
+
 The client's prediction now passes the terrain and building colliders to
 `applyInput` too. It used to leave them out, so it predicted you walking
 through walls and at the wrong height, and was corrected every patch.
@@ -1369,7 +1448,9 @@ meres). Each is also a band of creature levels, rising away from Daso (see
 Where the levels are). A region is the nearest of nine centres, with borders
 warped by noise so they meander and blended over ~200 m so none is a line. The same
 `TerrainRegion` data bends the height function — a moor is lifted, a fen
-pressed flat, mesas terraced — so the land and its look agree about borders.
+pressed flat, mesas terraced, ranges raised along the borders — so the land and
+its look agree about borders (see Terrain, Hills, mountains, and the valleys
+between).
 
 **Lakes** are shallow — you wade, there is no swimming — and carved by
 `heightAt` with a wandering shoreline and a bank that always rises above the
@@ -1421,7 +1502,7 @@ steeply with gradient (roads go round mountains), water is nearly forbidden
 gets long sweeping bends), and ground an earlier road covers is cheap (so roads
 merge into a network with junctions and loops rather than running side by
 side). The result is smoothed into curves and given a gentle wander. Thirteen
-roads, about 36 km, route in ~0.13 s at startup on each side.
+roads, about 36 km, route in ~0.2 s at startup on each side.
 
 For a long while "nearly forbidden" was the opposite. `waterDepthAt` answered 0
 away from any water, which reads as "right at the waterline", and the router
@@ -1621,9 +1702,12 @@ build next live in [TODO.md](TODO.md).
 - **AI has no pathfinding.** A creature walks straight at its goal and slides
   along whatever it hits. Generated camps sit in clearings, but a chase through
   thick woodland shows it.
-- **Terrain does not slow you.** Slopes cost nothing to climb — including the
-  rim's 120 m peaks. You can jump, but collision is flat, so a jump clears
-  nothing a walk would not.
+- **Slopes do not slow you.** Anything up to 45° is climbed at full walking
+  speed, and anything steeper not at all. You can jump, but collision is flat,
+  so a jump clears nothing a walk would not.
+- **Creatures do not path round mountains.** One chasing you across a valley
+  stops at the foot of a cliff it cannot climb, rather than finding the way
+  round.
 - **Villagers are scenery.** They stand where they are put and say one line,
   and some give quests. No trading, no schedule.
 

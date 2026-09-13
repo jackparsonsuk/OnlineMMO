@@ -129,8 +129,14 @@ packages/client/src/
 - In dev, `JWT_SECRET` is random per boot and `tsx watch` restarts the server on
   every server/shared change — stored sessions become invalid and the client
   drops back to sign-in.
-- Roads are routed by A* at startup on both sides (~0.13 s). Anything that
-  changes terrain height, lakes or road `points` changes every road.
+- Roads are routed by A* at startup on both sides (~0.2 s). Anything that
+  changes terrain height, lakes or road `points` changes every road — and
+  road `points` also carve the valleys the mountains fall away from, so moving
+  one moves hills. Check the boot log (`[road]`, `[town]`, `[sea]`, `[spawn]`)
+  after any terrain change; pin a road with a point where it goes wrong.
+- Fractal noise uses a fraction of its nominal range (two octaves sit in about
+  0.3–0.7). A layer's `amplitude` is a ceiling, not a typical height: measure
+  the result before tuning by eye.
 - `requestAnimationFrame` stops when the page isn't visible. `window.mmo.frame(now)`
   drives one frame by hand; `window.mmo` exposes `world`, `room`, `session`
   (`session.debug`), `keyboard`, `audio`, `characterScreen`, `devMenu`, and

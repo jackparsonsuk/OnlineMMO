@@ -1,4 +1,4 @@
-import { fbm, gradientNoise, ridged, smoothstep } from "./noise.js";
+import { fbm, gradientNoise, ridged, ridgedMulti, smoothstep } from "./noise.js";
 
 /**
  * The shape of the ground.
@@ -74,8 +74,41 @@ export interface TerrainSettings {
   };
   flats: FlatZone[];
   regions?: TerrainRegion[];
+  /**
+   * Ranges along the borders between regions, so each region is a country of
+   * its own with walls round it — the way one zone of a big game ends at a
+   * line of mountains and the next begins through a pass. Scaled per region
+   * by `TerrainRegion.walls`; a border is the mean of its two sides, so a
+   * gentle region is still walled off from a wild one, just less so.
+   */
+  borders?: {
+    /** Height of a full range at the border itself. */
+    height: number;
+    /** How far either side of the border it rises from. */
+    width: number;
+  };
+  /**
+   * Valleys along the roads: mountains and border ranges fall away near each
+   * line, so a road runs through low country with the heights either side of
+   * it, and every place a road joins stays where a person can walk to it.
+   */
+  valleys?: {
+    lines: ValleyLine[];
+    /** Kept clear of mountains this far either side of a line... */
+    floor: number;
+    /** ...and they climb back to full height over this much further. */
+    width: number;
+  };
   lakes?: LakeDefinition[];
   sea?: SeaDefinition;
+}
+
+/** A straight stretch of valley, from (ax, az) to (bx, bz). */
+export interface ValleyLine {
+  ax: number;
+  az: number;
+  bx: number;
+  bz: number;
 }
 
 /**
@@ -125,6 +158,8 @@ export interface TerrainRegion {
   mountains?: number;
   /** Height of terrace steps, for mesa country. */
   terrace?: number;
+  /** Scales the ranges along this region's borders (see `borders`). */
+  walls?: number;
 }
 
 /**
@@ -156,14 +191,45 @@ export interface RegionSample {
 
 /** Regions blend into each other over this many metres either side of a border. */
 const REGION_BLEND = 220;
-/** How far borders wander from the straight bisector between two centres. */
-const REGION_WARP = 420;
+/**
+ * How far borders wander from the straight bisector between two centres, in
+ * two sizes. Terra's centres sit near a three-by-three grid, and with one
+ * gentle warp its regions were nearly squares — invisible while the ground
+ * was flat, and a patchwork of tiles once it was not.
+ */
+const REGION_WARP = 650;
+const REGION_WARP_FINE = 160;
 
 const regionScratch: RegionSample = { primary: 0, secondary: 0, weight: 1 };
+/** Distance from the warped point to each region's centre, for the last call
+ *  to `regionDistances`. */
+const regionDistance: number[] = [];
+
+/** Fill `regionDistance` for (x, z), and return the nearest region's index. */
+function regionDistances(regions: readonly TerrainRegion[], seed: number, x: number, z: number): number {
+  const wx = x + gradientNoise(x / 1500, z / 1500, seed + 501) * REGION_WARP
+    + gradientNoise(x / 380, z / 380, seed + 503) * REGION_WARP_FINE;
+  const wz = z + gradientNoise(x / 1500 + 17.3, z / 1500 - 9.1, seed + 502) * REGION_WARP
+    + gradientNoise(x / 380 - 4.2, z / 380 + 6.6, seed + 504) * REGION_WARP_FINE;
+  let best = Infinity;
+  let nearest = 0;
+  for (let i = 0; i < regions.length; i++) {
+    const dx = wx - regions[i]!.x;
+    const dz = wz - regions[i]!.z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    regionDistance[i] = d;
+    if (d < best) {
+      best = d;
+      nearest = i;
+    }
+  }
+  return nearest;
+}
 
 /**
- * Which region a point is in. Returns a shared scratch object — copy what you
- * need before calling again.
+ * Which region a point is in, and its runner-up. Returns a shared scratch
+ * object — copy what you need before calling again. For colouring and naming;
+ * the shape of the ground uses `regionWeights`, which never jumps.
  */
 export function regionAt(terrain: TerrainSettings, x: number, z: number): RegionSample {
   const regions = terrain.regions;
@@ -174,40 +240,146 @@ export function regionAt(terrain: TerrainSettings, x: number, z: number): Region
     out.weight = 1;
     return out;
   }
-  const s = terrain.seed;
-  // One octave each: borders only need to wander, and this runs for every
-  // height sample.
-  const wx = x + gradientNoise(x / 1100, z / 1100, s + 501) * REGION_WARP;
-  const wz = z + gradientNoise(x / 1100 + 17.3, z / 1100 - 9.1, s + 502) * REGION_WARP;
-  let best = Infinity;
-  let second = Infinity;
-  let a = 0;
-  let b = 0;
+  const a = regionDistances(regions, terrain.seed, x, z);
+  let b = a === 0 ? 1 : 0;
   for (let i = 0; i < regions.length; i++) {
-    const dx = wx - regions[i]!.x;
-    const dz = wz - regions[i]!.z;
-    const d = dx * dx + dz * dz;
-    if (d < best) {
-      second = best;
-      b = a;
-      best = d;
-      a = i;
-    } else if (d < second) {
-      second = d;
-      b = i;
-    }
+    if (i !== a && regionDistance[i]! < regionDistance[b]!) b = i;
   }
   out.primary = a;
-  out.secondary = b;
+  out.secondary = regions.length > 1 ? b : a;
   // Roughly how far past the border between the two nearest centres, in metres.
-  const margin = (Math.sqrt(second) - Math.sqrt(best)) / 2;
+  const margin = regions.length > 1 ? (regionDistance[b]! - regionDistance[a]!) / 2 : Infinity;
   out.weight = 0.5 + 0.5 * smoothstep(margin / REGION_BLEND);
   return out;
 }
 
+/**
+ * How much of every region's character applies at a point, summing to 1.
+ *
+ * Each region counts fully on its own ground and fades out over REGION_BLEND
+ * beyond its border. Blending only the nearest two used to jump wherever
+ * the runner-up changed hands near a three-way junction — a step in the
+ * ground nobody noticed while hills were seven metres tall, and a line of
+ * cliffs once a moor stood thirty metres above its neighbours.
+ */
+export function regionWeights(terrain: TerrainSettings, x: number, z: number, out: number[]): void {
+  const regions = terrain.regions ?? [];
+  if (regions.length === 0) return;
+  const nearest = regionDistances(regions, terrain.seed, x, z);
+  const best = regionDistance[nearest]!;
+  let total = 0;
+  for (let i = 0; i < regions.length; i++) {
+    const w = 1 - smoothstep((regionDistance[i]! - best) / 2 / REGION_BLEND);
+    out[i] = w;
+    total += w;
+  }
+  for (let i = 0; i < regions.length; i++) out[i] = out[i]! / total;
+}
+
+const weightScratch: number[] = [];
+
 /** Mountains are kept this far clear of any flat zone's outer edge, so a town
  *  never has a cliff for a back wall. */
 const MOUNTAIN_CLEARANCE = 320;
+
+const rangeDistances: number[] = [];
+
+/**
+ * The border ranges' height at a point, before their crest is roughened.
+ *
+ * Measured against the region centres through a warp of their own, wilder
+ * than the one that decides colours and creatures: Terra's centres sit near a
+ * three-by-three grid, and ranges following those borders exactly were a
+ * grid of embankments. So a range wanders a few hundred metres either side of
+ * the line where the country changes, which is also how real ones sit.
+ *
+ * The height is the greatest over every neighbouring region, not only the
+ * nearest one: which region is "next nearest" flips from one to another near
+ * a three-way junction, and taking only that one put a crack in the ground
+ * along every flip.
+ */
+export function borderRange(t: TerrainSettings, x: number, z: number): number {
+  const regions = t.regions;
+  const b = t.borders;
+  if (!regions || regions.length < 2 || !b) return 0;
+  const s = t.seed;
+  const wx = x + gradientNoise(x / 1700, z / 1700, s + 811) * 700 + gradientNoise(x / 420, z / 420, s + 813) * 150;
+  const wz = z + gradientNoise(x / 1700 + 5.1, z / 1700 - 3.3, s + 812) * 700 + gradientNoise(x / 420 + 2.7, z / 420 + 8.9, s + 814) * 150;
+  let best = Infinity;
+  let primary = 0;
+  for (let i = 0; i < regions.length; i++) {
+    const dx = wx - regions[i]!.x;
+    const dz = wz - regions[i]!.z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    rangeDistances[i] = d;
+    if (d < best) {
+      best = d;
+      primary = i;
+    }
+  }
+  const own = regions[primary]!.walls ?? 1;
+  let height = 0;
+  for (let i = 0; i < regions.length; i++) {
+    if (i === primary) continue;
+    const margin = (rangeDistances[i]! - best) / 2;
+    if (margin >= b.width) continue;
+    const scale = (own + (regions[i]!.walls ?? 1)) / 2;
+    const h = (1 - smoothstep(margin / b.width)) * scale;
+    if (h > height) height = h;
+  }
+  return height * b.height;
+}
+
+/**
+ * Mountain country at `wavelength`, roughly 0 to 1: a ridged multifractal
+ * over a warped copy of the plane. The warp bends the crests, so they branch
+ * and wander instead of looping round in the same few shapes.
+ */
+function massif(x: number, z: number, wavelength: number, seed: number): number {
+  const u = x / wavelength;
+  const v = z / wavelength;
+  const qu = u + fbm(u * 0.6, v * 0.6, seed + 31, 2) * 0.6;
+  const qv = v + fbm(u * 0.6 + 7.7, v * 0.6 - 3.1, seed + 32, 2) * 0.6;
+  return ridgedMulti(qu, qv, seed, 5) * 1.6;
+}
+
+/** 0 within `floor` of any valley line, rising to 1 by `width` further out. */
+function valleyClearance(valleys: NonNullable<TerrainSettings["valleys"]>, x: number, z: number): number {
+  const reach = valleys.floor + valleys.width;
+  let nearestSq = reach * reach;
+  for (const line of valleys.lines) {
+    // Cheap rejection first: most lines are nowhere near.
+    if (x < (line.ax < line.bx ? line.ax : line.bx) - reach || x > (line.ax > line.bx ? line.ax : line.bx) + reach) continue;
+    if (z < (line.az < line.bz ? line.az : line.bz) - reach || z > (line.az > line.bz ? line.az : line.bz) + reach) continue;
+    const lx = line.bx - line.ax;
+    const lz = line.bz - line.az;
+    const lengthSq = lx * lx + lz * lz;
+    let u = lengthSq > 0 ? ((x - line.ax) * lx + (z - line.az) * lz) / lengthSq : 0;
+    u = u < 0 ? 0 : u > 1 ? 1 : u;
+    const dx = x - (line.ax + lx * u);
+    const dz = z - (line.az + lz * u);
+    const dSq = dx * dx + dz * dz;
+    if (dSq < nearestSq) nearestSq = dSq;
+  }
+  return smoothstep((Math.sqrt(nearestSq) - valleys.floor) / valleys.width);
+}
+
+/** 0 on or next to a flat zone, rising to 1 once MOUNTAIN_CLEARANCE clear of
+ *  every one: how much of anything steep is allowed here. */
+function flatClearance(t: TerrainSettings, x: number, z: number): number {
+  let clearance = 1;
+  for (const flat of t.flats) {
+    const dx = x - flat.x;
+    const dz = z - flat.z;
+    const clear = flat.radius + flat.falloff;
+    const reach = clear + MOUNTAIN_CLEARANCE;
+    const dSq = dx * dx + dz * dz;
+    if (dSq >= reach * reach) continue;
+    clearance *= smoothstep((Math.sqrt(dSq) - clear) / MOUNTAIN_CLEARANCE);
+    if (clearance === 0) return 0;
+  }
+  return clearance;
+}
 
 /** Everything except the flats and lakes. */
 function naturalHeight(x: number, z: number, t: TerrainSettings): number {
@@ -219,16 +391,26 @@ function naturalHeight(x: number, z: number, t: TerrainSettings): number {
   let terrace = 0;
   let terraceStep = 0;
   if (t.regions && t.regions.length > 0) {
-    const r = regionAt(t, x, z);
-    const w = r.weight;
-    const A = t.regions[r.primary]!;
-    const B = t.regions[r.secondary]!;
-    lift = (A.lift ?? 0) * w + (B.lift ?? 0) * (1 - w);
-    relief = (A.relief ?? 1) * w + (B.relief ?? 1) * (1 - w);
-    mountainScale = (A.mountains ?? 1) * w + (B.mountains ?? 1) * (1 - w);
-    terrace = (A.terrace ? w : 0) + (B.terrace ? 1 - w : 0);
-    terraceStep = A.terrace ?? B.terrace ?? 0;
+    regionWeights(t, x, z, weightScratch);
+    relief = 0;
+    mountainScale = 0;
+    for (let i = 0; i < t.regions.length; i++) {
+      const w = weightScratch[i]!;
+      const region = t.regions[i]!;
+      lift += (region.lift ?? 0) * w;
+      relief += (region.relief ?? 1) * w;
+      mountainScale += (region.mountains ?? 1) * w;
+      if (region.terrace && w > 0) {
+        terrace += w;
+        terraceStep = region.terrace;
+      }
+    }
   }
+  // How clear of every flat zone and every valley this is (see
+  // `flatClearance`, `valleyClearance`), worked out at most once each, and
+  // only if something steep asks.
+  let clearance = -1;
+  let valley = -1;
 
   let height = fbm(x / t.hills.wavelength, z / t.hills.wavelength, s, t.hills.octaves) * t.hills.amplitude * relief;
 
@@ -243,21 +425,31 @@ function naturalHeight(x: number, z: number, t: TerrainSettings): number {
     // shape. Without the mask, the whole map is uniformly craggy.
     const maskNoise = fbm(x / (m.wavelength * 3.1), z / (m.wavelength * 3.1), s + 211, 2) * 0.5 + 0.5;
     const coverage = Math.min(0.95, m.coverage * mountainScale);
-    let mask = coverage <= 0 ? 0 : smoothstep((maskNoise - (1 - coverage)) / 0.18);
+    // Two-octave noise sits between about 0.3 and 0.7, so it is spread over
+    // 0..1 first; tested raw against `coverage`, almost nothing passed and
+    // nothing reached full height.
+    const spread = smoothstep((maskNoise - 0.3) / 0.4);
+    // Brought in over nearly half of that range, and squared, so a range
+    // rises out of long foothills. Over a narrow band the whole massif stood
+    // up at once, and every range had a rampart of cliff round its edge.
+    let mask = coverage <= 0 ? 0 : smoothstep((spread - (1 - coverage)) / 0.45);
+    if (mask > 0) mask *= clearance = flatClearance(t, x, z);
+    if (mask > 0 && t.valleys) mask *= valley = valleyClearance(t.valleys, x, z);
     if (mask > 0) {
-      for (const flat of t.flats) {
-        const dx = x - flat.x;
-        const dz = z - flat.z;
-        const clear = flat.radius + flat.falloff;
-        const reach = clear + MOUNTAIN_CLEARANCE;
-        const dSq = dx * dx + dz * dz;
-        if (dSq >= reach * reach) continue;
-        mask *= smoothstep((Math.sqrt(dSq) - clear) / MOUNTAIN_CLEARANCE);
-      }
-      if (mask > 0) {
-        height += ridged(x / m.wavelength, z / m.wavelength, s + 307, 4) * m.amplitude * mask;
-      }
+      height += massif(x, z, m.wavelength, s + 307) * m.amplitude * mask * mask;
     }
+  }
+
+  let wall = t.borders ? borderRange(t, x, z) : 0;
+  if (wall > 0) {
+    // Not one even embankment: peaks, spurs and notches along the crest, and
+    // long stretches where the range sinks away to hills of its own accord —
+    // so the borders do not read as a grid of walls.
+    wall *= 0.25 + 1.1 * massif(x, z, 520, s + 803);
+    wall *= smoothstep((fbm(x / 1500, z / 1500, s + 801, 2) + 0.3) / 0.6);
+    // Where a road crosses, the range comes down to a pass.
+    if (wall > 0 && t.valleys) wall *= valley >= 0 ? valley : (valley = valleyClearance(t.valleys, x, z));
+    if (wall > 0) height += wall * (clearance >= 0 ? clearance : flatClearance(t, x, z));
   }
 
   if (t.rim) {
@@ -287,7 +479,10 @@ function naturalHeight(x: number, z: number, t: TerrainSettings): number {
 
   height += lift;
 
-  // Mesa country: flat treads and steep risers, blended in by region weight.
+  // Mesa country: flat treads and steep risers, blended in by region weight —
+  // and smoothed away along the roads, whose valleys would otherwise climb a
+  // flight of nine-metre steps nobody can walk up.
+  if (terrace > 0 && terraceStep > 0 && t.valleys) terrace *= valley >= 0 ? valley : valleyClearance(t.valleys, x, z);
   if (terrace > 0 && terraceStep > 0) {
     const f = height / terraceStep;
     const floor = Math.floor(f);
@@ -400,6 +595,14 @@ export const SAND_HEIGHT = 1.6;
  * than any lake (0.9 at most), so only the sea ever stops anyone.
  */
 export const MAX_WADE_DEPTH = 1;
+
+/**
+ * The steepest ground anyone walks up: a metre of rise to a metre across, 45°.
+ * Anything steeper is a wall to the step (see `moveBody`), so a mountain is a
+ * barrier to go round and a pass is a place that matters. Going down is never
+ * refused. Roads are routed well under it (`roadProblems` checks they are).
+ */
+export const MAX_CLIMB_GRADE = 1;
 
 /**
  * How far towards the sea's edge of the Ostra (x, z) is, from 0 where the land

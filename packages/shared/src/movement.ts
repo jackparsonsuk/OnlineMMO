@@ -12,7 +12,7 @@ import {
   SPRINT_MULTIPLIER,
   STEP_DOWN,
 } from "./constants.js";
-import { heightAt, MAX_WADE_DEPTH, seaDepthAt, type TerrainSettings } from "./terrain.js";
+import { heightAt, MAX_CLIMB_GRADE, MAX_WADE_DEPTH, seaDepthAt, seaRamp, type TerrainSettings } from "./terrain.js";
 
 /**
  * The single movement simulation, run in two places:
@@ -275,7 +275,7 @@ export function moveBody(
   state.x = clamp(state.x, -limit, limit);
   state.z = clamp(state.z, -limit, limit);
 
-  if (world.terrain?.sea) keepWading(state, fromX, fromZ, world.terrain);
+  if (world.terrain) keepFooting(state, fromX, fromZ, world.terrain);
 
   // Then stand on the ground. Height is derived from the final position rather
   // than integrated, so there is no vertical velocity to drift out of sync —
@@ -284,58 +284,94 @@ export function moveBody(
 }
 
 /**
- * The sea past wading depth is a wall, like the edge of the Ostra, and for the
- * same reason it is a pure function of where you are: the client knows it
- * exactly, so walking into it predicts perfectly.
+ * Ground a body cannot walk onto: uphill steeper than MAX_CLIMB_GRADE, or the
+ * sea past wading depth. Both are walls, like the edge of the Ostra, and for
+ * the same reason both are pure functions of where you are — the client knows
+ * them exactly, so walking into a cliff predicts perfectly.
  *
- * A step that would end too deep keeps whichever half of it does not — the x
- * or the z — so you slide along the drop-off rather than sticking to it.
- * Where the drop-off runs on a diagonal both halves go deeper, so then the
- * step is turned to run along the line of equal depth instead. A body already
- * out too deep (knocked there, or a coast that moved under a saved character)
- * may always move somewhere shallower, or it could never leave.
+ * Steepness is judged over the step itself, from where it starts to where it
+ * ends, so it is the climb you would actually be making. Going down is never
+ * refused, however steep: the mountains should keep you out, not keep you in,
+ * and anyone who ends up high on a slope can always come down off it.
+ *
+ * A refused step keeps whichever half of it — the x or the z — is allowed, so
+ * you slide along a cliff foot or a drop-off rather than sticking to it. Where
+ * it runs on a diagonal both halves are refused, and then the step is turned
+ * to run along the slope instead. A body already out too deep (knocked there,
+ * or a coast that moved under a saved character) may always move somewhere
+ * shallower, or it could never leave.
  */
-function keepWading(state: MoveState, fromX: number, fromZ: number, terrain: TerrainSettings): void {
-  const depth = seaDepthAt(state.x, state.z, terrain);
-  if (depth <= MAX_WADE_DEPTH) return;
-  const was = seaDepthAt(fromX, fromZ, terrain);
-  if (depth <= was) return;
-  const allowed = was > MAX_WADE_DEPTH ? was : MAX_WADE_DEPTH;
-  if (seaDepthAt(state.x, fromZ, terrain) <= allowed) {
+function keepFooting(state: MoveState, fromX: number, fromZ: number, terrain: TerrainSettings): void {
+  const toX = state.x;
+  const toZ = state.z;
+  if (toX === fromX && toZ === fromZ) return;
+  const fromHeight = heightAt(fromX, fromZ, terrain);
+  const fromDepth = terrain.sea ? seaDepthAt(fromX, fromZ, terrain) : -Infinity;
+  const reason = footing(terrain, fromX, fromZ, fromHeight, fromDepth, toX, toZ);
+  if (reason === FOOTING_OK) return;
+  if (footing(terrain, fromX, fromZ, fromHeight, fromDepth, toX, fromZ) === FOOTING_OK) {
     state.z = fromZ;
     return;
   }
-  if (seaDepthAt(fromX, state.z, terrain) <= allowed) {
+  if (footing(terrain, fromX, fromZ, fromHeight, fromDepth, fromX, toZ) === FOOTING_OK) {
     state.x = fromX;
     return;
   }
 
-  const stepX = state.x - fromX;
-  const stepZ = state.z - fromZ;
+  const stepX = toX - fromX;
+  const stepZ = toZ - fromZ;
   state.x = fromX;
   state.z = fromZ;
-  // Which way is deeper, sampled either side of where the step began.
-  const gx = seaDepthAt(fromX + SLOPE_PROBE, fromZ, terrain) - seaDepthAt(fromX - SLOPE_PROBE, fromZ, terrain);
-  const gz = seaDepthAt(fromX, fromZ + SLOPE_PROBE, terrain) - seaDepthAt(fromX, fromZ - SLOPE_PROBE, terrain);
+  // The way the step must not go: uphill for a cliff, downhill (deeper) for
+  // the sea. Sampled either side of where the step began.
+  const sign = reason === FOOTING_STEEP ? 1 : -1;
+  const gx = sign * (heightAt(fromX + SLOPE_PROBE, fromZ, terrain) - heightAt(fromX - SLOPE_PROBE, fromZ, terrain));
+  const gz = sign * (heightAt(fromX, fromZ + SLOPE_PROBE, terrain) - heightAt(fromX, fromZ - SLOPE_PROBE, terrain));
   const lengthSq = gx * gx + gz * gz;
   if (!(lengthSq > 0)) return;
   const into = (stepX * gx + stepZ * gz) / lengthSq;
   if (into <= 0) return;
   // The part of the step across the slope taken away, and a hair more, so a
-  // drop-off that curves towards you does not turn the slide back into the
-  // deep on the next step.
+  // cliff that curves towards you does not turn the slide back into it on the
+  // next step.
   const length = Math.sqrt(lengthSq);
   const slideX = fromX + stepX - gx * into - (gx / length) * SLIDE_MARGIN;
   const slideZ = fromZ + stepZ - gz * into - (gz / length) * SLIDE_MARGIN;
-  if (seaDepthAt(slideX, slideZ, terrain) <= allowed) {
+  if (footing(terrain, fromX, fromZ, fromHeight, fromDepth, slideX, slideZ) === FOOTING_OK) {
     state.x = slideX;
     state.z = slideZ;
   }
 }
 
-/** Half the distance the sea's slope is sampled across, in metres. */
+const FOOTING_OK = 0;
+const FOOTING_STEEP = 1;
+const FOOTING_DEEP = 2;
+
+/** Whether a step from (fromX, fromZ) to (x, z) may be taken, and if not, why. */
+function footing(
+  terrain: TerrainSettings,
+  fromX: number,
+  fromZ: number,
+  fromHeight: number,
+  fromDepth: number,
+  x: number,
+  z: number,
+): number {
+  const height = heightAt(x, z, terrain);
+  const dx = x - fromX;
+  const dz = z - fromZ;
+  if (height - fromHeight > MAX_CLIMB_GRADE * Math.sqrt(dx * dx + dz * dz) + 1e-9) return FOOTING_STEEP;
+  const sea = terrain.sea;
+  if (sea && seaRamp(sea, x, z, terrain.seed) > 0) {
+    const depth = sea.level - height;
+    if (depth > MAX_WADE_DEPTH && depth > fromDepth) return FOOTING_DEEP;
+  }
+  return FOOTING_OK;
+}
+
+/** Half the distance the ground's slope is sampled across, in metres. */
 const SLOPE_PROBE = 0.25;
-/** How far a slide along the drop-off also steps back from it. */
+/** How far a slide along a cliff or a drop-off also steps back from it. */
 const SLIDE_MARGIN = 0.01;
 
 /**

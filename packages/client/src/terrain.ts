@@ -47,6 +47,14 @@ export const CHUNK = SCENERY_CELL;
  *  than as a failed attempt at smooth. */
 const QUAD = 2;
 
+/**
+ * Metres per quad on the horizon, which must divide CHUNK. It was a whole
+ * chunk, 64 m, when the far country was low hills; with mountains four
+ * hundred metres tall that cut every ridge into a few flat slabs, and the
+ * skyline is most of what a mountain range is.
+ */
+const HORIZON_QUAD = 32;
+
 /** Detailed ground out to here. Fog is thick enough by this range that the
  *  swap to the horizon mesh is hard to spot. */
 export const TERRAIN_RADIUS = 330;
@@ -482,6 +490,8 @@ export class TerrainStreamer {
   /** Chunk index of the horizon's first column and row. */
   private horizonOrigin = 0;
   private horizonDirty = false;
+  /** Scratch for every cut, sized once. */
+  private keptIndices: Uint32Array | undefined;
   private lastCentre = "";
   private wanted: Array<{ cx: number; cz: number; d: number }> = [];
 
@@ -516,15 +526,20 @@ export class TerrainStreamer {
     this.horizonOrigin = Math.floor(-half / CHUNK);
     const lo = this.horizonOrigin * CHUNK;
     const hi = Math.ceil(half / CHUNK) * CHUNK;
-    const mesh = gridMesh("horizon", this.scene, this.ostra, this.palette, lo, lo, hi, hi, CHUNK, false);
+    const started = performance.now();
+    const mesh = gridMesh("horizon", this.scene, this.ostra, this.palette, lo, lo, hi, hi, HORIZON_QUAD, false);
+    this.horizonBuildMs = performance.now() - started;
     mesh.material = this.material;
     mesh.isPickable = false;
     mesh.alwaysSelectAsActiveMesh = true;
     this.horizon = mesh;
-    this.horizonCols = (hi - lo) / CHUNK;
+    this.horizonCols = (hi - lo) / HORIZON_QUAD;
     const all = mesh.getIndices();
     this.horizonQuads = all ? Uint32Array.from(all) : undefined;
   }
+
+  /** How long the horizon took to build on arrival, for the console. */
+  horizonBuildMs = 0;
 
   /** Call every frame with where the camera is looking. */
   update(x: number, z: number): void {
@@ -611,15 +626,21 @@ export class TerrainStreamer {
     if (!horizon || !quads) return;
 
     const offset = this.horizonOrigin;
-    const kept: number[] = [];
     const cols = this.horizonCols;
+    // Several horizon quads to a chunk's side; a quad goes with the chunk it
+    // lies in.
+    const perChunk = CHUNK / HORIZON_QUAD;
+    const kept = this.keptIndices ??= new Uint32Array(quads.length);
+    let n = 0;
     for (let q = 0; q < cols * cols; q++) {
-      const cx = (q % cols) + offset;
-      const cz = Math.floor(q / cols) + offset;
+      const cx = Math.floor((q % cols) / perChunk) + offset;
+      const cz = Math.floor(Math.floor(q / cols) / perChunk) + offset;
       if (this.chunks.has(chunkKey(cx, cz))) continue;
-      for (let k = 0; k < 6; k++) kept.push(quads[q * 6 + k]!);
+      for (let k = 0; k < 6; k++) kept[n++] = quads[q * 6 + k]!;
     }
-    horizon.setIndices(kept);
+    // A copy: the geometry keeps the array it is given, and this buffer is
+    // written over by the next cut.
+    horizon.setIndices(kept.slice(0, n));
   }
 
   /** Is the detailed ground at (x, z) built yet? */

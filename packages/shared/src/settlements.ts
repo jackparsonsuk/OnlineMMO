@@ -158,7 +158,9 @@ function treeRing(
     const wobble = ((i * 37) % 11) / 11;
     const degrees = (i / count) * 360 + wobble * 7 - 3.5;
     const normal = ((degrees % 360) + 360) % 360;
-    if (gaps.some(([from, to]) => normal >= from && normal <= to)) continue;
+    // A gap may start below 0 to straddle north ([-22, 10]); test the angle
+    // both ways round, or that half of the gap is never left open.
+    if (gaps.some(([from, to]) => (normal >= from && normal <= to) || (normal - 360 >= from && normal - 360 <= to))) continue;
     const angle = (degrees * Math.PI) / 180;
     const reach = radius + wobble * 5;
     trees.push({

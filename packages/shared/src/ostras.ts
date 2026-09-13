@@ -8,6 +8,7 @@ import {
   type SeaDefinition,
   type TerrainRegion,
   type TerrainSettings,
+  type ValleyLine,
 } from "./terrain.js";
 
 /**
@@ -343,6 +344,30 @@ const TERRA_ROADS: RoadDefinition[] = [
 ];
 
 /**
+ * The valleys the roads run through: a straight line between each pair of a
+ * road's places, and one out to each ruin no road passes. The road is routed
+ * afterwards and finds its own way, but the low country along its line is the
+ * cheapest going, so it keeps to it — and everything it joins stays reachable.
+ */
+function valleyLines(
+  roads: readonly RoadDefinition[],
+  spurs: ReadonlyArray<readonly [{ x: number; z: number }, { x: number; z: number }]>,
+): ValleyLine[] {
+  const lines: ValleyLine[] = [];
+  for (const road of roads) {
+    for (let i = 1; i < road.points.length; i++) {
+      const a = road.points[i - 1]!;
+      const b = road.points[i]!;
+      lines.push({ ax: a.x, az: a.z, bx: b.x, bz: b.z });
+    }
+  }
+  for (const [a, b] of spurs) lines.push({ ax: a.x, az: a.z, bx: b.x, bz: b.z });
+  return lines;
+}
+
+const TERRA_BORDERS = { height: 230, width: 300 };
+
+/**
  * Terra's regions. The Westwood round Daso, where everyone starts, and the
  * Heartland round the Gate Circle are gentle and green; everything further out
  * has a character of its own, and creatures to match. Waystones sit roughly at
@@ -355,47 +380,47 @@ const TERRA_ROADS: RoadDefinition[] = [
  */
 const TERRA_REGIONS: RegionDefinition[] = [
   {
-    id: "heartland", name: "The Heartland", x: 0, z: 0,
+    id: "heartland", name: "The Heartland", x: 0, z: 0, relief: 0.65, mountains: 0.25, walls: 0.35,
     ground: "#41703f", crest: "#79a355", woods: 0.7, trees: ["oak", "oak", "pine", "birch"],
     rock: "grey", grass: "grass", creatures: { zombie: 3, spider: 2, wolf: 1 }, levels: [5, 10],
   },
   {
-    id: "westwood", name: "Westwood", x: -1500, z: -150, relief: 1.1,
+    id: "westwood", name: "Westwood", x: -1500, z: -150, relief: 0.6, mountains: 0.15, walls: 0.3,
     ground: "#3b673a", crest: "#6c974d", woods: 1.15, trees: ["oak", "oak", "pine", "birch"],
     rock: "grey", grass: "grass", creatures: { wolf: 3, spider: 2, zombie: 1 }, levels: [1, 5],
   },
   {
-    id: "greywood", name: "Greywood", x: -2400, z: 1950, lift: 12, relief: 1.3, mountains: 1.2,
+    id: "greywood", name: "Greywood", x: -2400, z: 1950, lift: 12, relief: 1.35, mountains: 1.4, walls: 1.2,
     ground: "#33523a", crest: "#56794c", woods: 1.4, trees: ["pine", "pine", "pine", "birch"],
     rock: "grey", grass: "grass", creatures: { wolf: 4, spider: 3, golem: 0.4 }, levels: [10, 15],
   },
   {
-    id: "highmoor", name: "Highmoor", x: 200, z: 2450, lift: 20, relief: 0.8, mountains: 1.3,
+    id: "highmoor", name: "Highmoor", x: 200, z: 2450, lift: 30, relief: 1.1, mountains: 1.5, walls: 1.2,
     ground: "#6b6248", crest: "#927a70", woods: 0.22, trees: ["pine", "dead"],
     rock: "grey", grass: "heather", creatures: { golem: 1.5, wolf: 2.5, zombie: 1 }, levels: [15, 20],
   },
   {
-    id: "brightwater", name: "Brightwater", x: 2350, z: 2250, relief: 0.55, mountains: 0.3,
+    id: "brightwater", name: "Brightwater", x: 2350, z: 2250, relief: 0.7, mountains: 0.3, walls: 0.9,
     ground: "#487a4a", crest: "#8ab45e", woods: 0.55, trees: ["birch", "birch", "oak"],
     rock: "grey", grass: "grass", creatures: { wretch: 3, boar: 2, spider: 1 }, levels: [22, 27],
   },
   {
-    id: "sunward", name: "Sunward", x: 2500, z: 100, relief: 0.5, mountains: 0.15,
+    id: "sunward", name: "Sunward", x: 2500, z: 100, relief: 0.75, mountains: 0.2, walls: 0.8,
     ground: "#7a8844", crest: "#c7b66a", woods: 0.15, trees: ["oak"],
     rock: "grey", grass: "dry", creatures: { boar: 4, zombie: 2, wolf: 1 }, levels: [18, 23],
   },
   {
-    id: "redstep", name: "Redstep", x: 2500, z: -2350, lift: 10, relief: 1.7, mountains: 0.6, terrace: 9,
+    id: "redstep", name: "Redstep", x: 2500, z: -2350, lift: 10, relief: 1.6, mountains: 0.9, terrace: 9, walls: 1.1,
     ground: "#8a5a3a", crest: "#c3844f", woods: 0.06, trees: ["dead"],
     rock: "red", grass: "dry", creatures: { golem: 2, boar: 1.5, wisp: 1 }, levels: [25, 30],
   },
   {
-    id: "ashfall", name: "Ashfall", x: -2450, z: -2150, relief: 1.2,
+    id: "ashfall", name: "Ashfall", x: -2450, z: -2150, relief: 1.3, mountains: 1.1, walls: 1,
     ground: "#4a4642", crest: "#706860", woods: 0.55, trees: ["dead", "dead", "pine"],
     rock: "dark", grass: "ash", creatures: { wisp: 4, zombie: 3 }, levels: [11, 16],
   },
   {
-    id: "lowfen", name: "Lowfen", x: -200, z: -2550, lift: -8, relief: 0.25, mountains: 0,
+    id: "lowfen", name: "Lowfen", x: -200, z: -2550, lift: -8, relief: 0.3, mountains: 0, walls: 0.7,
     ground: "#3d5839", crest: "#5f7a47", woods: 0.4, trees: ["dead", "birch", "birch"],
     rock: "dark", grass: "reeds", creatures: { wretch: 4, spider: 2, zombie: 1 }, levels: [13, 18],
   },
@@ -441,8 +466,9 @@ const TERRA_SEA: SeaDefinition = {
   from: 2900,
   wander: 250,
   width: 1100,
-  fall: 220,
-  level: -12,
+  fall: 320,
+  // Below the deepest basin the hills leave near the coast (about -42 m).
+  level: -46,
   depth: 14,
 };
 
@@ -455,15 +481,19 @@ function terraFlats(): FlatZone[] {
     { x: 0, z: 0, radius: 34, falloff: 60 },
     // Daso sits on a level shelf. A logging town on a hillside would look
     // like an accident.
-    { x: DASO.x, z: DASO.z, radius: DASO.radius + 6, falloff: 50 },
-    { x: FANSHONA.x, z: FANSHONA.z, radius: FANSHONA.radius + 6, falloff: 40, level: FANSHONA.level },
+    // Both blend back to the hills over a long way, so each town sits in a
+    // broad level hollow its roads can come down into from any side.
+    { x: DASO.x, z: DASO.z, radius: DASO.radius + 6, falloff: 130 },
+    { x: FANSHONA.x, z: FANSHONA.z, radius: FANSHONA.radius + 6, falloff: 130, level: FANSHONA.level },
   ];
   for (const w of TERRA_WAYSTONES) {
     if (w.id === "gate-circle" || w.id === "daso" || w.id === "fanshona") continue;
-    flats.push({ x: w.x, z: w.z, radius: 7, falloff: 26 });
+    // A long blend back to the natural ground: in hill country a short one
+    // stood each stone on a shelf with banks too steep to walk up.
+    flats.push({ x: w.x, z: w.z, radius: 7, falloff: 60 });
   }
   for (const r of TERRA_RUINS) {
-    flats.push({ x: r.x, z: r.z, radius: r.radius + 4, falloff: 28 });
+    flats.push({ x: r.x, z: r.z, radius: r.radius + 4, falloff: 60 });
   }
   return flats;
 }
@@ -560,16 +590,30 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
     obstacleStyle: "pillar",
     terrain: {
       seed: 1701,
-      // The ground you walk over: enough relief that the horizon moves as you
-      // walk, not so much that a creature disappears behind every rise.
-      hills: { amplitude: 7.5, wavelength: 320, octaves: 5 },
+      // The ground you walk over. These are ceilings, not typical heights:
+      // four octaves of noise mostly move the ground about a third of this
+      // (see the README, Hills, mountains, and the valleys between).
+      hills: { amplitude: 45, wavelength: 380, octaves: 4 },
       // Kilometre-scale uplands and basins.
-      continent: { amplitude: 26, wavelength: 2400 },
-      // Ranges in about a third of the map. They are climbable — terrain does
-      // not slow you — but they block sight, and sight is what makes a big map
-      // feel big.
-      mountains: { amplitude: 95, wavelength: 760, coverage: 0.34 },
-      rim: { halfExtent: TERRA_SIZE / 2, width: 420, height: 120 },
+      continent: { amplitude: 80, wavelength: 2200 },
+      // Massifs, scaled per region, up to about 500 m with the hills under
+      // them. Steeper than 45° cannot be climbed, so a range is a barrier to
+      // go round as well as something to see from the next valley.
+      mountains: { amplitude: 280, wavelength: 800, coverage: 0.55 },
+      // Taller than any peak inside, so the edge of the world stays a wall.
+      rim: { halfExtent: TERRA_SIZE / 2, width: 420, height: 280 },
+      borders: TERRA_BORDERS,
+      // Mountains, border ranges and terraces fall away along every road, so
+      // everything the roads join stays in walkable low country.
+      valleys: {
+        // The two ruins no road goes to get a way in of their own.
+        lines: valleyLines(TERRA_ROADS, [
+          [ruin("sunken-hall"), stone("far-south")],
+          [ruin("cinder-spire"), stone("southwest")],
+        ]),
+        floor: 70,
+        width: 650,
+      },
       flats: terraFlats(),
       regions: TERRA_REGIONS,
       lakes: TERRA_LAKES,

@@ -119,6 +119,37 @@ export function ridged(x: number, z: number, seed: number, octaves: number): num
   return sum / norm;
 }
 
+/**
+ * Ridged multifractal: each octave's detail is weighted by how near the octave
+ * before it was to a crest. So the crests grow spurs and broken tops, and the
+ * valleys between them stay smooth — which is what separates a mountain range
+ * from `ridged`'s even tangle of ridges, where every octave is as rough in the
+ * valley floor as on the summit. In [0, 1], and mostly well below 1.
+ */
+export function ridgedMulti(x: number, z: number, seed: number, octaves: number): number {
+  let sum = 0;
+  let amplitude = 1;
+  let norm = 0;
+  let weight = 1;
+  let px = x;
+  let pz = z;
+  for (let i = 0; i < octaves; i++) {
+    const n = gradientNoise(px, pz, seed + i * 6151);
+    let signal = 1 - (n < 0 ? -n : n);
+    signal *= signal * weight;
+    weight = signal * 2;
+    if (weight > 1) weight = 1;
+    sum += signal * amplitude;
+    norm += amplitude;
+    amplitude *= 0.5;
+    const rx = (px * ROT_C - pz * ROT_S) * 2.11;
+    const rz = (px * ROT_S + pz * ROT_C) * 2.11;
+    px = rx;
+    pz = rz;
+  }
+  return sum / norm;
+}
+
 /** Smooth 0..1 ramp. Linear blending leaves a visible crease; this does not. */
 export function smoothstep(t: number): number {
   const c = t < 0 ? 0 : t > 1 ? 1 : t;

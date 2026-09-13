@@ -213,16 +213,18 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
   paintSky(world.sky, sky, sky.scale(ostra.wilds ? 0.62 : 0.5));
 
   // Haze. On a big Ostra it is what gives distance its depth, and it hides the
-  // seam where detailed chunks end: trees appear at ~330 m, and at 0.0018 that
-  // band is already about a third fog, so they fade in rather than pop. (It was
-  // 0.0008 — 7% at 330 m, which hid nothing.) The price is a hazier horizon:
-  // past a kilometre the far hills are mostly sky. On a small Ostra it keeps
-  // the edge of the world soft.
+  // seam where detailed chunks end: trees appear at ~330 m. It has swung both
+  // ways. At 0.0008 that band was 7% fog and the trees popped; at 0.0018 it was
+  // a third, which hid them, but past a kilometre everything was sky — which
+  // did not matter while Terra was flat and does now it has mountains, whose
+  // whole point is being seen from the next valley. 0.0012 keeps a range in
+  // sight to a kilometre and a half, at the price of the trees showing a
+  // little more as they arrive. On a small Ostra it keeps the edge soft.
   scene.fogMode = Scene.FOGMODE_EXP2;
   scene.fogColor = sky;
   // A dungeon closer still: the next room should be a shape in the dark, not
   // something you can read from the door.
-  scene.fogDensity = ostra.dungeon ? 0.026 : ostra.size > 1000 ? 0.0018 : 0.012;
+  scene.fogDensity = ostra.dungeon ? 0.026 : ostra.size > 1000 ? 0.0012 : 0.012;
 
   // The ground is built from the same height function the simulation walks on,
   // so what you see and what you stand on cannot drift apart.

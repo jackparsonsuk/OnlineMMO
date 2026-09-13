@@ -17,7 +17,19 @@ import {
   type RoadDefinition,
   type RuinDefinition,
 } from "./ostras.js";
-import { heightAt, lakeLevel, lakeReach, regionAt, SAND_HEIGHT, seaDepthAt, seaRamp, waterDepthAt } from "./terrain.js";
+import {
+  heightAt,
+  lakeLevel,
+  lakeReach,
+  MAX_CLIMB_GRADE,
+  MAX_WADE_DEPTH,
+  regionAt,
+  SAND_HEIGHT,
+  seaDepthAt,
+  seaRamp,
+  slopeAt,
+  waterDepthAt,
+} from "./terrain.js";
 import { getVariant } from "./variants.js";
 
 /**
@@ -104,6 +116,10 @@ const ROUTE_CELL = 32;
  *  length. The route already bends around the land; this is the wobble of
  *  feet on top of it. */
 const ROAD_MEANDER = 16;
+/** The steepest a road is routed up, rise over run, between grid cells. The
+ *  cost has long since made anything near it a last resort; this only rules
+ *  out the mountainside, and `roadProblems` checks the drawn road under foot. */
+const ROUTE_MAX_GRADE = 0.6;
 const ROAD_MEANDER_WAVELENGTH = 260;
 
 /** Ground this close above the water counts as wet to a road: the drowned
@@ -250,6 +266,10 @@ function route(ostra: OstraDefinition, grid: RouteGrid, ax: number, az: number, 
       const nh = gridHeight(ostra, grid, ni, nj);
       const length = step * ROUTE_CELL;
       const grade = Math.abs(nh - h) / length;
+      // Not merely expensive: a road does not go up a mountainside at all.
+      // Averaged over a 32 m cell the ground is gentler than it is under foot,
+      // so the limit sits well below the steepest anyone can walk.
+      if (grade > ROUTE_MAX_GRADE) continue;
       const steep = grade * 11;
       let cost = length * (1 + steep * steep + gridRough(ostra, grid, ni, nj) + 0.25 * hashUnit(ni, nj, seed + 71));
       if (grid.wet[next] === 1) cost *= 30;
@@ -749,6 +769,9 @@ export function campsIn(ostra: OstraDefinition): readonly CampDefinition[] {
         // Not on the shore either: a creature scattered to the edge of its
         // camp should land on dry ground, not out past the depth it can wade.
         if (ostra.terrain.sea && campAtSea(ostra, x, z, radius + 2)) continue;
+        // Nor on a mountainside: creatures scattered over a slope too steep
+        // to climb could never come down to anyone, or be reached.
+        if (slopeAt(x, z, ostra.terrain) > CAMP_MAX_SLOPE) continue;
         if (roadDistance(ostra, x, z) - radius <= 10) continue;
 
         list.push({ id: `w${i}_${j}`, kind, count, x, z, radius, level });
@@ -760,6 +783,11 @@ export function campsIn(ostra: OstraDefinition): readonly CampDefinition[] {
   campCache.set(ostra.id, camps);
   return camps;
 }
+
+/** Camps only go where the ground under them is gentler than this. */
+const CAMP_MAX_SLOPE = 0.45;
+/** Trees give way to bare rock above this slope, as the ground colour does. */
+const TREE_MAX_SLOPE = 0.8;
 
 /** Whether any of a circle — its centre and four points on its edge — is
  *  within a metre of the sea. */
@@ -923,8 +951,9 @@ function generateWilds(
       const region = regionOf(ostra, x, z);
 
       if (isTree) {
-        // Nothing grows on the peaks.
+        // Nothing grows on the peaks, or on a cliff face.
         if (ground > snowLine) continue;
+        if (slopeAt(x, z, ostra.terrain) > TREE_MAX_SLOPE) continue;
         h = rehash(h, 15);
         const species = region ? region.trees[Math.floor((h / 4294967296) * region.trees.length)]! : "oak";
         // High ground turns any wood to pine.
@@ -1075,17 +1104,73 @@ export function seaProblems(): string[] {
     const toWorld = (out: number, along: number): [number, number] =>
       sea.side === "east" ? [out, along] : sea.side === "west" ? [-out, along]
         : sea.side === "north" ? [along, out] : [along, -out];
+    // One line for the whole coast, with the worst of it: a hundred lines of
+    // the same fault bury every other warning at boot.
+    let count = 0;
+    let lowest = { height: Infinity, x: 0, z: 0 };
     for (let along = -half; along <= half; along += 16) {
       for (let out = sea.from - sea.wander; out <= sea.from + sea.wander; out += 16) {
         const [x, z] = toWorld(out, along);
         if (seaRamp(sea, x, z, t.seed) > 0) break;
         const height = heightAt(x, z, t);
         if (height <= sea.level + 0.5) {
-          problems.push(`${ostra.name}: ground at (${x}, ${z}) is ${height.toFixed(1)} m, at or below ${sea.name} `
-            + `(${sea.level} m) before the land falls to it — lower the sea or move \`from\``);
+          count++;
+          if (height < lowest.height) lowest = { height, x, z };
           break;
         }
       }
+    }
+    if (count > 0) {
+      problems.push(`${ostra.name}: in ${count} places along the coast the ground is at or below ${sea.name} (${sea.level} m) `
+        + `before the land falls to it, lowest ${lowest.height.toFixed(1)} m at (${lowest.x}, ${lowest.z}) — lower the sea or move \`from\``);
+    }
+  }
+  return problems;
+}
+
+/**
+ * Anywhere a road cannot be walked: steeper under foot than a body may climb
+ * (in either direction, since a road is walked both ways), or through water
+ * too deep to wade. Every waystone, town and most ruins hang off the roads,
+ * so a road that can be walked end to end is also the proof that they can be
+ * reached. Sampled every metre along the drawn line; one line per road.
+ */
+export function roadProblems(): string[] {
+  const problems: string[] = [];
+  for (const ostra of Object.values(OSTRAS)) {
+    const t = ostra.terrain;
+    for (const { road, points } of roadPaths(ostra)) {
+      let worst = 0;
+      let worstAt = { x: 0, z: 0 };
+      let wet: { x: number; z: number } | undefined;
+      let lastX = points[0]!.x;
+      let lastZ = points[0]!.z;
+      let lastH = heightAt(lastX, lastZ, t);
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1]!;
+        const b = points[i]!;
+        const steps = Math.max(1, Math.ceil(dist(a.x, a.z, b.x, b.z)));
+        for (let s = 1; s <= steps; s++) {
+          const x = a.x + ((b.x - a.x) * s) / steps;
+          const z = a.z + ((b.z - a.z) * s) / steps;
+          const h = heightAt(x, z, t);
+          const run = dist(x, z, lastX, lastZ);
+          const grade = run > 0 ? Math.abs(h - lastH) / run : 0;
+          if (grade > worst) {
+            worst = grade;
+            worstAt = { x, z };
+          }
+          if (!wet && waterDepthAt(x, z, t) > MAX_WADE_DEPTH) wet = { x, z };
+          lastX = x;
+          lastZ = z;
+          lastH = h;
+        }
+      }
+      if (worst > MAX_CLIMB_GRADE) {
+        problems.push(`${ostra.name}: the ${road.id} climbs ${worst.toFixed(2)} at (${Math.round(worstAt.x)}, ${Math.round(worstAt.z)}), `
+          + `steeper than anyone can walk (${MAX_CLIMB_GRADE})`);
+      }
+      if (wet) problems.push(`${ostra.name}: the ${road.id} runs into deep water at (${Math.round(wet.x)}, ${Math.round(wet.z)})`);
     }
   }
   return problems;

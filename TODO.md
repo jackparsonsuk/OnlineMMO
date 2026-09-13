@@ -123,10 +123,16 @@ smaller entries below; those are the first step towards them.
   light on the street.
 - **Unnamed Ostras.** The lore's small, beast-ridden Ostras, generated into the
   same shape as the named ones.
-- **Slopes, and a jump that clears things.** Terrain does not slow you: you
-  climb a 120 m peak at walking speed. You can jump, but collision is flat, so
-  a jump clears nothing; low things (logs, fences) could be skipped when high
-  enough in the air.
+- **Slopes that slow you, and a jump that clears things.** Up to 45° is walked
+  at full speed and anything steeper is a wall; a slowdown on the way up would
+  make a climb feel like one. You can jump, but collision is flat, so a jump
+  clears nothing; low things (logs, fences) could be skipped when high enough
+  in the air.
+- **Somewhere to go in the mountains.** The massifs between the roads and the
+  wild country towards the rim are empty but for camps: a hidden valley, a
+  pass with a ruin in it, an elite on a summit, a quest that sends you up.
+- **Distant trees on the mountains.** With the haze thinner the horizon mesh's
+  bare slopes show more; see "Distant trees".
 - **Swimming.** Lakes are deliberately wadeable, and the Morning Sea is a wall
   past waist depth (`MAX_WADE_DEPTH`), because there is no swimming.
 - **More to the coast.** The Morning Sea is empty: a fishing hamlet, a wreck,
@@ -136,8 +142,9 @@ smaller entries below; those are the first step towards them.
 ## Creatures and combat
 
 - **Creature pathfinding.** Creatures walk straight at you and slide along
-  whatever they hit, which shows in the new forests. The road router's A* is a
-  starting point.
+  whatever they hit, which shows in the new forests — and now at every cliff,
+  where a chasing creature stops at the foot of ground too steep to climb. The
+  road router's A* is a starting point.
 - **More from elites.** A unique named drop each; persist their timers (a
   restart resets them); give Ascendant and Barals theirs; an aura and a horn. Watch the tank rule for leeching — standing in the
   way of blows is enough for credit, which is right for a tank and cheap for
