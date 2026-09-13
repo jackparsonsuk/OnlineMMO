@@ -1685,7 +1685,8 @@ body.portrait :is(#compass, #minimap, #actionbar, #corner, #target-frame, #castb
   clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
   background: #f7d66e;
 }
-#worldmap-legend .lg-elite { border-radius: 50%; background: #e8c23f; box-shadow: 0 0 0 1px #1a1408; }
+#worldmap-legend .lg-elite { border-radius: 50%; background: #c77dff; box-shadow: 0 0 0 1px #1a1408; }
+#worldmap-legend .lg-shop { border-radius: 50%; background: #e8c23f; box-shadow: inset 0 0 0 2px #e8c23f, inset 0 0 0 3px #6b4d0a, 0 0 0 1px #0d1117; }
 
 /* Waystone labels read as landmarks, not as people. */
 .nametag.waystone {

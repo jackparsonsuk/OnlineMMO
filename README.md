@@ -841,8 +841,10 @@ elite is its kind drawn and collided larger (`Enemy.scale`, read on both sides
 through `scaledArchetype`, so a bigger body is never a smaller hitbox), three
 levels above the ground it stands on, with several times the health and more
 damage. It is the **first source of mythic and legendary loot** (`source:
-"elite"`), always drops two or three items, and shows gold on nametags, and on
-the minimap and world map at any range while it lives — it is announced to the
+"elite"`), always drops two or three items, and shows gold on nametags, and
+violet on the minimap and world map at any range while it lives (they were
+gold there too, and eight gold dots that never went away read as quest marks
+that would not clear) — it is announced to the
 whole Ostra, so hiding where it is would only make you search.
 
 Each has **signature moves**, data in its `abilities` list, resolved by the

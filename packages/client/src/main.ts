@@ -301,6 +301,13 @@ window.addEventListener("keydown", (event) => {
       }
       break;
     case "KeyM":
+      // The map covers the middle of the screen; a conversation left open
+      // under it floated over the map with nothing to say it was still there.
+      if (session && !session.mapOpen) {
+        questUI.close();
+        vendorUI.close();
+        travelUI.close();
+      }
       session?.toggleMap();
       break;
     case "Tab":

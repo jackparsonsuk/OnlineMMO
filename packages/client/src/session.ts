@@ -172,6 +172,10 @@ const SPEAKING_RANGE = 3.6;
  *  server keeps camps awake well beyond it, so nothing pops in close. */
 const ENEMY_DRAW_DISTANCE = 240;
 
+/** A living elite on the maps: violet, apart from the quests' gold and the
+ *  ordinary creatures' red. Matches `.lg-elite` in the legend. */
+const ELITE_BLIP = "#c77dff";
+
 /** Tab only considers creatures this close. */
 const TARGET_RANGE = 36;
 
@@ -1523,9 +1527,11 @@ export function createSession(
       const hunting = enemy.state === EnemyState.Chase;
 
       if (!dead && enemy.name !== "") {
-        // A living elite shows gold on the minimap and the world map at any
-        // range: it is announced to the whole Ostra, and worth crossing it for.
-        blips.push({ x, z, size: 4.2, colour: "#e8c23f", ring: enemyId === target, elite: true });
+        // A living elite shows on the minimap and the world map at any range:
+        // it is announced to the whole Ostra, and worth crossing it for. Not
+        // gold, which is the quests' colour: eight gold dots that never went
+        // away read as quest marks that would not clear.
+        blips.push({ x, z, size: 4.2, colour: ELITE_BLIP, ring: enemyId === target, elite: true });
       } else if (distance < 270 && !dead) {
         blips.push({
           x, z, size: enemyId === target ? 3.4 : 2.4,
