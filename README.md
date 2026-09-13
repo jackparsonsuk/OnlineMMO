@@ -1634,6 +1634,18 @@ and grass are thin instances, one draw call per kind. Fog and a sky dome fade
 the far ground into the sky; the depth buffer is reversed, because a normal one
 runs out of precision long before eight kilometres.
 
+**Arriving is quick.** Entering Terra used to freeze for nine seconds before
+the first frame, and seven of those were towns: every copy of a voxel model
+was meshed again — each wall panel, barrel and fence run — though the models
+were already cached. `voxelMesh` now keeps each model's mesh by anchor and
+grain, so a town pays once per distinct piece. And towns and lakes are no
+longer built on arrival but when you come within 1.5 km of them
+(`DEFERRED_RANGE`): whatever is in range on the first frame is built then,
+since you are standing in it, and anything later one a frame. Fanshona is a
+second of meshing four kilometres from Daso, past the fog. From click to the
+first frame is now about three seconds in a dev build; the ground still takes
+a few more to stream in around you.
+
 **You can find your way.** A minimap (north up, with an N on the rim to say
 so), a compass strip with bearings to landmarks, and a world map on **M** that
 paints itself in tiles in the background from the same `groundTone` as the

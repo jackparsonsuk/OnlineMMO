@@ -164,8 +164,7 @@ let level = 1;
 function refreshQuestMarkers(): void {
   const log = questUI.currentLog;
   session?.setQuestMarkers((id) => questMarker(id, log, level));
-  // ...and on the maps and the compass, where each quest wants you.
-  // ...and in the world, whatever a gather objective still wants picked up.
+  // ...in the world, whatever a gather objective still wants picked up...
   const gathering: Array<{ quest: string; objective: number }> = [];
   for (const [id, progress] of Object.entries(log.active)) {
     getQuest(id)?.objectives.forEach((objective, index) => {
@@ -173,6 +172,7 @@ function refreshQuestMarkers(): void {
     });
   }
   session?.setGathering(gathering);
+  // ...and on the maps and the compass, where each quest wants you.
   if (currentOstra) {
     const marks = questMarksFor(currentOstra, log, level);
     session?.setQuestMarks(marks);

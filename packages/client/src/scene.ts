@@ -73,6 +73,9 @@ export interface World {
   /** The ground and what grows on it, streamed around the camera. */
   terrain: TerrainStreamer | undefined;
   scenery: SceneryStreamer | undefined;
+  /** Towns and lakes not built yet, until you come near (`DEFERRED_RANGE`). */
+  deferred: Array<{ x: number; z: number; reach: number; build: () => void }>;
+  deferredStarted: boolean;
   ostra: OstraDefinition | undefined;
   sky: Mesh;
   /** Dimmed per Ostra (`OstraPalette.light`) along with the ambient. */
@@ -138,6 +141,8 @@ export function createWorld(canvas: HTMLCanvasElement): World {
     ostraRoot: undefined,
     terrain: undefined,
     scenery: undefined,
+    deferred: [],
+    deferredStarted: false,
     ostra: undefined,
     sky: buildSky(scene),
     sun,
@@ -230,6 +235,7 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
   // so what you see and what you stand on cannot drift apart.
   world.scenery = new SceneryStreamer(scene, ostra);
   world.terrain = new TerrainStreamer(scene, ostra, world.scenery);
+  world.deferred = [];
 
   // A rim of mountains is boundary enough, and a dungeon's rock more than
   // enough; the low wall is for the small open Ostras.
@@ -247,22 +253,49 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
     water.emissiveColor = Color3.FromHexString("#0e2a3a");
     water.alpha = 0.78;
     water.backFaceCulling = false;
-    for (const lake of ostra.terrain.lakes) addLake(scene, root, ostra, lake, water);
+    for (const lake of ostra.terrain.lakes) {
+      world.deferred.push({ x: lake.x, z: lake.z, reach: lakeReach(lake), build: () => addLake(scene, root, ostra, lake, water) });
+    }
   }
   if (ostra.terrain.sea) addSea(scene, root, ostra, ostra.terrain.sea);
 
   for (const settlement of settlementsIn(ostra)) {
-    buildSettlement(scene, ostra, settlement).parent = root;
-    for (const villager of settlement.villagers) {
-      buildVillager(scene, ostra, villager).parent = root;
-    }
+    world.deferred.push({
+      x: settlement.x, z: settlement.z, reach: settlement.radius,
+      build: () => {
+        buildSettlement(scene, ostra, settlement).parent = root;
+        for (const villager of settlement.villagers) buildVillager(scene, ostra, villager).parent = root;
+      },
+    });
   }
+  world.deferredStarted = false;
 }
+
+/**
+ * Towns and lakes are built when you come within this of their edge, not on
+ * arrival. Building every one of them up front was most of the wait to enter
+ * Terra — Fanshona alone is a second of meshing, four kilometres from where
+ * everyone starts, and past the fog from anywhere near Daso.
+ */
+const DEFERRED_RANGE = 1500;
 
 /** Stream the ground around where the camera is looking. Once per frame. */
 export function updateWorld(world: World, x: number, z: number): void {
   world.terrain?.update(x, z);
   world.scenery?.update(x, z);
+
+  // On the first frame, everything already in range is built at once: you are
+  // standing in it. After that, one thing a frame, so walking towards a town
+  // costs a hitch rather than a stall.
+  const first = !world.deferredStarted;
+  world.deferredStarted = true;
+  for (let i = 0; i < world.deferred.length; i++) {
+    const item = world.deferred[i]!;
+    if (Math.hypot(item.x - x, item.z - z) - item.reach > DEFERRED_RANGE) continue;
+    world.deferred.splice(i--, 1);
+    item.build();
+    if (!first) break;
+  }
 }
 
 /** A low wall marking where `applyInput` clamps you, so the boundary isn't an

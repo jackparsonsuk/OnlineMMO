@@ -377,6 +377,8 @@ export type Anchor = "centre" | "base" | { readonly x: number; readonly y: numbe
  * every model in the game can share one material, because the colour travels
  * in the vertex data.
  */
+const meshCache = new WeakMap<VoxelModel, Map<string, VertexData>>();
+
 function meshOf(model: VoxelModel, anchor: Anchor, cellSize: number): VertexData {
   const { sx, sy, sz, cells, palette } = model;
   const dims = [sx, sy, sz];
@@ -571,7 +573,17 @@ export function voxelMesh(
   cell: number = VOXEL,
 ): Mesh {
   const mesh = new Mesh(name, scene);
-  meshOf(model, anchor, cell).applyToMesh(mesh, false);
+  // Meshed once per model, anchor and grain, however many times it is placed.
+  // A town is the same few wall panels, barrels and fence runs over and over,
+  // and re-meshing each copy cost seven of the nine seconds it took to arrive
+  // in Terra. `applyToMesh` copies the arrays into the mesh's own buffers, so
+  // the shared data is never written to.
+  const key = `${typeof anchor === "object" ? `${anchor.x},${anchor.y},${anchor.z}` : anchor}:${cell}`;
+  let meshes = meshCache.get(model);
+  if (!meshes) meshCache.set(model, (meshes = new Map()));
+  let data = meshes.get(key);
+  if (!data) meshes.set(key, (data = meshOf(model, anchor, cell)));
+  data.applyToMesh(mesh, false);
   mesh.useVertexColors = true;
   return mesh;
 }
