@@ -106,6 +106,11 @@ const ROUTE_CELL = 32;
 const ROAD_MEANDER = 16;
 const ROAD_MEANDER_WAVELENGTH = 260;
 
+/** Ground this close above the water counts as wet to a road: the drowned
+ *  margin, where nothing grows either. A road is four metres wide on a
+ *  32-metre grid, and one routed right along the waterline would dip in. */
+const WET_MARGIN = 0.4;
+
 interface RouteGrid {
   n: number;
   origin: number;
@@ -149,7 +154,7 @@ function gridHeight(ostra: OstraDefinition, grid: RouteGrid, i: number, j: numbe
     const z = grid.origin + j * ROUTE_CELL;
     h = heightAt(x, z, ostra.terrain);
     grid.heights[k] = h;
-    grid.wet[k] = waterDepthAt(x, z, ostra.terrain) > -0.4 ? 1 : 0;
+    grid.wet[k] = waterDepthAt(x, z, ostra.terrain) > -WET_MARGIN ? 1 : 0;
   }
   return h;
 }

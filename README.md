@@ -1421,7 +1421,22 @@ steeply with gradient (roads go round mountains), water is nearly forbidden
 gets long sweeping bends), and ground an earlier road covers is cheap (so roads
 merge into a network with junctions and loops rather than running side by
 side). The result is smoothed into curves and given a gentle wander. Thirteen
-roads, about 36 km, route in ~0.35 s at startup on each side.
+roads, about 36 km, route in ~0.13 s at startup on each side.
+
+For a long while "nearly forbidden" was the opposite. `waterDepthAt` answered 0
+away from any water, which reads as "right at the waterline", and the router
+counts a cell wet within 40 cm of water (`WET_MARGIN`, the drowned margin
+where nothing grows) — so every field on Terra was wet and cost thirty times
+over, and a lake's bank was the one cheap ground in the world. The roads went
+looking for water: the west road ran 80 cm deep through Daso's millpond, and
+the lake road through Fanshona's lake. It also made A*'s distance estimate
+worthless against a map priced thirty to the metre, which is where most of
+the old 0.35 s went. Now `waterDepthAt` is -Infinity where no water reaches,
+and only the ground around water counts. Most roads did not move at all; the
+ones that did came off the water, the ring lane now actually runs by Sunward
+Ring instead of borrowing two other roads to get there, and the lake road had
+to be pinned where it leaves Fanshona on the shore side, or the new way to the
+Brightwater Stone went back round the south of town through two houses.
 
 **Ruins** — a stone ring, a watchtower, a barrow, two spires, a sunken hall — are
 landmarks with guardians. `ruinParts` places every stone deterministically, so

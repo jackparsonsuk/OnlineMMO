@@ -428,23 +428,28 @@ export function seaDepthAt(x: number, z: number, terrain: TerrainSettings): numb
   return sea.level - heightAt(x, z, terrain);
 }
 
-/** Depth of water standing at (x, z); zero or less on dry land. */
+/**
+ * Depth of water standing at (x, z): positive in a lake or the sea, and on a
+ * bank or a shore how far the ground stands above the water beside it, as a
+ * negative number. -Infinity anywhere no water reaches.
+ *
+ * It used to answer 0 away from water, which reads as "right at the
+ * waterline" — and the road router, asking "within 40 cm of water?", took
+ * every field on Terra for a marsh and every lake bank for the one dry road in
+ * the world.
+ */
 export function waterDepthAt(x: number, z: number, terrain: TerrainSettings): number {
-  if (terrain.sea) {
-    // Dry shore reads 0 like any other dry land, not how far above the tide it
-    // is: the road router's wet grid tests against a negative number.
-    const depth = seaDepthAt(x, z, terrain);
-    if (depth > 0) return depth;
-  }
-  if (!terrain.lakes) return 0;
-  for (const lake of terrain.lakes) {
+  let depth = terrain.sea ? seaDepthAt(x, z, terrain) : -Infinity;
+  for (const lake of terrain.lakes ?? []) {
     const dx = x - lake.x;
     const dz = z - lake.z;
     const reach = lakeReach(lake);
     if (dx * dx + dz * dz >= reach * reach) continue;
-    return lakeLevel(lake, terrain) - heightAt(x, z, terrain);
+    const here = lakeLevel(lake, terrain) - heightAt(x, z, terrain);
+    if (here > depth) depth = here;
+    break;
   }
-  return 0;
+  return depth;
 }
 
 /**

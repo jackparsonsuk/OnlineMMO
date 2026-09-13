@@ -318,7 +318,14 @@ const TERRA_ROADS: RoadDefinition[] = [
   { id: "northroad", width: 4, points: [{ x: 0, z: 34 }, stone("north"), stone("far-north")] },
   { id: "eastroad", width: 4, points: [{ x: 34, z: 0 }, stone("east"), stone("far-east")] },
   { id: "southroad", width: 4, points: [{ x: 0, z: -36 }, stone("south"), stone("far-south")] },
-  { id: "lakeroad", width: 4, points: [stone("far-east"), stone("fanshona"), stone("northeast")] },
+  {
+    id: "lakeroad", width: 4,
+    // Up Fanshona's spine, across the square and out along the shore, which
+    // is what the town is laid out around. Pinned where it leaves town on the
+    // lake side: unpinned, the way on to the Brightwater Stone is cheaper back
+    // round the south of town, and it went straight through two houses.
+    points: [stone("far-east"), stone("fanshona"), { x: FANSHONA.x + 41, z: FANSHONA.z + 16 }, stone("northeast")],
+  },
   { id: "highroad", width: 3, points: [stone("far-north"), stone("fanshona")] },
   {
     id: "greywood-track", width: 3,

@@ -129,7 +129,7 @@ packages/client/src/
 - In dev, `JWT_SECRET` is random per boot and `tsx watch` restarts the server on
   every server/shared change — stored sessions become invalid and the client
   drops back to sign-in.
-- Roads are routed by A* at startup on both sides (~0.35 s). Anything that
+- Roads are routed by A* at startup on both sides (~0.13 s). Anything that
   changes terrain height, lakes or road `points` changes every road.
 - `requestAnimationFrame` stops when the page isn't visible. `window.mmo.frame(now)`
   drives one frame by hand; `window.mmo` exposes `world`, `room`, `session`
