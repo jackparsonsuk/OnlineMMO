@@ -744,6 +744,14 @@ wolf might drop is not a top tier; mythic and up have to come from something
 that is itself rare. None of those sources exist yet, so for now the top of the
 table is only seen through the dev loot command.
 
+**Colour is earned with the levels.** The same 70/25/5 everywhere had level-1
+wolves by Daso dropping blues, spending the moment a rare is meant to be before
+a new player knows what a green is. An ordinary creature below level 5 drops no
+rare at all, and its share grows to the full 5% by level 12; greens start at
+40% of theirs and are whole by level 7. What is thinned away goes to common
+(`youngCreatureShare`). Quest rewards keep their own rarity — green in Daso,
+a first blue from the Hollow Barrow.
+
 Four **primary** stats — **Might** (adds to Strike), **Focus** (adds to spells
 that cost mana), **Vigour** (health, 3 per point), **Spirit** (mana, and its
 return) — and four **secondaries**: **Critical**, **Recovery**, **Leech**, and

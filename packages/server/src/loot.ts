@@ -48,17 +48,45 @@ export function dropDanger(ostraDanger: number, creatureLevel: number): number {
 }
 
 /**
+ * How much of a tier's odds an ordinary creature of `level` gets.
+ *
+ * The same 70/25/5 at every level had a level-1 wolf by Daso dropping blues,
+ * which spends the moment a rare is meant to be before a new player has
+ * learned what a green is. So colour is earned with the levels: no rare from
+ * anything below level 5, reaching its full share by 12, and greens at 40% of
+ * theirs on the first day, full by level 7. The tiers taken away go to common.
+ * Elites, dungeons and raids are rare sources already and are not touched.
+ */
+export function youngCreatureShare(rarity: Rarity, level: number): number {
+  if (rarity === "uncommon") return Math.min(1, 0.4 + 0.1 * Math.max(0, level - 1));
+  if (rarity === "rare") return Math.max(0, Math.min(1, (level - 4) / 8));
+  return 1;
+}
+
+/**
  * Pick a rarity.
  *
  * A dangerous place paying the same as a safe one would make Barals pure
  * downside, so `danger` multiplies each rarer tier's weight by one more power
- * of itself. At danger 1.0 a creature drops 70/25/5; at Barals' 1.5, nearer
- * 59/32/9.
+ * of itself. At danger 1.0 a creature of level 12 or more drops 70/25/5; at
+ * Barals' 1.5, nearer 59/32/9. Below 12 an ordinary creature's colours are
+ * thinned by `youngCreatureShare`, and what they lose goes to common.
  */
-export function rollRarity(random: () => number, source: LootSource, danger: number): Rarity {
+export function rollRarity(random: () => number, source: LootSource, danger: number, creatureLevel = MAX_ITEM_LEVEL): Rarity {
   const odds = SOURCE_ODDS[source];
   const tiers = RARITIES.filter((rarity) => odds[rarity] !== undefined);
-  const weights = tiers.map((rarity, index) => odds[rarity]! * Math.pow(Math.max(1, danger), index));
+  const weights = tiers.map((rarity, index) => {
+    const weight = odds[rarity]! * Math.pow(Math.max(1, danger), index);
+    if (source !== "creature" || rarity === "common") return weight;
+    return weight * youngCreatureShare(rarity, creatureLevel);
+  });
+  if (source === "creature") {
+    // What the young creature did not get of each colour, back to plain.
+    const lost = tiers.reduce((sum, rarity, index) =>
+      sum + odds[rarity]! * Math.pow(Math.max(1, danger), index) - weights[index]!, 0);
+    const common = tiers.indexOf("common");
+    if (common >= 0) weights[common] = weights[common]! + lost;
+  }
   const total = weights.reduce((sum, weight) => sum + weight, 0);
   let point = random() * total;
   for (let i = 0; i < tiers.length; i++) {
@@ -143,7 +171,7 @@ export function rollDrop(random: () => number, context: DropContext): ItemKey | 
     }
   }
 
-  const rarity = rollRarity(random, context.source, context.danger);
+  const rarity = rollRarity(random, context.source, context.danger, context.creatureLevel);
   const base = pickBase(random, rarity, context.classId);
   if (!base) return undefined;
   return encodeItem({ base: base.id, level, rarity, seed: newSeed(random), classId: context.classId });
