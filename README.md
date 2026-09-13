@@ -173,6 +173,15 @@ position into CSS pixels every frame. Babylon's GUI package would render text in
 a texture — another dependency, and soft text up close. As with most MMOs the
 labels are not occluded by geometry: you can read a name through a rock.
 
+A villager's quest mark used to be a 14px character before the name, seen
+only as far as the name — 45 m — so in a town of lit windows the way to find
+work was to read every label. It is now a large gold "!" or "?" floating over
+the head, bobbing, and seen on its own from 140 m (`MARKER_DISTANCE`); the
+name appears when you are close enough to read it. Work under way keeps the
+small grey "…", and stays at name range. A vendor carries a gold **Shop** sign
+under the name, and a coin where they stand on the minimap and the world map
+zoomed in on a town.
+
 ## Art style
 
 **Voxels.** Every body, prop, building and tree is a grid of cells, meshed at

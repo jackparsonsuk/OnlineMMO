@@ -17,6 +17,9 @@ import { PLAYER_SIZE } from "@mmo/shared";
 /** Beyond this the label is clutter rather than information. */
 const MAX_DISTANCE = 45;
 
+/** A quest mark over a villager is seen from much further than a name. */
+const MARKER_DISTANCE = 140;
+
 /** Default height above a body's feet to float the label. Creatures pass
  *  their own, since a spider is a fraction of a player's height. */
 const DEFAULT_HEIGHT = PLAYER_SIZE + 0.55;
@@ -85,13 +88,22 @@ export class Nametags {
     this.tags.set(sessionId, tag);
   }
 
-  /** A mark before the name — a quest's "!" or "?". Empty removes it. */
+  /**
+   * A quest's "!" or "?", large, over the name. Empty removes it.
+   *
+   * It used to be a 14px character before the name, visible from as far as
+   * the name was — 45 m — which in a town of lit windows and lanterns is a
+   * mark you find by reading every label. Now it floats over the head, bobs,
+   * and is seen from `MARKER_DISTANCE`, alone, before the name is readable:
+   * the thing to walk towards should be what you see first.
+   */
   setMarker(sessionId: string, marker: string): void {
     const tag = this.tags.get(sessionId);
     if (!tag) return;
     let mark = tag.querySelector<HTMLElement>(".marker");
     if (!marker) {
       mark?.remove();
+      delete tag.dataset["marked"];
       return;
     }
     if (!mark) {
@@ -100,7 +112,24 @@ export class Nametags {
       tag.prepend(mark);
     }
     mark.textContent = marker;
-    mark.dataset["kind"] = marker === "?" ? "ready" : marker === "!" ? "offer" : "underway";
+    const kind = marker === "?" ? "ready" : marker === "!" ? "offer" : "underway";
+    mark.dataset["kind"] = kind;
+    // Only work to take or hand in is worth seeing from across town.
+    if (kind === "underway") delete tag.dataset["marked"];
+    else tag.dataset["marked"] = "";
+  }
+
+  /** A small sign under the name: what someone does ("Shop"). */
+  setRole(sessionId: string, role: string): void {
+    const tag = this.tags.get(sessionId);
+    if (!tag) return;
+    let badge = tag.querySelector<HTMLElement>(".role");
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "role";
+      tag.querySelector(".label")?.after(badge);
+    }
+    badge.textContent = role;
   }
 
   /**
@@ -215,10 +244,14 @@ export class Nametags {
       // Points behind the camera still project to a screen position — a
       // mirrored, nonsensical one. Drop them before projecting.
       const facing = toX * forwardX + toY * forwardY + toZ * forwardZ;
-      if (facing <= 0 || Math.hypot(toX, toY, toZ) > (target.maxDistance ?? MAX_DISTANCE)) {
+      const range = Math.hypot(toX, toY, toZ);
+      // Past the name's own reach, a quest mark still shows, alone.
+      const distant = range > (target.maxDistance ?? MAX_DISTANCE);
+      if (facing <= 0 || (distant && !(tag.dataset["marked"] !== undefined && range <= MARKER_DISTANCE))) {
         if (!tag.hidden) tag.hidden = true;
         continue;
       }
+      if (tag.classList.contains("distant") !== distant) tag.classList.toggle("distant", distant);
 
       this.scratch.set(target.x, worldY, target.z);
       const projected = Vector3.Project(

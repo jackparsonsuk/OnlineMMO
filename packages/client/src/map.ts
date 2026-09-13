@@ -68,7 +68,9 @@ interface Landmark {
   name: string;
   x: number;
   z: number;
-  kind: "waystone" | "settlement" | "gate" | "ruin";
+  /** A vendor is a coin where they stand: a town's shop should be findable
+   *  without walking up to everyone in it. */
+  kind: "waystone" | "settlement" | "gate" | "ruin" | "vendor";
   colour: string;
   /**
    * The waystone at this place, if there is one — its own id for a waystone,
@@ -198,6 +200,7 @@ const LABEL_LINE_HEIGHT = 14;
  */
 const RUIN_LABEL_ZOOM = 1.6;
 const AREA_LABEL_ZOOM = 2.2;
+const VENDOR_ZOOM = 4;
 
 /** Round distances a scale bar is allowed to be. */
 const SCALE_STEPS = [25, 50, 100, 200, 500, 1000, 2000, 4000];
@@ -278,6 +281,10 @@ export class Cartographer {
         name: settlement.name, x: settlement.x, z: settlement.z, kind: "settlement", colour: "#ffc46b",
         ...(townStone.has(settlement.id) ? { stone: townStone.get(settlement.id)! } : {}),
       });
+      for (const villager of settlement.villagers) {
+        if (!villager.vendor) continue;
+        this.landmarks.push({ name: `${villager.name} · Shop`, x: villager.x, z: villager.z, kind: "vendor", colour: "#e8c23f" });
+      }
     }
     for (const ruin of ostra.ruins) {
       this.landmarks.push({ name: ruin.name, x: ruin.x, z: ruin.z, kind: "ruin", colour: "#cdbb8c" });
@@ -496,6 +503,8 @@ export class Cartographer {
       this.compassMarks.push(tick);
     }
     for (const landmark of this.landmarks) {
+      // The town is on the compass; its shop would only crowd it.
+      if (landmark.kind === "vendor") continue;
       const mark = document.createElement("span");
       mark.className = `landmark ${landmark.kind}`;
       mark.style.setProperty("--mark", landmark.colour);
@@ -755,6 +764,9 @@ export class Cartographer {
     }
 
     for (const landmark of this.landmarks) {
+      // A shop is a speck inside its town until the map is close enough to
+      // show the town's streets.
+      if (landmark.kind === "vendor" && this.zoom < VENDOR_ZOOM) continue;
       const [px, py] = toPx(landmark.x, landmark.z);
       drawLandmark(ctx, landmark, px, py, 1.4, this.woken(landmark));
       // A Gate is named by the world it opens on, which the zone banner and
@@ -947,7 +959,8 @@ export class Cartographer {
     let nearest: Landmark | undefined;
     let best = Infinity;
     for (const landmark of this.landmarks) {
-      if (landmark.kind === "gate") continue;
+      // You are in Daso, not "North of Mott".
+      if (landmark.kind === "gate" || landmark.kind === "vendor") continue;
       const d = Math.hypot(landmark.x - x, landmark.z - z);
       if (d < best) {
         best = d;
@@ -1115,6 +1128,20 @@ function drawLandmark(
         ctx.fill();
       }
     }
+    ctx.restore();
+    return;
+  }
+  if (landmark.kind === "vendor") {
+    // A coin: gold, rimmed dark, with a struck ring inside.
+    const r = 4 * scale;
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.5, 0, Math.PI * 2);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "#6b4d0a";
+    ctx.stroke();
     ctx.restore();
     return;
   }

@@ -1901,17 +1901,61 @@ body.no-hud :is(#compass, #minimap, #actionbar, #corner, #target-frame, #party, 
 /* --- quests ------------------------------------------------------------------ */
 
 /* The mark over a villager's head: gold "!" for work on offer, gold "?" for
-   something to hand in, grey "…" for something under way. */
+   something to hand in, grey "…" for something under way. Large and floating
+   over the name rather than beside it, and seen from across town on its own
+   (`.distant`, see MARKER_DISTANCE) — the thing to walk towards should be the
+   first thing you see. */
 .nametag .marker {
-  display: inline-block;
-  margin-right: 5px;
-  font-weight: 800;
-  font-size: 14px;
-  color: #f0c83c;
-  text-shadow: 0 0 6px rgb(240 200 60 / 60%), 0 1px 2px #000;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% - 2px);
+  transform: translateX(-50%);
+  font: 900 36px/1 "Arial Black", Impact, "Segoe UI Black", system-ui, sans-serif;
+  color: #ffd23c;
+  -webkit-text-stroke: 2px #3a2600;
+  paint-order: stroke fill;
+  text-shadow: 0 0 12px rgb(255 200 50 / 75%), 0 2px 3px #000;
+  animation: marker-bob 1.6s ease-in-out infinite;
 }
 
-.nametag .marker[data-kind="underway"] { color: #9aa7b4; text-shadow: 0 1px 2px #000; font-size: 12px; }
+.nametag .marker[data-kind="ready"] { color: #ffe066; }
+
+.nametag .marker[data-kind="underway"] {
+  font-size: 20px;
+  color: #9aa7b4;
+  -webkit-text-stroke: 0;
+  text-shadow: 0 1px 2px #000;
+  animation: none;
+}
+
+@keyframes marker-bob {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -4px; }
+}
+
+/* Too far to read the name: only the mark is left, and smaller. */
+.nametag.distant { background: none; border-color: transparent; }
+.nametag.distant::before, .nametag.distant > :not(.marker) { visibility: hidden; }
+.nametag.distant .marker { font-size: 24px; }
+
+/* A speech bubble clears the mark. */
+.nametag[data-marked] .bubble { bottom: calc(100% + 36px); }
+
+/* What someone does, under their name: a vendor's "Shop". */
+.nametag .role {
+  display: block;
+  margin: 1px auto 0;
+  width: max-content;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #1c1405;
+  background: #e8c23f;
+  text-shadow: none;
+}
 
 .speech-talk { display: block; margin-top: 4px; font-size: 11px; color: #f0d98a; font-style: normal; }
 

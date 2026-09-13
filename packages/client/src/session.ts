@@ -1286,6 +1286,8 @@ export function createSession(
         y: heightAt(villager.x, villager.z, ostra.terrain),
       });
       nametags.add(key, villager.name, villager.colour, "villager");
+      // Nothing about a vendor's body says "shop"; the label has to.
+      if (villager.vendor) nametags.setRole(key, "Shop");
     }
   }
   /** The villager you are close enough to hear, this frame. */
