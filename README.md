@@ -673,6 +673,36 @@ Past Terra, the Gates: the Ascendant is meant for 30–65 and Barals for 65–10
 Both are still courtyards; their camps sit at 35 and 68–72 as placeholders.
 Packs grow with level up to three extra creatures and no further.
 
+### Fighting above your level
+
+Levels used to change only a creature's numbers, and a telegraphed fight
+does not care much about numbers: every blow is painted on the ground, so a
+level-4 Warrior could step out of a level-20 Risen's overhead for as long as
+it took, and did. In WoW the level itself fights you, and so it does here
+(`LEVEL_GAP` and `levelGapEffect` in `combat.ts`). For each level a creature
+stands above you:
+
+| | Per level | Limit |
+| --- | --- | --- |
+| Your blows miss it ("Miss") | +6% | 45% |
+| Your blows that land do less | −10% | 25% of their worth |
+| Its blows do more | +15% | ×2.5 |
+| Your guard takes less off | −10 points of 80% | 30% |
+| Its windup is shorter | −6% | 55% of its own |
+| It notices you further off | +1 m | +8 m |
+
+and from **three levels up your heavy blows no longer stagger it**, which is
+most of how a Warrior handles a Risen. One level up is a hard fight you should
+win; three one you will probably lose; five and more you run from. A miss is
+still an attack — it adds threat and rallies the camp — so swinging at
+something far above you is how to find out. Nothing is given back the other
+way: out-levelling a creature already makes it pay and hurt less.
+
+The windup is scaled by the level of whoever it swings at, and sent in
+`enemySwing` as always, so the painted wedge fills at the true speed. The
+Hollow King (level 10) is two levels up on a party of level-8s, which is
+meant: it is a party's fight.
+
 ### Difficulty by Ostra
 
 Creatures scale per Ostra too, so travel is a difficulty choice rather than a

@@ -255,7 +255,7 @@ interface CastPayload {
   spell: string;
   yaw: number;
   combo: number;
-  hits: Array<{ id: string; amount: number; crit: boolean; killed: boolean; staggered: boolean }>;
+  hits: Array<{ id: string; amount: number; crit: boolean; killed: boolean; staggered: boolean; missed?: boolean }>;
 }
 
 interface EnemyView {
@@ -975,6 +975,7 @@ export function createSession(
         showCast(view, spell, payload.combo, payload.yaw, now, origin, () => {
           const at = origin();
           for (const hit of payload.hits) {
+            if (hit.missed) continue;
             strikeEnemy(hit.id, at.x, at.z, hit.crit || payload.combo === STRIKE_COMBO_LENGTH, performance.now());
           }
           if (payload.hits.length > 0) play(spell.id === "throw" ? "throwHit" : "hit", at.x, at.z, 0.6);
@@ -984,6 +985,12 @@ export function createSession(
 
     for (const hit of payload.hits) {
       const point = enemyPoint(hit.id);
+      if (hit.missed) {
+        // Turned aside by something above your level (LEVEL_GAP).
+        if (point) combatText.spawn(now, point.x, point.y + 0.4, point.z, "Miss", mine ? "note" : "other");
+        if (mine) predictedHits.delete(hit.id);
+        continue;
+      }
       if (point) {
         combatText.spawn(
           now, point.x, point.y + 0.4, point.z,

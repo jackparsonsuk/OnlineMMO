@@ -1,6 +1,7 @@
 import {
   EnemyState,
   isInArc,
+  levelGapEffect,
   moveBody,
   PLAYER_RADIUS,
   STAGGER_MS,
@@ -81,7 +82,12 @@ export interface AITarget {
   sessionId: string;
   x: number;
   z: number;
+  /** A creature above this sees them sooner and swings faster (LEVEL_GAP). */
+  level: number;
 }
+
+/** What the AI reads of a creature beyond where it stands. */
+type Creature = MoveState & { health: number; state: number; level: number };
 
 /** What a creature did this tick that the room needs to act on. */
 export type EnemyEvent =
@@ -207,7 +213,7 @@ export function rally(brain: EnemyBrain, attacker: string): void {
  *   logic across two files for no gain.
  */
 export function stepEnemy(
-  enemy: MoveState & { health: number; state: number },
+  enemy: Creature,
   brain: EnemyBrain,
   archetype: EnemyArchetype,
   dt: number,
@@ -277,7 +283,7 @@ export function stepEnemy(
 
 /** Start winding up on the quarry if it is in reach and the cooldown is done. */
 function beginAttack(
-  enemy: MoveState & { state: number },
+  enemy: Creature,
   brain: EnemyBrain,
   archetype: EnemyArchetype,
   targets: readonly AITarget[],
@@ -291,13 +297,14 @@ function beginAttack(
   if (distance(enemy.x, enemy.z, quarry.x, quarry.z) > archetype.attackRange) return undefined;
 
   // Committed: this direction, this target, no tracking. That is what makes
-  // it dodgeable.
+  // it dodgeable — less so the further it stands above whoever it swings at.
+  const windupMs = Math.round(archetype.windupMs * levelGapEffect(enemy.level, quarry.level, 0).windup);
   brain.windupYaw = Math.atan2(quarry.x - enemy.x, quarry.z - enemy.z);
   brain.windupTarget = quarry.sessionId;
-  brain.windupUntil = now + archetype.windupMs;
-  brain.nextAttackAt = now + archetype.windupMs + archetype.attackCooldownMs;
+  brain.windupUntil = now + windupMs;
+  brain.nextAttackAt = now + windupMs + archetype.attackCooldownMs;
   enemy.yaw = brain.windupYaw;
-  return { type: "windup", target: quarry.sessionId, yaw: brain.windupYaw, ms: archetype.windupMs };
+  return { type: "windup", target: quarry.sessionId, yaw: brain.windupYaw, ms: windupMs };
 }
 
 /** The windup is over: did the target get out of the way? */
@@ -343,7 +350,7 @@ function resolveBlow(
  * line makes the creature start and stop every tick.
  */
 function pickQuarry(
-  enemy: MoveState,
+  enemy: Creature,
   brain: EnemyBrain,
   archetype: EnemyArchetype,
   targets: readonly AITarget[],
@@ -355,9 +362,12 @@ function pickQuarry(
     const range = distance(enemy.x, enemy.z, target.x, target.z);
     const threat = brain.threat.get(target.sessionId) ?? 0;
     const current = target.sessionId === brain.quarry;
+    // Something well above you notices you from further off — and, so the
+    // gap between noticing and giving up survives, lets go further off too.
+    const sooner = levelGapEffect(enemy.level, target.level, 0).aggro;
     const limit = threat > 0
-      ? archetype.deaggroRadius + PROVOKED_REACH
-      : current ? archetype.deaggroRadius : archetype.aggroRadius;
+      ? archetype.deaggroRadius + sooner + PROVOKED_REACH
+      : current ? archetype.deaggroRadius + sooner : archetype.aggroRadius + sooner;
     if (range > limit) continue;
 
     const score = (threat > 0 ? 1000 + threat * (current ? 1.1 : 1) : 0) - range;

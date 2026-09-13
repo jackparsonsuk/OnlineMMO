@@ -3,6 +3,7 @@ import {
   addXp,
   applyInput,
   armourReduction,
+  levelGapEffect,
   BATTLE_CRY_HOLD_MS,
   buildingColliders,
   campsIn,
@@ -1009,7 +1010,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       // Nothing hunts a corpse — without this, creatures would stand over a
       // dead player swinging until they respawned somewhere else entirely.
       if (!session || session.transferring || player.health === 0) continue;
-      this.aiTargets.push({ sessionId, x: player.x, z: player.z });
+      this.aiTargets.push({ sessionId, x: player.x, z: player.z, level: session.level });
     }
 
     for (const [enemyId, enemy] of this.state.enemies) {
@@ -1241,9 +1242,22 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     const hits: CastHit[] = [];
     let dealt = 0;
     for (const { id, enemy } of struck) {
+      // A creature above you turns aside some blows and shrugs off part of
+      // the rest (see LEVEL_GAP).
+      const gap = levelGapEffect(enemy.level, session.level, BLOCK_REDUCTION);
+      if (Math.random() < gap.miss) {
+        const brain = this.brains.get(id);
+        // A miss is still an attack: it knows who swung at it.
+        if (brain) {
+          takeHit(brain, this.archetypeFor(enemy), sessionId, 1, 0, 0, 0, false, now);
+          this.rallyCampMates(id, brain, enemy, sessionId);
+        }
+        hits.push({ id, amount: 0, crit: false, killed: false, staggered: false, missed: true });
+        continue;
+      }
       const crit = Math.random() < critChance;
       const amount = Math.max(1, Math.round(
-        base * (finisher ? COMBO_FINISHER_MULTIPLIER : 1) * (crit ? CRIT_MULTIPLIER : 1),
+        base * gap.dealt * (finisher ? COMBO_FINISHER_MULTIPLIER : 1) * (crit ? CRIT_MULTIPLIER : 1),
       ));
       dealt += Math.min(amount, enemy.health);
       enemy.health = Math.max(0, enemy.health - amount);
@@ -1260,7 +1274,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         const dz = enemy.z - player.z;
         const length = Math.hypot(dx, dz) || 1;
         const knockback = finisher ? COMBO_FINISHER_KNOCKBACK : spell.knockback;
-        staggered = spell.stagger || finisher;
+        staggered = (spell.stagger || finisher) && gap.staggers;
         const archetype = this.archetypeFor(enemy);
         takeHit(brain, archetype, sessionId, amount, dx / length, dz / length, knockback, staggered, now);
         // A golem shrugs it off; tell the client so it doesn't claim otherwise.
@@ -2270,6 +2284,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       return;
     }
     const reduction = armourReduction(session.stats.totals.armour, attackerLevel);
+    const gap = levelGapEffect(attackerLevel, session.level, BLOCK_REDUCTION);
     // A raised guard takes most of a blow from the front. The front is judged
     // from where the blow came from — the creature, or a slam's centre — and
     // where you face, which is where your camera looks.
@@ -2280,7 +2295,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const off = Math.abs(Math.atan2(Math.sin(bearing - player.yaw), Math.cos(bearing - player.yaw)));
       blocked = off <= BLOCK_ARC;
     }
-    const amount = Math.max(1, Math.round(raw * (1 - reduction) * (blocked ? 1 - BLOCK_REDUCTION : 1)));
+    const amount = Math.max(1, Math.round(raw * gap.taken * (1 - reduction) * (blocked ? 1 - gap.block : 1)));
     player.health = Math.max(0, player.health - amount);
     // Holding an elite's attention is a share of the fight (see eliteFell).
     const fight = this.eliteOf.get(byEnemyId);
@@ -2765,4 +2780,6 @@ interface CastHit {
   killed: boolean;
   /** Interrupted — the client cancels its telegraph and plays a stagger. */
   staggered: boolean;
+  /** Turned aside by a creature above your level: no damage. */
+  missed?: boolean;
 }

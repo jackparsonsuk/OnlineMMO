@@ -61,6 +61,82 @@ export const COMBO_FINISHER_KNOCKBACK = 1.7;
  *  moment: an interrupted Risen overhead is a blow you never take. */
 export const STAGGER_MS = 700;
 
+// --- fighting above your level -------------------------------------------------
+
+/**
+ * What each level a creature stands above you costs you in a fight.
+ *
+ * Levels used to change only the numbers — health and damage — and a
+ * telegraphed fight does not care about numbers: every blow is painted on the
+ * ground, so a patient level-4 Warrior could step out of a level-20 Risen's
+ * overhead for as long as it took, and did. What makes a level above you a
+ * wall in WoW is that the level itself fights you, and so it does here:
+ *
+ * - your blows **miss** it more often, and those that land do less;
+ * - its blows land **harder**, and your guard holds back less of them;
+ * - it **winds up faster**, so the painted wedge gives you less time;
+ * - from a few levels up, your heavy blows no longer **stagger** it;
+ * - and it notices you from further off.
+ *
+ * One level up is a hard fight you should win; three is one you will
+ * probably lose; five and up you run from. A creature below you gets nothing
+ * back the other way — being out-levelled already pays less and hits less.
+ */
+export const LEVEL_GAP = {
+  /** Chance per level that a blow misses outright, and the ceiling. */
+  missPerLevel: 0.06,
+  maxMiss: 0.45,
+  /** Damage lost per level on the blows that land, and the floor. */
+  damageLossPerLevel: 0.1,
+  minDamage: 0.25,
+  /** Its damage gained per level, and the ceiling. */
+  incomingPerLevel: 0.15,
+  maxIncoming: 2.5,
+  /** Block's reduction lost per level, and the least a guard still takes. */
+  blockLossPerLevel: 0.1,
+  minBlock: 0.3,
+  /** Windup lost per level, and the shortest it gets as a share of its own. */
+  windupLossPerLevel: 0.06,
+  minWindup: 0.55,
+  /** From this many levels up, heavy blows no longer interrupt it. */
+  unstaggerable: 3,
+  /** Metres further it notices you per level, and the most. */
+  aggroPerLevel: 1,
+  maxAggro: 8,
+} as const;
+
+export interface LevelGapEffect {
+  /** Chance a blow of yours misses it outright. */
+  miss: number;
+  /** Multiplier on the damage of your blows that land. */
+  dealt: number;
+  /** Multiplier on the damage its blows do you. */
+  taken: number;
+  /** What a raised guard takes off its blows (`BLOCK_REDUCTION` when even). */
+  block: number;
+  /** Multiplier on its windup. */
+  windup: number;
+  /** Whether your heavy blows still stagger it. */
+  staggers: boolean;
+  /** Metres added to its aggro radius. */
+  aggro: number;
+}
+
+/** What a creature of `creatureLevel` has over a player of `playerLevel`. */
+export function levelGapEffect(creatureLevel: number, playerLevel: number, blockReduction: number): LevelGapEffect {
+  const gap = Math.max(0, creatureLevel - playerLevel);
+  const g = LEVEL_GAP;
+  return {
+    miss: Math.min(g.maxMiss, g.missPerLevel * gap),
+    dealt: Math.max(g.minDamage, 1 - g.damageLossPerLevel * gap),
+    taken: Math.min(g.maxIncoming, 1 + g.incomingPerLevel * gap),
+    block: Math.max(Math.min(g.minBlock, blockReduction), blockReduction - g.blockLossPerLevel * gap),
+    windup: Math.max(g.minWindup, 1 - g.windupLossPerLevel * gap),
+    staggers: gap < g.unstaggerable,
+    aggro: Math.min(g.maxAggro, g.aggroPerLevel * gap),
+  };
+}
+
 /** How long a cast's ground marker is drawn for. Purely cosmetic. */
 export const SWING_VISUAL_MS = 180;
 
