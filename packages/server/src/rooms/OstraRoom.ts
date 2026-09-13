@@ -100,6 +100,18 @@ import {
   tradeXpToNext,
   type TradeId,
   type Trades,
+  biteDelayMs,
+  biteWindowMs,
+  castPoint,
+  catchChances,
+  FISHING_BITE,
+  FISHING_NONE,
+  FISHING_WAITING,
+  gatherXpFor,
+  lowestCatchLevel,
+  RECAST_MS,
+  tradeLevel,
+  type WatersId,
   castSteps,
   isMoving,
   isDodging,
@@ -233,6 +245,11 @@ interface Session {
   goods: Goods;
   /** Total XP in each trade. */
   trades: Trades;
+  /** A line in the water: what lives there, when it bites, and when the
+   *  bite is gone. `Player.fishing` says which of those it is at. */
+  fishing: { waters: WatersId; biteAt: number; windowEnd: number } | undefined;
+  /** Wall-clock ms when another cast may start. */
+  fishReadyAt: number;
   /** When their recent chat lines were sent, for the flood limit. */
   chatTimes: number[];
 }
@@ -456,6 +473,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       this.onVendorSell(client, message?.vendor, message?.item));
     this.onMessage("vendorSellAll", (client, message: { vendor?: unknown }) =>
       this.onVendorSell(client, message?.vendor, undefined));
+    this.onMessage("fishCast", (client) => this.onFishCast(client));
+    this.onMessage("fishHook", (client) => this.onFishHook(client));
     this.onMessage("vendorSellGoods", (client, message: { vendor?: unknown; good?: unknown }) =>
       this.onVendorSellGoods(client, message?.vendor, message?.good));
     this.onMessage("vendorBuy", (client, message: { vendor?: unknown; index?: unknown }) =>
@@ -552,6 +571,11 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
           // A raised guard, for a class whose guard is a block. Set before the
           // cast step, which will not start a swing behind a shield.
           player.blocking = input.block === true && getClass(session.classId).guard === "block";
+          // Anything but standing still reels the line in: moving, jumping,
+          // dodging, a raised guard (all `isMoving`), an ability or the heal.
+          if (session.fishing && (isMoving(input) || input.cast || input.heal)) {
+            this.endFishing(sessionId, session, player, "cancelled", now);
+          }
           this.stepCast(sessionId, session, player, input, now);
           if (input.heal) this.tryHeal(sessionId, session, player, now);
         }
@@ -562,6 +586,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       this.stepEnemies(ctx.dt, world, now);
       this.stepElites(now);
       this.updateCombatFlags(now);
+      this.stepFishing(now);
       this.regenerate(ctx.dt, now);
       this.processRespawns(now);
       this.processGround(now);
@@ -688,6 +713,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       waystones: [...character.waystones],
       goods: { ...character.goods },
       trades: { ...character.trades },
+      fishing: undefined,
+      fishReadyAt: 0,
       chatTimes: [],
     });
     this.announcePresence(client.sessionId);
@@ -1393,6 +1420,115 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     this.clients.getById(sessionId)?.send("xp", { level: session.level, xp: session.xp, gained: amount });
   }
 
+  // --- fishing ---------------------------------------------------------------------
+
+  /**
+   * Cast a line: straight ahead from where the player stands and faces, onto
+   * the first water deep enough (`castPoint`). Refused out loud — no water,
+   * in a fight, nothing here bites for you yet — so E never silently does
+   * nothing.
+   */
+  private onFishCast(client: Client): void {
+    const session = this.sessions.get(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    const now = Date.now();
+    if (!session || !player || session.transferring || player.health === 0) return;
+    if (session.fishing || session.pendingCast || now < session.fishReadyAt) return;
+    if (player.inCombat) {
+      client.send("fishResult", { result: "combat" });
+      return;
+    }
+    const point = castPoint(this.ostra.terrain, player.x, player.z, player.yaw);
+    if (!point) {
+      client.send("fishResult", { result: "noWater" });
+      return;
+    }
+    const level = tradeLevel(session.trades, "fishing");
+    const lowest = lowestCatchLevel(point.waters);
+    if (level < lowest) {
+      client.send("fishResult", { result: "tooLow", level: lowest, name: point.name, waters: point.waters });
+      return;
+    }
+    session.fishing = { waters: point.waters, biteAt: now + biteDelayMs(level, Math.random()), windowEnd: 0 };
+    player.fishing = FISHING_WAITING;
+    player.bobberX = point.x;
+    player.bobberZ = point.z;
+  }
+
+  /**
+   * The click. Before a bite it only pulls the line in empty; during one it
+   * lands whatever was on it, rolled here from what lives in that water at
+   * this player's level.
+   */
+  private onFishHook(client: Client): void {
+    const session = this.sessions.get(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    const fishing = session?.fishing;
+    if (!session || !player || !fishing) return;
+    const now = Date.now();
+    if (player.fishing !== FISHING_BITE) {
+      this.endFishing(client.sessionId, session, player, "early", now);
+      return;
+    }
+    if (now > fishing.windowEnd) {
+      this.endFishing(client.sessionId, session, player, "missed", now);
+      return;
+    }
+
+    const level = tradeLevel(session.trades, "fishing");
+    const chances = catchChances(fishing.waters, level);
+    let roll = Math.random();
+    let fish = chances[chances.length - 1];
+    for (const candidate of chances) {
+      roll -= candidate.chance;
+      if (roll <= 0) {
+        fish = candidate;
+        break;
+      }
+    }
+    if (!fish) {
+      this.endFishing(client.sessionId, session, player, "missed", now);
+      return;
+    }
+    // A full satchel lets the fish go, but the catch still taught you something.
+    const kept = addGoods(session.goods, fish.good, 1) > 0;
+    this.endFishing(client.sessionId, session, player, "caught", now, { good: fish.good, kept });
+    this.grantTradeXp(client.sessionId, session, "fishing", gatherXpFor(fish.level, level));
+    if (kept) this.sendProfile(client.sessionId, session);
+  }
+
+  /** Once a tick: bites arrive, bites are missed, and a fight ends it all. */
+  private stepFishing(now: number): void {
+    for (const [sessionId, session] of this.sessions) {
+      const fishing = session.fishing;
+      if (!fishing) continue;
+      const player = this.state.players.get(sessionId);
+      if (!player) continue;
+      if (player.health === 0 || player.inCombat || session.transferring) {
+        this.endFishing(sessionId, session, player, "cancelled", now);
+      } else if (player.fishing === FISHING_WAITING && now >= fishing.biteAt) {
+        player.fishing = FISHING_BITE;
+        fishing.windowEnd = now + biteWindowMs(tradeLevel(session.trades, "fishing"));
+      } else if (player.fishing === FISHING_BITE && now > fishing.windowEnd) {
+        this.endFishing(sessionId, session, player, "missed", now);
+      }
+    }
+  }
+
+  private endFishing(
+    sessionId: string,
+    session: Session,
+    player: Player,
+    result: "caught" | "missed" | "early" | "cancelled",
+    now: number,
+    detail: Record<string, unknown> = {},
+  ): void {
+    session.fishing = undefined;
+    session.fishReadyAt = now + RECAST_MS;
+    player.fishing = FISHING_NONE;
+    this.clients.getById(sessionId)?.send("fishResult", { result, ...detail });
+  }
+
   /**
    * Add XP to a trade. Only yours to know, like the pack: nobody nearby is
    * told, because a fishing level is not a moment the way a character level
@@ -1882,6 +2018,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     player.z = z;
     player.y = groundHeight(this.ostra, x, z);
     this.standStill(player);
+    if (session.fishing) this.endFishing(client.sessionId, session, player, "cancelled", Date.now());
     session.suppressedGate = travel ? undefined : this.gateContaining(x, z)?.id;
     this.releaseFrom(client.sessionId);
     client.send("teleported", { x, z });

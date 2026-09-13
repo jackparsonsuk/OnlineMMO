@@ -16,7 +16,8 @@ export type Sound =
   | "throw" | "throwHit" | "sunder" | "cry" | "hurt" | "evade"
   | "windup" | "kill" | "pickup" | "death" | "levelUp"
   | "growl" | "snort" | "gurgle" | "crackle" | "rumble"
-  | "spit" | "charge" | "burst" | "slam";
+  | "spit" | "charge" | "burst" | "slam"
+  | "cast" | "plop" | "bite" | "reel" | "catch";
 
 const STORAGE_KEY = "ostracon.muted";
 
@@ -188,6 +189,34 @@ export class SoundBoard {
       case "slam":
         this.thud(t, 70, 25, 0.6, 1.0 * volume);
         this.rumble(t, 0.7, 0.7 * volume);
+        break;
+      // Fishing: quiet sounds, because it is a quiet thing to do.
+      case "cast":
+        // The rod whipped forward, and the line singing off the reel.
+        this.whoosh(t, 900 * pitch, 2400 * pitch, 0.2, 0.22 * volume);
+        this.tone(t + 0.12, 2200 * pitch, 1500 * pitch, 0.28, "triangle", 0.035 * volume, 3000);
+        break;
+      case "plop":
+        // A small weight into water: a pitched drop and a wet crackle.
+        this.thud(t, 520 * pitch, 180, 0.09, 0.32 * volume);
+        this.crack(t + 0.01, 1800 * pitch, 0.06, 0.12 * volume);
+        break;
+      case "bite":
+        // Something takes it: two sharp splashes close together.
+        this.thud(t, 380 * pitch, 120, 0.1, 0.45 * volume);
+        this.crack(t, 1500 * pitch, 0.09, 0.3 * volume);
+        this.thud(t + 0.14, 420 * pitch, 140, 0.08, 0.35 * volume);
+        this.crack(t + 0.14, 1700 * pitch, 0.07, 0.22 * volume);
+        break;
+      case "reel":
+        // The ratchet: a run of tiny clicks.
+        for (let i = 0; i < 7; i++) this.crack(t + i * 0.035, 4200, 0.012, 0.1 * volume);
+        break;
+      case "catch":
+        this.thud(t, 300 * pitch, 110, 0.12, 0.4 * volume);
+        this.crack(t, 1400, 0.1, 0.28 * volume);
+        this.tone(t + 0.1, 784, 784, 0.1, "triangle", 0.12 * volume);
+        this.tone(t + 0.19, 1175, 1175, 0.18, "triangle", 0.12 * volume);
         break;
     }
   }

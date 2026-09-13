@@ -110,7 +110,13 @@ interface PlayerParts {
   chest: VoxelModel;
   head: VoxelModel;
   sword: VoxelModel;
+  rod: VoxelModel;
 }
+
+/** The rod's length, in metres: 44 cells at 1/32 m. */
+const ROD_LENGTH = 44 / 32;
+/** How far the rod's butt sits behind the hand, so the fist closes on the grip. */
+const ROD_BUTT = 0.09;
 
 /**
  * The player's parts, at 1/32 m to a voxel.
@@ -209,7 +215,22 @@ function playerParts(colour: number): PlayerParts {
     v.speckle(STEEL, 41, [tint(STEEL, 0.9)], 0.18);
   });
 
-  return { leg, arm, chest, head, sword };
+  // A rod, only out while fishing: a cork grip, a brass reel hung beneath it,
+  // and a cane that thins to a red-whipped tip. Long, because the line leaving
+  // the tip is most of what says "fishing" from across a lake.
+  const CORK = 0xb08a5a;
+  const CANE = 0x7a5530;
+  const rod = build(3, 4, 44, (v) => {
+    v.fill(0, 1, 0, 3, 3, 9, CORK);
+    v.fill(1, 0, 3, 1, 1, 3, BRASS);
+    v.fill(0, 1, 9, 3, 3, 1, BRASS);
+    v.fill(1, 2, 10, 2, 2, 16, CANE);
+    v.fill(1, 2, 26, 1, 1, 17, tint(CANE, 1.15));
+    v.fill(1, 2, 43, 1, 1, 1, 0xb03a2a);
+    v.speckle(CORK, 51, [tint(CORK, 0.86), tint(CORK, 1.1)], 0.4);
+  });
+
+  return { leg, arm, chest, head, sword, rod };
 }
 
 /**
@@ -246,7 +267,14 @@ export function buildPlayerRig(scene: Scene, colour: number): Rig {
   const blade = joint(scene, "blade", armR, 0, -0.42 * u, 0.04 * u);
   part(scene, rig, blade, parts.sword, 0, 0, 0.266, skin);
 
-  Object.assign(rig.joints, { legL, legR, chest, head, armL, armR, blade });
+  // In the same hand as the blade, which is put away while the rod is out
+  // (see `Animator.angling`). `rodTip` is where the line leaves it.
+  const rod = joint(scene, "rod", armR, 0, -0.42 * u, 0.04 * u);
+  part(scene, rig, rod, parts.rod, 0, 0, ROD_LENGTH / 2 - ROD_BUTT, skin);
+  const rodTip = joint(scene, "rodTip", rod, 0, 0, ROD_LENGTH - ROD_BUTT);
+  rod.setEnabled(false);
+
+  Object.assign(rig.joints, { legL, legR, chest, head, armL, armR, blade, rod, rodTip });
   return rig;
 }
 
@@ -802,6 +830,10 @@ const mix = (a: number, b: number, t: number): number => a + (b - a) * t;
 const DODGE_POSE: ReadonlyArray<readonly [number, number]> = [[0, 0], [50, 1], [240, 1], [360, 0]];
 const DODGE_POSE_MS = 360;
 const LANDING_MS = 200;
+/** When, into a cast, the line leaves the rod — where the bobber starts to fly. */
+export const CAST_RELEASE_MS = 360;
+/** Reeling in, after the line comes out of the water. */
+const REEL_MS = 380;
 
 function keys(t: number, frames: ReadonlyArray<readonly [number, number]>): number {
   if (t <= frames[0]![0]) return frames[0]![1];
@@ -871,8 +903,24 @@ export class Animator {
   private dodgeAt = -Infinity;
   private dodgeX = 0;
   private dodgeZ = 0;
+  /**
+   * A player fishing: FISHING_NONE, FISHING_WAITING or FISHING_BITE, set each
+   * frame from the replicated state. The rod comes out, the cast is thrown,
+   * and a bite tugs at the arm; when it goes back to none the line is
+   * reeled in before the rod is put away.
+   */
+  angling = 0;
+  private lastAngling = 0;
+  private castAt = -Infinity;
+  private biteAt = -Infinity;
+  private reelAt = -Infinity;
 
   constructor(readonly rig: Rig) {}
+
+  /** When the current cast was thrown, on the frame clock; -Infinity if none. */
+  get castStartedAt(): number {
+    return this.angling > 0 ? this.castAt : -Infinity;
+  }
 
   /** A dodge starting, along world (x, z). */
   dodge(now: number, x: number, z: number): void {
@@ -909,6 +957,9 @@ export class Animator {
     this.dead = true;
     this.diedAt = now;
     this.action = undefined;
+    // The dead are not posed any further, so the rod is put away here.
+    this.rig.joints["rod"]?.setEnabled(false);
+    this.rig.joints["blade"]?.setEnabled(true);
   }
 
   /** Back up (a respawn) — rise out of the ground. */
@@ -1080,6 +1131,7 @@ export class Animator {
     }
 
     const action = this.action;
+    if (this.poseAngling(now, swing)) return;
     if (this.guarding && action?.type !== "cast") {
       // Both forearms up across the chest, the blade held crosswise in front,
       // leaning into it: a shield wall of one. The legs keep walking.
@@ -1154,6 +1206,63 @@ export class Animator {
       legL.rotation.x = keys(t, [[0, 0], [200, -0.5], [520, 0]]);
       legR.rotation.x = keys(t, [[0, 0], [200, -0.5], [520, 0]]);
     }
+  }
+
+  /**
+   * Fishing, if it is: the rod out, the cast, the wait, a bite, the reel. Owns
+   * which of the rod and the blade is in the hand. Returns whether it posed
+   * the arms, so nothing else does this frame.
+   */
+  private poseAngling(now: number, swing: number): boolean {
+    const j = this.rig.joints;
+    const rod = j["rod"], blade = j["blade"];
+    if (!rod || !blade) return false;
+    const armL = j["armL"]!, armR = j["armR"]!, chest = j["chest"]!, head = j["head"]!;
+
+    if (this.angling !== this.lastAngling) {
+      if (this.lastAngling === 0) this.castAt = now;
+      if (this.angling === 2) this.biteAt = now;
+      if (this.angling === 0) this.reelAt = now;
+      this.lastAngling = this.angling;
+    }
+
+    const reel = now - this.reelAt;
+    const reeling = this.angling === 0 && reel < REEL_MS && !this.dead;
+    const out = (this.angling > 0 && !this.dead) || reeling;
+    if (rod.isEnabled() !== out) {
+      rod.setEnabled(out);
+      blade.setEnabled(!out);
+    }
+    if (!out) return false;
+
+    if (reeling) {
+      // A sharp lift of the rod as the line comes in, then down to the side.
+      armR.rotation.x = keys(reel, [[0, -0.75], [120, -1.7], [REEL_MS, swing * 0.5]]);
+      armL.rotation.x = keys(reel, [[0, -0.5], [120, -0.9], [REEL_MS, 0]]);
+      chest.rotation.x = keys(reel, [[0, 0.04], [120, -0.12], [REEL_MS, 0]]);
+      return true;
+    }
+
+    // The throw: back over the shoulder and forward, the line leaving at
+    // CAST_RELEASE_MS; then held out over the water, the off hand on the reel.
+    const t = now - this.castAt;
+    armR.rotation.x = keys(t, [[0, swing * 0.5], [180, -2.5], [CAST_RELEASE_MS, -0.45], [620, -0.75]]);
+    armR.rotation.z = keys(t, [[0, 0], [180, -0.2], [620, -0.1]]);
+    armL.rotation.x = keys(t, [[0, 0], [CAST_RELEASE_MS, -0.35], [620, -0.62]]);
+    armL.rotation.z = keys(t, [[0, 0], [620, -0.35]]);
+    chest.rotation.x = keys(t, [[0, 0], [180, -0.14], [CAST_RELEASE_MS, 0.12], [620, 0.05]]);
+    // Breathing, while you wait: the tip nods.
+    armR.rotation.x += Math.sin(this.clock / 700) * 0.025;
+    head.rotation.x = 0.12;
+
+    if (this.angling === 2) {
+      // Something on the line: the arm is pulled at in jerks, and you lean into it.
+      const b = now - this.biteAt;
+      armR.rotation.x += 0.18 * Math.max(0, Math.sin(b / 55)) * Math.min(1, b / 90);
+      chest.rotation.x += 0.08;
+      head.rotation.x = 0.26;
+    }
+    return true;
   }
 
   private poseZombie(now: number): void {

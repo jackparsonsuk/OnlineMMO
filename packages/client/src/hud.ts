@@ -45,6 +45,8 @@ export class Hud {
   private gatePrompt = document.getElementById("gate-prompt") as HTMLElement;
   private waystonePrompt = document.getElementById("waystone-prompt") as HTMLElement;
   private waystoneShown: string | undefined;
+  private fishPrompt = document.getElementById("fish-prompt") as HTMLElement;
+  private fishShown: string | undefined;
   private speech = document.getElementById("speech") as HTMLElement;
   private speechWho = document.getElementById("speech-who") as HTMLElement;
   private speechLine = document.getElementById("speech-line") as HTMLElement;
@@ -180,6 +182,27 @@ export class Hud {
     if (name === undefined) return;
     this.waystonePrompt.innerHTML = `<b></b><span><kbd>E</kbd> travel</span>`;
     (this.waystonePrompt.querySelector("b") as HTMLElement).textContent = name;
+  }
+
+  /**
+   * What E does at the water: cast (naming the water), not yet (with the
+   * level it wants), wait, or — loudest — strike now. Only touches the DOM
+   * when that changes.
+   */
+  setFishPrompt(kind: "cast" | "tooLow" | "waiting" | "bite" | undefined, detail?: string): void {
+    const key = kind === undefined ? undefined : `${kind}:${detail ?? ""}`;
+    if (key === this.fishShown) return;
+    this.fishShown = key;
+    this.fishPrompt.hidden = kind === undefined;
+    this.fishPrompt.className = kind ?? "";
+    if (kind === undefined) return;
+    const text = kind === "cast" ? `<b></b><span><kbd>E</kbd> fish</span>`
+      : kind === "tooLow" ? `<b></b><span>needed to fish here</span>`
+        : kind === "waiting" ? `<span>Waiting for a bite · <kbd>E</kbd> reel in · move to stop</span>`
+          : `<b>Something's biting!</b><span><kbd>Click</kbd> or <kbd>E</kbd> to strike</span>`;
+    this.fishPrompt.innerHTML = text;
+    const name = this.fishPrompt.querySelector("b");
+    if (name && detail !== undefined && kind !== "bite") name.textContent = detail;
   }
 
   /**

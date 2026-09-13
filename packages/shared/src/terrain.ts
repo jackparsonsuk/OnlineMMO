@@ -142,6 +142,8 @@ export interface LakeDefinition {
   depth: number;
   /** Surface height. Omit to use the natural ground at the centre. */
   level?: number;
+  /** What lives in it — a `WatersId` in `fishing.ts`. Omit for a pond. */
+  waters?: string;
 }
 
 /** Where a point falls among the regions: the nearest, the runner-up, and how

@@ -35,7 +35,7 @@ sprint (out of combat), **Space** jump, **Q** dodge, **R** Second Wind (a heal),
 **Alt** held for a cursor, **Tab** to lock a target, **Esc** to let go (and,
 with nothing left to close, the game menu: log out, sign out, sound), **M** map
 (scroll to zoom, drag to pan), **I** (or **C**) character and pack, **E** talk
-to a villager, **J** quest log, **P** party, **Enter** chat, **H** this list,
+to a villager (or, facing open water, fish), **J** quest log, **P** party, **Enter** chat, **H** this list,
 scroll to zoom, walk into a Gate ring to travel.
 
 In development, **`` ` ``** (backtick) opens the dev menu: teleport by clicking
@@ -1127,6 +1127,53 @@ pays `10 + 2 × level`; below you it pays less, and nothing twelve levels down
 curve is about 140 catches to 11, 1,000 to 31 and 2,900 to 50. Trade levels
 are private, like the pack: a level-up is announced to you and nobody else, and
 the Satchel tab shows each trade's bar above what you have gathered.
+
+### Fishing
+
+Face open water and press **E**. A line goes out onto the first water deep
+enough to fish (`FISHING_DEPTH`, 35 cm) straight ahead, between 3 and 12 m;
+after four to twelve seconds — a third quicker at Fishing 50 — something bites,
+and a **click** or **E** hooks it. Too soon pulls the line in empty; too late
+and it got away. Moving, jumping, dodging, blocking, an ability, the heal, a
+fight or a teleport all reel the line in.
+
+**Which water it is decides what lives there.** Every lake names its `waters`
+in `ostras.ts` — Daso's millpond and the heartland pond are *ponds*, the
+Lowfen's are *meres*, the Brightwater's are *lakes*, and Fanshona's own lake
+keeps the Lanternfin — and the Morning Sea is the sea. Each has a table in
+`fishing.ts` of fish, the Fishing level each wants, and how often it bites.
+Your level decides three things: whether anything there bites at all (every
+water has a lowest fish, and below it the cast is refused *with the level it
+wants*, so a beginner at the sea is told to find a pond rather than left
+waiting forever — the sea wants 10); which fish you can catch, a fish just
+within reach biting at a third of its weight and all of it five levels later;
+and how long a bite waits for you, 850 ms plus 12 per level.
+
+**The server decides everything, and none of it is predicted**, because
+nothing about fishing moves anyone. The cast point is the shared `castPoint`,
+so the prompt at the water's edge says exactly what E will do; the server
+works it out again from where you really stand and face. It times the bite,
+and the click is judged against its own clock — so the window it keeps carries
+another 400 ms (`HOOK_LATENCY_MS`) for the round trip the bite has to make to
+you and the click has to make back. What is caught is rolled on the server from
+`catchChances`, like loot, into the satchel; a full stack lets the fish go but
+still pays the XP.
+
+**Everyone sees everyone fish.** `Player` replicates `fishing` (none, waiting,
+bite) and where the bobber sits, and `Anglers` (client `fishing.ts`) draws every
+line from that alone, yours included: the rod out of the same hand as the blade
+(which is put away), the throw, the bobber arcing out and plopping in, the line
+sagging from the rod's tip, ripples, and on a bite the bobber jerking under
+and the arm pulled at. A bite is nothing more than that state changing, so a
+friend on the far bank sees yours dip. A fishing body turns to face its
+bobber whatever the camera does. While a line is out, or a cast has just been
+asked for, the left button hooks rather than Strikes — and stays out of the
+fight until it is let go, or a held click would swing the moment the line
+came in. The sounds are synthesised like the rest: a whoosh and the line
+singing off the reel, a plop, a double splash for a bite, the ratchet.
+
+`fishingProblems()` checks at boot that every lake names waters that exist and
+is deep enough to fish at its middle, and logs `[fishing]` if not.
 
 ## Accounts
 

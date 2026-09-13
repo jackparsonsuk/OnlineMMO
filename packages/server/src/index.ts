@@ -6,7 +6,7 @@ import cors from "cors";
 import express from "express";
 import { matchMaker, Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
-import { DUNGEON_ROOM_NAME, OSTRA_IDS, ROOM_NAME, seaProblems, settlementProblems, unsafeElites, unsafeSpawns } from "@mmo/shared";
+import { DUNGEON_ROOM_NAME, fishingProblems, OSTRA_IDS, ROOM_NAME, seaProblems, settlementProblems, unsafeElites, unsafeSpawns } from "@mmo/shared";
 import { setServerContext } from "./context.js";
 import {
   AuthError,
@@ -273,6 +273,9 @@ for (const problem of settlementProblems()) {
 }
 for (const problem of seaProblems()) {
   console.warn(`[sea] ${problem}`);
+}
+for (const problem of fishingProblems()) {
+  console.warn(`[fishing] ${problem}`);
 }
 
 const orphans = store.countOrphanedCharacters();

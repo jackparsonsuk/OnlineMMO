@@ -43,6 +43,7 @@ packages/shared/   one copy of everything both sides must agree on
   itemNames.ts       names and lore from the item's seed
   goods.ts           gathered goods (fish): counts by id in the satchel, not the pack
   trades.ts          trade levels 1-50 (fishing), stored as total XP per trade
+  fishing.ts         castPoint, what lives in each water, bite timing
   levels.ts          character level 1-100: the XP curve, kill XP by level gap,
                      difficulty ("con") colours
   classes.ts         classes (the Warrior), per-level stats, ability unlocks,
@@ -75,6 +76,7 @@ packages/client/src/
   scenery.ts         thin-instanced trees/rocks/grass per chunk
   voxel.ts           the art style: voxel models, greedy mesher, per-cell AO
   rigs.ts            procedural animated bodies (Animator), built from voxels
+  fishing.ts         everyone's rod, line and bobber, drawn from Player.fishing
   daylight.ts        the day/night cycle, from the wall clock
   effects.ts combatText.ts audio.ts map.ts hud.ts nametags.ts scene.ts
 ```

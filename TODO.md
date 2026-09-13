@@ -48,7 +48,10 @@ smaller entries below; those are the first step towards them.
   built the curve stops at 30.
 - **Weather.** Rain and heavier fog, from the clock like day/night
   (`daylight.ts`) so it needs nothing from the server.
-- **Fishing** — Fanshona is a fishing town on a lake nobody can fish.
+- **More to fishing.** Rods as gear (better ones widening the bite window),
+  trophy catches as real items with a name and lore from their seed, fish that
+  only bite at night or in the rain, a fishing quest or two from Fanshona's
+  fishers, and fishing from Fanshona's dock once it can be walked.
 - **More trades.** Trades (`trades.ts`) and goods (`goods.ts`) are in, with
   fishing first. Logging for Daso and mining next — but trees and rocks are
   colliders both sides must agree on, so decide first whether a felled tree

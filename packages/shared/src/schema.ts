@@ -94,6 +94,14 @@ export const Player = schema({
    * the server refuses is a rubber-band — and because the HUD shows it.
    */
   inCombat: t.boolean().default(false),
+  /**
+   * FISHING_NONE, FISHING_WAITING or FISHING_BITE, and where the bobber sits.
+   * Public, so everyone draws the rod, the line and the dip of a bite; the
+   * server alone decides when that is and what was on the end of it.
+   */
+  fishing: t.uint8().default(0),
+  bobberX: t.float32().default(0),
+  bobberZ: t.float32().default(0),
 }, "Player");
 export type Player = SchemaType<typeof Player>;
 

@@ -56,7 +56,14 @@ import {
   type WorldState,
   isAttuned,
   WAYSTONE_USE_RANGE,
+  castPoint,
+  FISHING_BITE,
+  FISHING_NONE,
+  GOODS,
+  isGoodId,
+  lowestCatchLevel,
 } from "@mmo/shared";
+import { Anglers } from "./fishing.js";
 import type { Sound, SoundBoard } from "./audio.js";
 import { CombatText } from "./combatText.js";
 import { Effects, type ShardColour } from "./effects.js";
@@ -110,6 +117,10 @@ export interface OstraSession {
   nearestVillager(): VillagerDefinition | undefined;
   /** The waystone you are standing at, if any — E travels from it. */
   nearestWaystone(): WaystoneDefinition | undefined;
+  /** E at the water: cast a line, or strike at a bite. */
+  fish(): void;
+  /** Your Fishing level, for the prompt at the water's edge. */
+  setFishingLevel(level: number): void;
   /** Which stones this character has woken, for the prompt and the maps. */
   setWaystones(attuned: readonly string[]): void;
   /** Your level: what the world map's region bands are read against. */
@@ -143,6 +154,9 @@ export interface OstraSession {
     reconciler(): Reconciler<Player, Data<MoveInput>> | undefined;
   };
 }
+
+/** How long after asking to cast a click is still kept out of the fight. */
+const FISH_ASK_MS = 500;
 
 /** Your own step collides with no bodies — see `moveWorld`. */
 const NO_BODIES: readonly Collider[] = [];
@@ -532,6 +546,64 @@ export function createSession(
     audio.play(sound, volume * Math.max(0, Math.min(1, 1.15 - distance / 40)));
   }
 
+  const anglers = new Anglers(scene, ostra.terrain, effects, play);
+  /** Your Fishing level, as the server last said: the prompt says when a
+   *  water wants more of it. */
+  let fishingLevel = 1;
+  /** When we last asked to cast. Until the server's answer arrives, a click
+   *  is not a Strike — it would cancel the very cast it followed. */
+  let fishAskedAt = -Infinity;
+  /** The left button went down to hook, and has not come up: it stays out of
+   *  the fight until it does, or a held click would swing the moment the
+   *  line came in. */
+  let hookHeld = false;
+  /** The prompt is worked out every few frames: it walks the water ahead. */
+  let fishPromptAt = 0;
+
+  /** E, with nothing else to talk to: cast, or strike at what is on the line. */
+  function fish(): void {
+    if (!selfPlayer || selfPlayer.health === 0) return;
+    if (selfPlayer.fishing !== FISHING_NONE) {
+      room.send("fishHook");
+      return;
+    }
+    fishAskedAt = performance.now();
+    room.send("fishCast");
+  }
+
+  const FISH_NAMES = (waters: string, name: string): string =>
+    waters === "sea" ? name : `this ${name.toLowerCase()}`;
+
+  const offFishResult = room.onMessage("fishResult", (payload: {
+    result: string; good?: string; kept?: boolean; level?: number; name?: string; waters?: string;
+  }) => {
+    fishAskedAt = -Infinity;
+    switch (payload.result) {
+      case "caught": {
+        const good = isGoodId(payload.good) ? GOODS[payload.good] : undefined;
+        const name = good?.name ?? "something";
+        hud.flash(payload.kept === false ? `${name} — your satchel is full, so back it goes` : `Caught a ${name}`, "#a9d4e8");
+        audio.play("catch");
+        break;
+      }
+      case "missed":
+        hud.flash("It got away.", "#8b98a5");
+        break;
+      case "early":
+        hud.flash("Nothing on the line yet — wait for the bite.", "#8b98a5");
+        break;
+      case "noWater":
+        hud.flash("No water deep enough to fish in front of you.");
+        break;
+      case "tooLow":
+        hud.flash(`Nothing in ${FISH_NAMES(payload.waters ?? "", payload.name ?? "water")} bites for a fisher below ${payload.level}.`, "#f0d98a");
+        break;
+      case "combat":
+        hud.flash("Not while you're fighting.");
+        break;
+    }
+  });
+
   function shake(strength: number, ms: number, now: number): void {
     if (strength < shakeStrength && now < shakeUntil) return;
     shakeStrength = strength;
@@ -873,6 +945,7 @@ export function createSession(
   const offRemove = $(room.state).players.onRemove((_player: Player, sessionId: string) => {
     players.get(sessionId)?.rig.root.dispose(false, true);
     players.delete(sessionId);
+    anglers.remove(sessionId);
     meshes.delete(sessionId);
     nametags.remove(sessionId);
     if (sessionId === room.sessionId) {
@@ -1146,7 +1219,17 @@ export function createSession(
       // behind it), a dodge for one that rolls.
       const guardPressed = keyboard.takeGuard();
       const blocking = guard === "block" && keyboard.guardHeld() && (selfPlayer?.health ?? 0) > 0;
-      const wanted = blocking ? undefined : bar[keyboard.castSlot() - 1];
+      // With a line out, the left button strikes at the fish, not the air.
+      let slot = keyboard.castSlot();
+      const angling = (selfPlayer?.fishing ?? FISHING_NONE) !== FISHING_NONE || now - fishAskedAt < FISH_ASK_MS;
+      if (slot !== 1) {
+        hookHeld = false;
+      } else if (angling || hookHeld) {
+        if (!hookHeld && selfPlayer && selfPlayer.fishing !== FISHING_NONE) room.send("fishHook");
+        hookHeld = true;
+        slot = 0;
+      }
+      const wanted = blocking ? undefined : bar[slot - 1];
       input.data.moveX = axes.x;
       input.data.moveZ = axes.z;
       input.data.yaw = facingYaw();
@@ -1397,7 +1480,9 @@ export function createSession(
       view.dead = dead;
       // A raised guard: ours as we hold it, everyone else's as the server says.
       view.animator.guarding = !dead && (mine ? input.data.block : player.blocking);
+      view.animator.angling = player.fishing;
       view.animator.update(now, x, z, mine && keyboard.sprinting() && !player.inCombat);
+      anglers.update(now, sessionId, player, view.rig, view.animator, mine);
       if (player.level !== view.level) {
         view.level = player.level;
         nametags.setLevel(sessionId, player.level);
@@ -1598,6 +1683,20 @@ export function createSession(
         ? atStone.stone.name
         : undefined);
 
+      // What E does at the water. Someone to talk to or a stone to use wins,
+      // as it does for the key.
+      if (selfPlayer.fishing !== FISHING_NONE) {
+        hud.setFishPrompt(selfPlayer.fishing === FISHING_BITE ? "bite" : "waiting");
+      } else if (nearby || atStone || selfPlayer.health === 0 || selfPlayer.inCombat) {
+        hud.setFishPrompt(undefined);
+      } else if (now >= fishPromptAt) {
+        fishPromptAt = now + 150;
+        const point = castPoint(ostra.terrain, x, z, facingYaw());
+        const wants = point ? lowestCatchLevel(point.waters) : 0;
+        hud.setFishPrompt(point === undefined ? undefined : fishingLevel >= wants ? "cast" : "tooLow",
+          point && fishingLevel < wants ? `Fishing ${wants}` : point?.name);
+      }
+
       cartographer.update(x, z, facingYaw(), blips, targetBearing);
     }
 
@@ -1692,6 +1791,9 @@ export function createSession(
     hud.endCast(false);
     offLevelUp();
     offHealed();
+    offFishResult();
+    anglers.dispose();
+    hud.setFishPrompt(undefined);
     cartographer.dispose();
     scene.onPointerObservable.remove(pointer);
     reconciler?.dispose();
@@ -1741,6 +1843,8 @@ export function createSession(
     selfPosition,
     nearestVillager: () => nearby,
     nearestWaystone: () => atStone?.stone,
+    fish,
+    setFishingLevel: (level) => { fishingLevel = level; },
     setWaystones: (keys) => {
       attuned = keys;
       cartographer.setAttuned(keys);

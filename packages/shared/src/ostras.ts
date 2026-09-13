@@ -398,22 +398,28 @@ const TERRA_REGIONS: RegionDefinition[] = [
  *  always reaches the water whatever the ground around them does. */
 const FANSHONA_LAKE_LEVEL = (FANSHONA.level ?? 0) - 1.1;
 
+/**
+ * `waters` is what lives in each (see `fishing.ts`): Daso's millpond and the
+ * heartland pond are where anyone learns to fish, and the meres and the lake
+ * country are for later. Every lake is deep enough to fish at its middle —
+ * the meres only just, at 0.5 m against FISHING_DEPTH's 0.35.
+ */
 const TERRA_LAKES: LakeDefinition[] = [
   // Brightwater: the lake country.
-  { x: 2150, z: 2050, radius: 70, shore: 18, depth: 0.85, level: FANSHONA_LAKE_LEVEL },
-  { x: 2620, z: 2560, radius: 110, shore: 22, depth: 0.9 },
-  { x: 2280, z: 2720, radius: 55, shore: 16, depth: 0.8 },
-  { x: 2800, z: 2080, radius: 62, shore: 18, depth: 0.8 },
+  { x: 2150, z: 2050, radius: 70, shore: 18, depth: 0.85, level: FANSHONA_LAKE_LEVEL, waters: "fanshona" },
+  { x: 2620, z: 2560, radius: 110, shore: 22, depth: 0.9, waters: "lake" },
+  { x: 2280, z: 2720, radius: 55, shore: 16, depth: 0.8, waters: "lake" },
+  { x: 2800, z: 2080, radius: 62, shore: 18, depth: 0.8, waters: "lake" },
   // Lowfen: pools and meres.
-  { x: -330, z: -2380, radius: 42, shore: 12, depth: 0.6 },
-  { x: -60, z: -2700, radius: 58, shore: 14, depth: 0.7 },
-  { x: 180, z: -2430, radius: 34, shore: 10, depth: 0.55 },
-  { x: -520, z: -2720, radius: 46, shore: 12, depth: 0.6 },
-  { x: 150, z: -2860, radius: 40, shore: 12, depth: 0.6 },
-  { x: -720, z: -2480, radius: 30, shore: 10, depth: 0.5 },
+  { x: -330, z: -2380, radius: 42, shore: 12, depth: 0.6, waters: "mere" },
+  { x: -60, z: -2700, radius: 58, shore: 14, depth: 0.7, waters: "mere" },
+  { x: 180, z: -2430, radius: 34, shore: 10, depth: 0.55, waters: "mere" },
+  { x: -520, z: -2720, radius: 46, shore: 12, depth: 0.6, waters: "mere" },
+  { x: 150, z: -2860, radius: 40, shore: 12, depth: 0.6, waters: "mere" },
+  { x: -720, z: -2480, radius: 30, shore: 10, depth: 0.5, waters: "mere" },
   // A pond in the heartland, and Daso's millpond.
-  { x: 420, z: 640, radius: 45, shore: 14, depth: 0.8 },
-  { x: -1180, z: 180, radius: 50, shore: 14, depth: 0.8 },
+  { x: 420, z: 640, radius: 45, shore: 14, depth: 0.8, waters: "pond" },
+  { x: -1180, z: 180, radius: 50, shore: 14, depth: 0.8, waters: "pond" },
 ];
 
 /**

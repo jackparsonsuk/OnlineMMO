@@ -18,6 +18,8 @@ import {
   type Goods,
   isTradeId,
   sanitiseTrades,
+  tradeLevel,
+  tradeProgress,
   TRADES,
   type Trades,
   type QuestLog,
@@ -262,7 +264,10 @@ window.addEventListener("keydown", (event) => {
       // town, and someone with work for you is the rarer thing to be beside.
       const villager = session?.nearestVillager();
       const stone = session?.nearestWaystone();
-      if (villager?.vendor) {
+      // A line already out is answered first, whoever is standing near.
+      if (room && (room.state.players.get(room.sessionId)?.fishing ?? 0) !== 0) {
+        session?.fish();
+      } else if (villager?.vendor) {
         questUI.close();
         vendorUI.open(villager);
       } else if (villager) {
@@ -270,6 +275,9 @@ window.addEventListener("keydown", (event) => {
         questUI.talkTo(villager);
       } else if (stone) {
         travelUI.open(stone);
+      } else {
+        // Nobody to talk to and no stone: the water, if there is any.
+        session?.fish();
       }
       break;
     }
@@ -531,13 +539,15 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
       hud.buildAbilityBar(classId);
     }
     const goods = sanitiseGoods(payload.goods);
+    const trades = sanitiseTrades(payload.trades);
+    session?.setFishingLevel(tradeLevel(trades, "fishing"));
     characterScreen.setProfile({
       classId,
       level: payload.level ?? level,
       inventory: payload.inventory ?? [],
       equipment: payload.equipment ?? {},
       goods,
-      trades: sanitiseTrades(payload.trades),
+      trades,
     });
     applyProgress(payload.level ?? level, payload.xp ?? 0, 0);
     hud.setPower(characterScreen.power);
@@ -575,6 +585,7 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   next.onMessage("trade", (payload: { trade: string; total: number; levelUp?: number }) => {
     if (!isTradeId(payload.trade)) return;
     characterScreen.setTrade(payload.trade, payload.total);
+    if (payload.trade === "fishing") session?.setFishingLevel(tradeProgress(payload.total).level);
     if (payload.levelUp !== undefined) {
       const trade = TRADES[payload.trade];
       hud.announce("Trade level", `${trade.name} ${payload.levelUp}`, "Better at it, and a little more will bite", true);

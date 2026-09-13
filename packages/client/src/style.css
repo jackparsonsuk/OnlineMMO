@@ -130,6 +130,46 @@ html, body {
 #waystone-prompt b { color: #cfe9f7; font-style: italic; font-weight: 600; }
 #waystone-prompt span { font-size: 11.5px; color: #8b98a5; }
 
+/* At the water's edge: the same place as a stone's prompt, since you are never
+   at both — E means one thing at a time. A bite is the one prompt in the game
+   that has to be seen in the moment, so it grows and pulses. */
+#fish-prompt {
+  position: fixed;
+  bottom: 244px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 6px 13px;
+  border-radius: var(--radius);
+  border: 1px solid rgb(169 212 232 / 30%);
+  background: var(--glass);
+  box-shadow: var(--shade);
+  font-size: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#fish-prompt[hidden] { display: none; }
+#fish-prompt b { color: #cfe9f7; font-style: italic; font-weight: 600; }
+#fish-prompt span { font-size: 11.5px; color: #8b98a5; }
+#fish-prompt.tooLow b { color: #f0d98a; font-style: normal; }
+#fish-prompt.bite {
+  bottom: 252px;
+  padding: 9px 18px;
+  border-color: rgb(240 200 60 / 70%);
+  font-size: 15px;
+  animation: bite-pulse 0.5s ease-in-out infinite alternate;
+}
+#fish-prompt.bite b { color: #f7e3a0; font-style: normal; }
+#fish-prompt.bite span { color: #e6edf3; }
+
+@keyframes bite-pulse {
+  from { box-shadow: var(--shade), 0 0 0 rgb(240 200 60 / 0%); }
+  to { box-shadow: var(--shade), 0 0 22px rgb(240 200 60 / 55%); }
+}
+
 #gate-prompt {
   position: fixed;
   bottom: 208px;
@@ -1116,12 +1156,12 @@ kbd {
 
 /* While the screen has the camera, the rest of the HUD steps back. */
 #compass, #minimap, #actionbar, #corner, #target-frame, #party, #chat, #castbar,
-#nametags, #gate-prompt, #waystone-prompt, #speech, #vitals, #quest-tracker {
+#nametags, #gate-prompt, #waystone-prompt, #fish-prompt, #speech, #vitals, #quest-tracker {
   transition: opacity 300ms ease;
 }
 
 body.portrait :is(#compass, #minimap, #actionbar, #corner, #target-frame, #castbar,
-  #nametags, #gate-prompt, #waystone-prompt, #speech, #vitals, #quest-tracker) {
+  #nametags, #gate-prompt, #waystone-prompt, #fish-prompt, #speech, #vitals, #quest-tracker) {
   opacity: 0;
   pointer-events: none;
 }
@@ -1715,7 +1755,7 @@ body.portrait :is(#compass, #minimap, #actionbar, #corner, #target-frame, #castb
 
 /* Screenshots without the furniture. */
 body.no-hud :is(#compass, #minimap, #actionbar, #corner, #target-frame, #party, #chat, #castbar,
-  #nametags, #gate-prompt, #waystone-prompt, #speech, #vitals, #quest-tracker, #zone-banner) {
+  #nametags, #gate-prompt, #waystone-prompt, #fish-prompt, #speech, #vitals, #quest-tracker, #zone-banner) {
   display: none;
 }
 
