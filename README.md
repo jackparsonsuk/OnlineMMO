@@ -348,6 +348,12 @@ for a Risen), because with a single radius a player standing exactly on the line
 makes the creature start and stop every tick. And **Return is a latch, not a
 distance test** — see below.
 
+**Grey creatures leave you alone.** Something grey to you (`difficultyOf`, too
+far below you to pay XP) does not notice you at all until you give it threat —
+by hitting it, or its camp, which rallies. A level-12 walking back through the
+Westwood used to be nipped at by every Pathstalker on the way; picking a fight
+with the weak is now a choice, as in WoW.
+
 Creatures live and die with their room and are never persisted, so an emptied
 Ostra repopulates the moment somebody walks back into it.
 

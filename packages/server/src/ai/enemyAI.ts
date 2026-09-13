@@ -1,4 +1,5 @@
 import {
+  difficultyOf,
   EnemyState,
   isInArc,
   levelGapEffect,
@@ -362,6 +363,11 @@ function pickQuarry(
     const range = distance(enemy.x, enemy.z, target.x, target.z);
     const threat = brain.threat.get(target.sessionId) ?? 0;
     const current = target.sessionId === brain.quarry;
+    // Something grey to you leaves you be unless you start it: a level-12
+    // walking home through the Westwood should not be nipped at by every
+    // Pathstalker it passes. Hitting it — or its camp, which rallies — is
+    // threat, and then it fights like anything else.
+    if (threat === 0 && !current && difficultyOf(enemy.level, target.level) === "grey") continue;
     // Something well above you notices you from further off — and, so the
     // gap between noticing and giving up survives, lets go further off too.
     const sooner = levelGapEffect(enemy.level, target.level, 0).aggro;
