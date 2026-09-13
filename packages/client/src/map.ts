@@ -52,10 +52,11 @@ export interface MapBlip {
 /**
  * Where a quest wants you, drawn on the maps and the compass: an area to hunt
  * in (a kill or collect whose creature lives in one place), a point to go to
- * (a visit, an elite), or the person to hand it back to.
+ * (a visit, an elite), the person to hand it back to — or someone with work
+ * to offer, which is how a new arrival finds their first quest.
  */
 export interface QuestMark {
-  kind: "area" | "point" | "turnin";
+  kind: "area" | "point" | "turnin" | "offer";
   x: number;
   z: number;
   /** Metres, for an area. */
@@ -1047,7 +1048,7 @@ function drawQuestMark(ctx: CanvasRenderingContext2D, mark: QuestMark, x: number
     ctx.font = `800 ${Math.round(10 * scale)}px ui-sans-serif, system-ui, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("?", x, y + 0.5);
+    ctx.fillText(mark.kind === "offer" ? "!" : "?", x, y + 0.5);
   }
   ctx.restore();
 }

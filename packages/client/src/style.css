@@ -1982,6 +1982,9 @@ body.no-hud :is(#compass, #minimap, #actionbar, #corner, #target-frame, #party, 
 #quest-tracker li { list-style: "– "; }
 #quest-tracker li.done { color: #6b7682; text-decoration: line-through; }
 #quest-tracker li.ready { color: #6dcf7e; list-style: "» "; }
+#quest-tracker .tracked.idle ul { padding: 0; max-width: 210px; white-space: normal; }
+#quest-tracker .tracked.idle li { list-style: none; }
+#quest-tracker .tracked.idle .mark { color: #ffd23c; font-weight: 900; }
 
 #quest-dialog, #quest-log, #vendor, #travel {
   position: fixed;
@@ -2487,6 +2490,7 @@ body.portrait #chat { opacity: 0; pointer-events: none; }
 }
 #compass .landmark.quest.area { border-radius: 50%; clip-path: none; background: rgb(247 214 110 / 70%); }
 #compass .landmark.quest.turnin { width: 10px; height: 10px; top: 18px; clip-path: none; border-radius: 50%; background: #fff1b8; }
+#compass .landmark.quest.offer { width: 10px; height: 10px; top: 18px; clip-path: none; border-radius: 50%; background: #f7d66e; box-shadow: 0 0 6px rgb(247 214 110 / 80%); }
 #worldmap-canvas { cursor: grab; }
 #worldmap-canvas:active { cursor: grabbing; }
 

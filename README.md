@@ -976,6 +976,13 @@ at its other half — and marks beyond the minimap's edge are notches on its
 rim, pointing the way. An objective for a whole kind has no single place and
 gets no mark, which is the argument for variants.
 
+**Someone with work is on the maps too**, as a gold "!" where they stand, and
+on the compass. The mark over a head is only any use once you can see the
+head: a new character woke at the Daso Stone facing away from the inn, with
+nothing to say there was work sixty metres behind them. With nothing under
+way, the tracker says so and where — "4 people in Daso have work for you" —
+rather than disappearing.
+
 A quest handed back to someone other than its giver is a delivery. Collected
 things are counted, not carried, because thirty slots of wolf fangs would be
 clutter the loot system has no use for. A kill counts for **everyone who fought

@@ -24,6 +24,7 @@ import {
   type Trades,
   type QuestLog,
   questMarker,
+  settlementsIn,
   isClassId,
   isOstraId,
   type ItemKey,
@@ -164,7 +165,18 @@ function refreshQuestMarkers(): void {
   const log = questUI.currentLog;
   session?.setQuestMarkers((id) => questMarker(id, log, level));
   // ...and on the maps and the compass, where each quest wants you.
-  if (currentOstra) session?.setQuestMarks(questMarksFor(currentOstra, log));
+  if (currentOstra) {
+    const marks = questMarksFor(currentOstra, log, level);
+    session?.setQuestMarks(marks);
+    // With nothing under way, the tracker says where work is rather than
+    // vanishing: the first thing a new character needs is a direction.
+    const offers = marks.filter((mark) => mark.kind === "offer");
+    const town = offers[0] && settlementsIn(currentOstra)
+      .find((s) => s.villagers.some((v) => v.x === offers[0]!.x && v.z === offers[0]!.z));
+    questUI.setIdleHint(offers.length === 0 ? undefined : town
+      ? `${offers.length === 1 ? "Someone" : `${offers.length} people`} in ${town.name} ${offers.length === 1 ? "has" : "have"} work for you — follow the gold ! on your compass.`
+      : "Someone has work for you — follow the gold ! on your compass.");
+  }
   hud.refreshSpeech();
 }
 

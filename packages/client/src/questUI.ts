@@ -79,6 +79,7 @@ export class QuestUI {
   private talking: VillagerDefinition | undefined;
   private showing: string | undefined;
   private choice = 0;
+  private idleHint: string | undefined;
 
   constructor(private readonly hooks: QuestHooks) {
     this.dialog = this.panel("quest-dialog");
@@ -123,6 +124,13 @@ export class QuestUI {
     this.renderTracker();
     if (!this.dialog.hidden) this.renderDialog();
     if (!this.journal.hidden) this.renderJournal();
+  }
+
+  /** What the tracker says when nothing is under way: where work is. */
+  setIdleHint(hint: string | undefined): void {
+    if (hint === this.idleHint) return;
+    this.idleHint = hint;
+    this.renderTracker();
   }
 
   get currentLog(): QuestLog {
@@ -328,7 +336,13 @@ export class QuestUI {
 
   private renderTracker(): void {
     const entries = Object.entries(this.log.active);
-    this.tracker.hidden = entries.length === 0;
+    if (entries.length === 0) {
+      this.tracker.hidden = this.idleHint === undefined;
+      this.tracker.innerHTML = this.idleHint === undefined ? ""
+        : `<div class="tracked idle"><b><span class="mark">!</span> Work to be had</b><ul><li>${escapeHtml(this.idleHint)}</li></ul></div>`;
+      return;
+    }
+    this.tracker.hidden = false;
     this.tracker.innerHTML = entries.map(([id, progress]) => {
       const quest = getQuest(id);
       if (!quest) return "";

@@ -6,6 +6,7 @@ import {
   getQuest,
   objectiveTarget,
   OSTRA_IDS,
+  questMarker,
   questReady,
   settlementsIn,
   type OstraDefinition,
@@ -25,9 +26,20 @@ import type { QuestMark } from "./map.js";
  *
  * Only unfinished objectives are drawn: a quest half done points at what is
  * left of it.
+ *
+ * - Someone with work for you: a "!" where they stand. The "!" over a head is
+ *   only any use once you can see the head; a new arrival at the Daso Stone,
+ *   facing the wrong way, had nothing telling them the inn was sixty metres
+ *   behind them with work in it.
  */
-export function questMarksFor(ostra: OstraDefinition, log: QuestLog): QuestMark[] {
+export function questMarksFor(ostra: OstraDefinition, log: QuestLog, level: number): QuestMark[] {
   const marks: QuestMark[] = [];
+  for (const settlement of settlementsIn(ostra)) {
+    for (const villager of settlement.villagers) {
+      if (villager.id === undefined || questMarker(villager.id, log, level) !== "!") continue;
+      marks.push({ kind: "offer", x: villager.x, z: villager.z, label: `${villager.name} has work` });
+    }
+  }
   for (const [id, progress] of Object.entries(log.active)) {
     const quest = getQuest(id);
     if (!quest) continue;
