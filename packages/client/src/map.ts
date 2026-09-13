@@ -745,17 +745,15 @@ export class Cartographer {
         : { x: sx - width / 2, y: sy - 9, w: width, h: 18 });
     }
 
-    // Hunting grounds, ringed whether or not a quest wants you there — the
-    // place you go to find Pathstalkers should be findable without one. Their
-    // names are the first thing to give way when the map is crowded.
+    // A hunting ground's name, under the gold ring of a quest that sends you
+    // there — and only then. Every ground used to be ringed and named whether
+    // or not you had business in it, and a ring on the map reads as "you have
+    // something to do here": the Webbed Thicket showed for players who had
+    // never met Osk. Names are the first thing to give way when it is crowded.
     for (const area of this.ostra.areas ?? []) {
+      if (!this.questMarks.some((mark) => mark.kind === "area" && mark.x === area.x && mark.z === area.z)) continue;
       const [ax, ay] = toPx(area.x, area.z);
-      const radius = Math.max(4, area.radius / mpp);
-      ctx.beginPath();
-      ctx.arc(ax, ay, radius, 0, Math.PI * 2);
-      ctx.strokeStyle = "rgba(230, 210, 170, 0.35)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      const radius = Math.max(8, area.radius / mpp);
       if (this.zoom >= AREA_LABEL_ZOOM) {
         labels.push({
           x: ax, y: ay + radius + 13,

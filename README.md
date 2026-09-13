@@ -1022,6 +1022,12 @@ at its other half — and marks beyond the minimap's edge are notches on its
 rim, pointing the way. An objective for a whole kind has no single place and
 gets no mark, which is the argument for variants.
 
+Hunting grounds are drawn **only while a quest sends you to one**, named under
+its gold ring. They used to be ringed and named on the world map always, so
+the place to find Pathstalkers was findable without the quest — but a ring on
+a map reads as "you have business here", and players saw the Webbed Thicket
+marked who had never spoken to Osk.
+
 **Someone with work is on the maps too**, as a gold "!" where they stand, and
 on the compass. The mark over a head is only any use once you can see the
 head: a new character woke at the Daso Stone facing away from the inn, with

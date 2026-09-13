@@ -1680,7 +1680,7 @@ body.portrait :is(#compass, #minimap, #actionbar, #corner, #target-frame, #castb
 #worldmap-legend .lg-stone.woken { background: #9fd8ff; box-shadow: none; }
 #worldmap-legend .lg-ruin { width: 6px; height: 9px; background: #cdbb8c; }
 #worldmap-legend .lg-gate { border-radius: 50%; background: #79a355; }
-#worldmap-legend .lg-area { border-radius: 50%; border: 1px dashed rgb(230 210 170 / 70%); }
+#worldmap-legend .lg-area { border-radius: 50%; border: 1px dashed rgb(247 214 110 / 95%); background: rgb(240 200 70 / 18%); }
 #worldmap-legend .lg-quest {
   clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
   background: #f7d66e;
