@@ -49,9 +49,11 @@ smaller entries below; those are the first step towards them.
 - **Weather.** Rain and heavier fog, from the clock like day/night
   (`daylight.ts`) so it needs nothing from the server.
 - **Fishing** — Fanshona is a fishing town on a lake nobody can fish.
-- **Life skills.** Gathering and crafting (logging for Daso, mining, cooking,
-  smithing), each with its own level — the one place use-based training might
-  still belong, now that combat has one character level.
+- **More trades.** Trades (`trades.ts`) and goods (`goods.ts`) are in, with
+  fishing first. Logging for Daso and mining next — but trees and rocks are
+  colliders both sides must agree on, so decide first whether a felled tree
+  falls for everyone (replicated, and honoured by the shared step) or only stops
+  yielding for you. Then cooking fish into food, and smithing.
 - **Mounts.** Terra takes fourteen minutes to cross at a sprint.
 - **Pets.**
 - **More chat.** Say and party are in (`chat.ts`); an Ostra-wide channel,

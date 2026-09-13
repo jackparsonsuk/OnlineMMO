@@ -37,6 +37,11 @@ import {
   type GearSlot,
   type GoodKind,
   type Goods,
+  TRADE_IDS,
+  TRADES,
+  tradeProgress,
+  type TradeId,
+  type Trades,
   type Item,
   type ItemFamily,
   type ItemKey,
@@ -66,6 +71,7 @@ export interface CharacterProfile {
   inventory: ItemKey[];
   equipment: Equipment;
   goods: Goods;
+  trades: Trades;
 }
 
 export interface CharacterScreenHooks {
@@ -208,7 +214,7 @@ export class CharacterScreen {
   private readonly tabs: HTMLElement[];
   private readonly slotViews = new Map<EquipSlot, SlotView>();
 
-  private profile: CharacterProfile = { classId: DEFAULT_CLASS, level: 1, inventory: [], equipment: {}, goods: {} };
+  private profile: CharacterProfile = { classId: DEFAULT_CLASS, level: 1, inventory: [], equipment: {}, goods: {}, trades: {} };
   private name = "";
   private open = false;
   private openedAt = 0;
@@ -349,6 +355,12 @@ export class CharacterScreen {
     if (level === this.profile.level) return;
     this.profile = { ...this.profile, level };
     this.renderAll();
+  }
+
+  /** A trade's total XP changed, between profiles. */
+  setTrade(trade: TradeId, total: number): void {
+    this.profile = { ...this.profile, trades: { ...this.profile.trades, [trade]: total } };
+    this.renderSatchel();
   }
 
   /** Total power of what is worn. */
@@ -707,18 +719,30 @@ export class CharacterScreen {
   }
 
   /**
-   * The satchel: everything gathered, by kind, with what a vendor pays. A list
-   * rather than a grid of cells, because a good has no look worth a cell of
-   * its own and its count is the thing you want to read.
+   * Trades and the satchel, together: what you are good at gathering, and
+   * what you have gathered. Goods are a list rather than a grid of cells,
+   * because a good has no look worth a cell of its own and its count is the
+   * thing you want to read.
    */
   private renderSatchel(): void {
+    const trades = TRADE_IDS.map((id) => {
+      const trade = TRADES[id];
+      const { level, into, toNext } = tradeProgress(this.profile.trades[id] ?? 0);
+      const share = toNext === 0 ? 1 : into / toNext;
+      return `<div class="trade-row" title="${escapeHtml(trade.description)}">` +
+        `<b>${escapeHtml(trade.name)}</b><span class="trade-level">${level}</span>` +
+        `<div class="trade-bar"><i style="width:${(share * 100).toFixed(1)}%"></i></div>` +
+        `<small>${toNext === 0 ? "Mastered" : `${into} / ${toNext}`}</small></div>`;
+    }).join("");
+    const head = `<h4 class="satchel-heading">Trades</h4>${trades}<h4 class="satchel-heading">Satchel</h4>`;
+
     const goods = this.profile.goods;
     const carried = GOOD_IDS.filter((id) => (goods[id] ?? 0) > 0);
     if (carried.length === 0) {
-      this.satchel.innerHTML = `<p class="abilities-note">Empty. Fish you catch go here, not in your pack, and any vendor will buy them.</p>`;
+      this.satchel.innerHTML = `${head}<p class="abilities-note">Empty. Fish you catch go here, not in your pack, and any vendor will buy them.</p>`;
       return;
     }
-    this.satchel.innerHTML = carried.map((id) => {
+    this.satchel.innerHTML = head + carried.map((id) => {
       const good = GOODS[id];
       const count = goods[id] ?? 0;
       const full = count >= good.stack;

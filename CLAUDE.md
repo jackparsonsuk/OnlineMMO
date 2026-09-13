@@ -42,6 +42,7 @@ packages/shared/   one copy of everything both sides must agree on
                      {base,level,rarity,seed} and describeItem() derives the rest
   itemNames.ts       names and lore from the item's seed
   goods.ts           gathered goods (fish): counts by id in the satchel, not the pack
+  trades.ts          trade levels 1-50 (fishing), stored as total XP per trade
   levels.ts          character level 1-100: the XP curve, kill XP by level gap,
                      difficulty ("con") colours
   classes.ts         classes (the Warrior), per-level stats, ability unlocks,

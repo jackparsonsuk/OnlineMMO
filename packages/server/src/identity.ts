@@ -71,6 +71,7 @@ export function createCharacter(
     inventory: [],
     equipment: {},
     goods: {},
+    trades: {},
     createdAt: now,
     lastSeenAt: now,
   };

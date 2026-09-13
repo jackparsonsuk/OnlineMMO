@@ -1106,6 +1106,28 @@ first: a perch is a perch, and there will be more of them. The satchel is
 saved as a JSON blob of counts, and a load keeps only ids this build knows,
 held to their stacks.
 
+## Trades
+
+Fishing is the first **trade** (`trades.ts`); logging, mining and cooking are
+meant to follow. Each has a level of its own, 1 to 50, earned only by doing it.
+
+That looks like the proficiency system combat gave up (see Levels), and on
+purpose it is the one place that system's idea survives. Combat went to one
+level because a dozen bars trained by use were a dozen things to keep in your
+head and every new weapon was a step back. A trade is the other case: it is
+something you choose to take up, apart from fighting, and "I am a good fisher"
+is exactly what a bar should say. **A trade pays no character XP**, so an
+afternoon at the lake is never a faster road to 30 than the camps.
+
+What is saved is the total XP ever earned in each trade, not a level and a
+remainder: the level is read back off the curve, so if the curve is retuned,
+everyone lands where their work puts them. Gathering something at your level
+pays `10 + 2 × level`; below you it pays less, and nothing twelve levels down
+— minnows teach a fisher of 20 nothing. At your own level every time, the
+curve is about 140 catches to 11, 1,000 to 31 and 2,900 to 50. Trade levels
+are private, like the pack: a level-up is announced to you and nobody else, and
+the Satchel tab shows each trade's bar above what you have gathered.
+
 ## Accounts
 
 Sign in with an email and password; a session token (JWT, one week) authorises

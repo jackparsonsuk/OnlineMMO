@@ -94,6 +94,12 @@ import {
   goodsValue,
   isGoodId,
   type Goods,
+  addTradeXp,
+  isTradeId,
+  MAX_TRADE_LEVEL,
+  tradeXpToNext,
+  type TradeId,
+  type Trades,
   castSteps,
   isMoving,
   isDodging,
@@ -225,6 +231,8 @@ interface Session {
   waystones: string[];
   /** The satchel. Private, like the pack. */
   goods: Goods;
+  /** Total XP in each trade. */
+  trades: Trades;
   /** When their recent chat lines were sent, for the flood limit. */
   chatTimes: number[];
 }
@@ -679,6 +687,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       gold: character.gold,
       waystones: [...character.waystones],
       goods: { ...character.goods },
+      trades: { ...character.trades },
       chatTimes: [],
     });
     this.announcePresence(client.sessionId);
@@ -821,6 +830,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         gold: session.gold,
         waystones: session.waystones,
         goods: session.goods,
+        trades: session.trades,
       });
     }
 
@@ -1344,6 +1354,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       gold: session.gold,
       waystones: session.waystones,
       goods: session.goods,
+      trades: session.trades,
     });
   }
 
@@ -1380,6 +1391,19 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       parties.levelChanged(session.characterId, result.level);
     }
     this.clients.getById(sessionId)?.send("xp", { level: session.level, xp: session.xp, gained: amount });
+  }
+
+  /**
+   * Add XP to a trade. Only yours to know, like the pack: nobody nearby is
+   * told, because a fishing level is not a moment the way a character level
+   * is — but you are, with the level if it moved.
+   */
+  private grantTradeXp(sessionId: string, session: Session, trade: TradeId, amount: number): void {
+    if (amount <= 0) return;
+    const { from, to } = addTradeXp(session.trades, trade, amount);
+    this.clients.getById(sessionId)?.send("trade", {
+      trade, total: session.trades[trade] ?? 0, gained: amount, ...(to > from ? { levelUp: to } : {}),
+    });
   }
 
   // --- quests ----------------------------------------------------------------------
@@ -1778,6 +1802,20 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       case "xp":
         this.grantXp(client.sessionId, Math.round(number(message["amount"], 0, 0, 10_000_000)));
         break;
+      case "trade": {
+        // XP into a trade, as if earned; or with a level, straight to the start of it.
+        const trade = isTradeId(message["trade"]) ? message["trade"] : "fishing";
+        if (message["level"] === undefined) {
+          this.grantTradeXp(client.sessionId, session, trade, Math.round(number(message["amount"], 0, 0, 1_000_000)));
+          break;
+        }
+        const target = Math.round(number(message["level"], 1, 1, MAX_TRADE_LEVEL));
+        let total = 0;
+        for (let level = 1; level < target; level++) total += tradeXpToNext(level);
+        session.trades[trade] = total;
+        client.send("trade", { trade, total, gained: 0 });
+        break;
+      }
       case "elites": {
         // Every elite in this Ostra: alive and where, or how long until it wakes.
         client.send("eliteStatus", elitesIn(this.ostra.id).map((elite) => {
@@ -2550,6 +2588,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         gold: session.gold,
         waystones: session.waystones,
         goods: session.goods,
+        trades: session.trades,
       });
 
       // With an auth context, so the reserved seat carries the account — see

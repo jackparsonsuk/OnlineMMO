@@ -17,5 +17,6 @@ export * from "./spells.js";
 export * from "./stats.js";
 export * from "./vendors.js";
 export * from "./terrain.js";
+export * from "./trades.js";
 export * from "./variants.js";
 export * from "./worldgen.js";

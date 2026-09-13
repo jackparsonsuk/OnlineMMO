@@ -16,6 +16,10 @@ import {
   isGoodId,
   sanitiseGoods,
   type Goods,
+  isTradeId,
+  sanitiseTrades,
+  TRADES,
+  type Trades,
   type QuestLog,
   questMarker,
   isClassId,
@@ -391,6 +395,7 @@ interface ProfileMessage {
   gold?: number;
   waystones?: string[];
   goods?: Goods;
+  trades?: Trades;
 }
 
 /** What the server sends when a player steps into a Gate. */
@@ -532,6 +537,7 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
       inventory: payload.inventory ?? [],
       equipment: payload.equipment ?? {},
       goods,
+      trades: sanitiseTrades(payload.trades),
     });
     applyProgress(payload.level ?? level, payload.xp ?? 0, 0);
     hud.setPower(characterScreen.power);
@@ -565,6 +571,15 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   next.onMessage("tooPoor", (payload: { price: number }) => hud.flash(`That costs ${payload.price} gold.`));
   next.onMessage("xp", (payload: { level: number; xp: number; gained: number }) => {
     applyProgress(payload.level, payload.xp, payload.gained);
+  });
+  next.onMessage("trade", (payload: { trade: string; total: number; levelUp?: number }) => {
+    if (!isTradeId(payload.trade)) return;
+    characterScreen.setTrade(payload.trade, payload.total);
+    if (payload.levelUp !== undefined) {
+      const trade = TRADES[payload.trade];
+      hud.announce("Trade level", `${trade.name} ${payload.levelUp}`, "Better at it, and a little more will bite", true);
+      audio.play("levelUp");
+    }
   });
   next.onMessage("cannotWear", (payload: { level: number; family?: ItemFamily }) => {
     hud.flash(classUsesFamily(classId, payload.family)
