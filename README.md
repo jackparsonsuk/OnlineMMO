@@ -1671,7 +1671,13 @@ fighting. Terra holds ~21000 creatures; the server simulates and replicates the
 dozens near someone.
 
 **The ground streams.** Detailed 64 m chunks (2 m quads) are built nearest-first
-around the camera, two per frame, out to 330 m, each with a skirt to hide seams.
+around the camera, out to 330 m, each with a skirt to hide seams. A chunk's
+heights and ground tones are worked out on two background workers
+(`chunkWorker.ts`, running the same `gridData` from `groundData.ts`), and the
+main thread only turns the returned arrays into meshes and places their trees,
+within 6 ms a frame. Built on the main thread two a frame, a chunk was 15-20 ms,
+and the first seconds anywhere new ran at 30-45 ms a frame; now about 15. The
+chunks under your feet on arrival are still built at once, on the main thread.
 Beyond that, one coarse mesh of the whole Ostra at 64 m per quad is the
 horizon — with its quad cut out wherever a detailed chunk stands. Trees, rocks
 and grass are thin instances, one draw call per kind. Fog and a sky dome fade
