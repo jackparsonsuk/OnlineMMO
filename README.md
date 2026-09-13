@@ -998,8 +998,12 @@ world can already tell apart:
 
 **Gathering** is the first quest that is not a fight. Moonwort in a glade,
 salt sacks spilled along a road, heartwood from a blighted grove, candle stubs
-round a barrow: each lies about its circle, drawn with a glow and a thread of
-light in its colour, and **E** picks one up. Where they lie is a pure function
+round a barrow: each lies about its circle, one part of it lit in its colour
+(the moonwort's flower, the candle flames) over a faint patch of glow, and
+**E** picks one up. They first stood under four-metre threads of light, which
+found every one from the edge of the place and turned the errand into walking
+from beam to beam; the map's circle says where to look, and looking is the
+errand. Where they lie is a pure function
 of the quest (`gatherSpots` in `gathering.ts`) — on dry, gentle ground, clear
 of every tree and rock — so the client draws exactly what the server accepts
 and nothing is sent or saved. The server checks the quest is under way, you

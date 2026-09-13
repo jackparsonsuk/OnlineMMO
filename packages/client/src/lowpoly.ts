@@ -137,8 +137,9 @@ export function buildCastArc(scene: Scene, spell: Spell, colour: number): Transf
 
 /**
  * Something a quest wants picked up (`gathering.ts`): a small model of the
- * thing, over a soft glow in its colour and under a faint thread of light, so
- * a sprig of moonwort in long grass is findable from the edge of the glade.
+ * thing, with one part of it lit in its colour — the moonwort's flower, the
+ * sack's tie, the heartwood's grey core, the candle flames — so it catches
+ * the eye among the grass once you are looking in the right place.
  * Not an octahedron — that is loot, and loot is picked up by walking over it;
  * these want E, so they must not look the same.
  */
@@ -212,30 +213,21 @@ export function buildGatherable(scene: Scene, thing: GatherThing): TransformNode
     }
   }
 
-  const halo = part(MeshBuilder.CreateDisc("gatherHalo", { radius: 0.75, tessellation: 14 }, scene), new StandardMaterial(`gatherHalo:${thing.name}`, scene));
+  // A faint patch of its colour on the ground, readable once you are close.
+  // No more than that: they first stood under a thread of light four metres
+  // tall, which found every sprig in the glade from its edge and left nothing
+  // to do but walk from beam to beam. The quest's circle on the map says
+  // where to look; looking is the errand.
+  const halo = part(MeshBuilder.CreateDisc("gatherHalo", { radius: 0.45, tessellation: 12 }, scene), new StandardMaterial(`gatherHalo:${thing.name}`, scene));
   halo.rotation.x = Math.PI / 2;
   halo.position.y = 0.04;
   const haloMaterial = halo.material as StandardMaterial;
   haloMaterial.diffuseColor = Color3.Black();
   haloMaterial.specularColor = Color3.Black();
   haloMaterial.emissiveColor = glow;
-  haloMaterial.alpha = 0.5;
+  haloMaterial.alpha = 0.16;
   haloMaterial.disableLighting = true;
   haloMaterial.backFaceCulling = false;
-
-  // Tall enough to see over grass and a camp's worth of bodies from the edge
-  // of the place; thin enough not to read as a legendary's pillar.
-  const thread = part(MeshBuilder.CreateCylinder("gatherThread", {
-    height: 4.5, diameterTop: 0.02, diameterBottom: 0.18, tessellation: 6,
-  }, scene), new StandardMaterial(`gatherThread:${thing.name}`, scene));
-  thread.position.y = 2.3;
-  const threadMaterial = thread.material as StandardMaterial;
-  threadMaterial.diffuseColor = Color3.Black();
-  threadMaterial.specularColor = Color3.Black();
-  threadMaterial.emissiveColor = glow;
-  threadMaterial.alpha = 0.4;
-  threadMaterial.disableLighting = true;
-  threadMaterial.backFaceCulling = false;
 
   return pivot;
 }

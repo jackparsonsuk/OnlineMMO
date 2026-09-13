@@ -612,9 +612,9 @@ export function createSession(
         const mesh = buildGatherable(scene, thing);
         mesh.position.set(spot.x, spot.y, spot.z);
         // Each turned its own way, so a glade of them is not a row of clones;
-        // and larger than life, because a sprig to scale is lost in the grass.
+        // and a little larger than life, or a sprig to scale is lost in grass.
         mesh.rotation.y = spot.index * 2.39996;
-        mesh.scaling.setAll(1.6);
+        mesh.scaling.setAll(1.3);
         gatherViews.set(key, { key, quest: questId, objective, spot: spot.index, x: spot.x, z: spot.z, name: thing.name, mesh });
       }
     }
