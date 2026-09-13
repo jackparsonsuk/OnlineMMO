@@ -254,8 +254,9 @@ export const QUESTS: Record<string, QuestDefinition> = {
     offer: "Since the Gates came back on, I've had someone through the door every week who came from the Circle. "
       + "Not this month. Walk the Westroad east to the end — the standing stones, you can't miss them — and tell me why.",
     progress: "All the way east on the Westroad. The stones are taller than the trees.",
-    complete: "The dead around the stones, and spiders in the grass. Well — that's why. Go carefully out there; "
-      + "and if you're going under the barrow for Basan, go carefully there too.",
+    complete: "The dead around the stones, and spiders in the grass. Well — that's why. Warden Tamsin keeps a waypost "
+      + "by the Westroad Stone; she'll have work for someone who's been that far. And if you're going under the barrow "
+      + "for Basan, go carefully.",
     objectives: [{ kind: "visit", x: 0, z: -9, radius: 18, label: "Reach the Gate Circle" }],
     rewards: { gold: 20, xpShare: 0.9, choices: 3, rarity: "uncommon" },
   },
