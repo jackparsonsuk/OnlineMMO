@@ -361,6 +361,21 @@ for a Risen), because with a single radius a player standing exactly on the line
 makes the creature start and stop every tick. And **Return is a latch, not a
 distance test** — see below.
 
+**Creatures find a way round.** They used to walk straight at their quarry and
+slide along whatever they hit, so a tree trunk or two metres of slope too steep
+to climb stopped them dead — and with the level gap making those fights
+hopeless, standing behind a tree made them free. Now a chasing (or homeward)
+creature checks every 0.3 s whether its straight line is clear
+(`clearLine` in `ai/pathfinding.ts`: scenery, buildings, climbable ground,
+wadeable water), and when it is not, follows a way round from a small A* over
+a one-metre grid, smoothed to a few waypoints and found again when the quarry
+has moved or every 1.5 s. Bodies are left out: another creature in the way
+moves, a tree does not. Through thick forest a search takes about two
+milliseconds. **An unreachable quarry is given up on**: no way found, or four
+seconds following one without getting any nearer, and the creature goes home
+and heals, as a leash would — so a ledge it cannot climb is an escape, not a
+place to throw things from. Wandering still ambles straight.
+
 **Grey creatures leave you alone.** Something grey to you (`difficultyOf`, too
 far below you to pay XP) does not notice you at all until you give it threat —
 by hitting it, or its camp, which rallies. A level-12 walking back through the
@@ -1884,9 +1899,9 @@ build next live in [TODO.md](TODO.md).
   same Ostra twice, but two clients racing could briefly hold it in two
   different Ostras.
 - **Creatures reset.** Camps are never persisted; a sleeping camp wakes fresh.
-- **AI has no pathfinding.** A creature walks straight at its goal and slides
-  along whatever it hits. Generated camps sit in clearings, but a chase through
-  thick woodland shows it.
+- **Pathfinding is local.** A creature finds a way round within a few dozen
+  metres of itself and its quarry (see Enemies and AI); beyond that, or through
+  a maze of buildings, it gives up and goes home.
 - **Slopes do not slow you.** Anything up to 45° is climbed at full walking
   speed, and anything steeper not at all. You can jump, but collision is flat,
   so a jump clears nothing a walk would not.

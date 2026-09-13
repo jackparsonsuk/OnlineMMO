@@ -10,6 +10,7 @@ import {
   type MoveState,
   type MoveWorld,
 } from "@mmo/shared";
+import { clearLine, findPath } from "./pathfinding.js";
 
 /**
  * Creature behaviour. Runs only on the server: clients never predict enemies,
@@ -76,6 +77,17 @@ export interface EnemyBrain {
   /** A spitter its quarry has closed on: it stops backing off and fights
    *  where it stands until they walk clear (see CAUGHT_REACH). */
   cornered: boolean;
+  /** The way round, when the straight line is blocked (see `pathfinding.ts`):
+   *  waypoints, the goal they lead to, and when they were found. */
+  path: { points: Array<{ x: number; z: number }>; goalX: number; goalZ: number; at: number } | undefined;
+  /** When the straight line to the goal was last checked, and whether it was clear. */
+  lineCheckedAt: number;
+  lineClear: boolean;
+  /** Since when no way to the quarry has been found; 0 while there is one. */
+  unreachableSince: number;
+  /** Going round: the nearest it has got to the goal, and when it last got nearer. */
+  roundBest: number;
+  roundBestAt: number;
 }
 
 /** Just enough of a player for the AI to hunt it. */
@@ -150,6 +162,12 @@ export function createBrain(x: number, z: number, campId: string, maxHealth: num
     knockX: 0,
     knockZ: 0,
     cornered: false,
+    path: undefined,
+    lineCheckedAt: 0,
+    lineClear: true,
+    unreachableSince: 0,
+    roundBest: Infinity,
+    roundBestAt: 0,
   };
 }
 
@@ -163,6 +181,9 @@ export function calmDown(brain: EnemyBrain): void {
   brain.knockX = 0;
   brain.knockZ = 0;
   brain.cornered = false;
+  brain.path = undefined;
+  brain.unreachableSince = 0;
+  brain.roundBest = Infinity;
 }
 
 /**
@@ -277,7 +298,16 @@ export function stepEnemy(
     }
   }
 
-  advance(enemy, brain, archetype, dt, world);
+  // A quarry there is no way to has been hunted long enough: give up, go home
+  // and heal, as if leashed. Standing on a ledge it cannot climb and throwing
+  // things at it is not a way to win a fight.
+  if (brain.unreachableSince > 0 && now - brain.unreachableSince > UNREACHABLE_MS && enemy.state === EnemyState.Chase) {
+    brain.returning = true;
+    calmDown(brain);
+    return undefined;
+  }
+
+  advance(enemy, brain, archetype, dt, world, now);
 
   return beginAttack(enemy, brain, archetype, targets, now);
 }
@@ -435,6 +465,7 @@ function advance(
   archetype: EnemyArchetype,
   dt: number,
   world: MoveWorld,
+  now: number,
 ): void {
   const toX = brain.targetX - enemy.x;
   const toZ = brain.targetZ - enemy.z;
@@ -479,9 +510,84 @@ function advance(
     : enemy.state === EnemyState.Return
       ? (archetype.speed + archetype.chaseSpeed) / 2
       : archetype.speed;
-  // Never overshoot the goal in a single step.
-  const travel = Math.min(speed * dt, range);
-  moveBody(enemy, (toX / range) * travel, (toZ / range) * travel, world, archetype.radius);
+  // Straight at the goal when the way is clear; otherwise at the next point of
+  // a way round. Wandering stays straight: an amble that bumps into a tree is
+  // fine, and not worth a search.
+  const purposeful = enemy.state === EnemyState.Chase || enemy.state === EnemyState.Return;
+  const [aimX, aimZ] = purposeful ? steer(enemy, brain, archetype, world, now) : [brain.targetX, brain.targetZ];
+  const aimDX = aimX - enemy.x;
+  const aimDZ = aimZ - enemy.z;
+  const aimRange = Math.hypot(aimDX, aimDZ);
+  if (aimRange < 1e-4) return;
+  if (aimRange !== range) turnToward(enemy, Math.atan2(aimDX, aimDZ), dt);
+  // Never overshoot the goal (or the waypoint) in a single step.
+  const travel = Math.min(speed * dt, range, aimRange);
+  moveBody(enemy, (aimDX / aimRange) * travel, (aimDZ / aimRange) * travel, world, archetype.radius);
+}
+
+/** How often a chasing creature re-checks that its straight line is clear. */
+const LINE_CHECK_MS = 300;
+/** A way round is found again when the goal has moved this far, or it is this old. */
+const REPATH_DISTANCE = 2.5;
+const REPATH_MS = 1500;
+/** No way to the quarry for this long, and the creature gives up and goes home. */
+const UNREACHABLE_MS = 4000;
+/** Close enough to a waypoint to make for the next. */
+const WAYPOINT_REACHED = 0.7;
+
+/** Where to walk towards this tick: the goal itself, or the next waypoint round to it. */
+function steer(
+  enemy: MoveState & { state: number },
+  brain: EnemyBrain,
+  archetype: EnemyArchetype,
+  world: MoveWorld,
+  now: number,
+): [number, number] {
+  const goalX = brain.targetX;
+  const goalZ = brain.targetZ;
+  if (now - brain.lineCheckedAt > LINE_CHECK_MS) {
+    brain.lineCheckedAt = now;
+    brain.lineClear = clearLine(world, enemy.x, enemy.z, goalX, goalZ, archetype.radius);
+  }
+  if (brain.lineClear) {
+    brain.path = undefined;
+    brain.unreachableSince = 0;
+    brain.roundBest = Infinity;
+    return [goalX, goalZ];
+  }
+
+  // Going round, and getting no nearer: a way the grid found but a body cannot
+  // follow — a ledge a metre too steep between two cells — is no way at all.
+  const distance = Math.hypot(goalX - enemy.x, goalZ - enemy.z);
+  if (distance < brain.roundBest - 0.5) {
+    brain.roundBest = distance;
+    brain.roundBestAt = now;
+    brain.unreachableSince = 0;
+  } else if (brain.roundBest === Infinity) {
+    brain.roundBest = distance;
+    brain.roundBestAt = now;
+  } else if (enemy.state === EnemyState.Chase && now - brain.roundBestAt > UNREACHABLE_MS && brain.unreachableSince === 0) {
+    brain.unreachableSince = brain.roundBestAt;
+  }
+
+  const path = brain.path;
+  const stale = !path || now - path.at > REPATH_MS
+    || Math.hypot(path.goalX - goalX, path.goalZ - goalZ) > REPATH_DISTANCE;
+  if (stale) {
+    const points = findPath(world, enemy.x, enemy.z, goalX, goalZ, archetype.radius);
+    if (!points) {
+      brain.path = undefined;
+      // Only a quarry can be out of reach; a way home that cannot be found is
+      // walked straight, and the leash brings it back in the end.
+      if (enemy.state === EnemyState.Chase && brain.unreachableSince === 0) brain.unreachableSince = now;
+      return [goalX, goalZ];
+    }
+    brain.path = { points, goalX, goalZ, at: now };
+  }
+
+  const route = brain.path!.points;
+  while (route.length > 1 && Math.hypot(route[0]!.x - enemy.x, route[0]!.z - enemy.z) < WAYPOINT_REACHED) route.shift();
+  return [route[0]!.x, route[0]!.z];
 }
 
 /** Rotate toward `desired` at a bounded rate, by the short way round. */

@@ -144,10 +144,6 @@ smaller entries below; those are the first step towards them.
 
 ## Creatures and combat
 
-- **Creature pathfinding.** Creatures walk straight at you and slide along
-  whatever they hit, which shows in the new forests — and now at every cliff,
-  where a chasing creature stops at the foot of ground too steep to climb. The
-  road router's A* is a starting point.
 - **More from elites.** A unique named drop each; persist their timers (a
   restart resets them); give Ascendant and Barals theirs; an aura and a horn. Watch the tank rule for leeching — standing in the
   way of blows is enough for credit, which is right for a tank and cheap for
