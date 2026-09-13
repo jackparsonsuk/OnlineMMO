@@ -432,10 +432,17 @@ export class Hud {
 
   /** "+77 XP", floating off the end of the bar. */
   xpGain(amount: number): void {
-    if (amount <= 0) return;
+    if (amount === 0) return;
     const drop = document.createElement("div");
-    drop.className = "xp-drop";
-    drop.textContent = `+${amount.toLocaleString()} XP`;
+    // Negative is what a death cost: said as plainly as a gain, in red.
+    drop.className = amount < 0 ? "xp-drop loss" : "xp-drop";
+    drop.textContent = `${amount < 0 ? "−" : "+"}${Math.abs(amount).toLocaleString()} XP`;
+    if (amount < 0) {
+      // The loss and the fall arrive in either order: remember it for the
+      // death screen, and put it there now if that is already up.
+      this.deathLoss = -amount;
+      if (!this.death.hidden) this.setDead(true, this.deathWake);
+    }
     this.xpRoot.appendChild(drop);
     window.setTimeout(() => drop.remove(), 1400);
   }
@@ -552,9 +559,16 @@ export class Hud {
     window.setTimeout(() => banner.remove(), life + 200);
   }
 
+  private deathLoss = 0;
+  private deathWake = "";
+
   setDead(dead: boolean, detail = ""): void {
     this.death.hidden = !dead;
-    this.deathDetail.textContent = detail;
+    this.deathWake = detail;
+    this.deathDetail.textContent = dead && this.deathLoss > 0
+      ? `You lost ${this.deathLoss.toLocaleString()} XP. ${detail}`
+      : detail;
+    if (!dead) this.deathLoss = 0;
   }
 
 }

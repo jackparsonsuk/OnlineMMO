@@ -3,6 +3,7 @@ import {
   addXp,
   applyInput,
   armourReduction,
+  deathXpLoss,
   findGatherSpot,
   GATHER_RANGE,
   GATHER_RESPAWN_MS,
@@ -2352,6 +2353,12 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       // Fervour is the fight's; the fight is over.
       if (getClass(session.classId).resource === "fervour") player.resource = 0;
       this.broadcastNear(player.x, player.z, "died", { id: sessionId });
+      // And a share of the way through this level (see DEATH_XP_SHARE).
+      const lost = deathXpLoss({ level: session.level, xp: session.xp });
+      if (lost > 0) {
+        session.xp -= lost;
+        this.clients.getById(sessionId)?.send("xp", { level: session.level, xp: session.xp, gained: -lost });
+      }
     }
   }
 

@@ -106,6 +106,27 @@ export function addXp(progress: Progress, gained: number): Progress & { levelsGa
   return { level, xp, levelsGained };
 }
 
+/**
+ * What dying costs: a tenth of what this level takes, out of the progress made
+ * through it — never a level, so a bad fight cannot undo a level-up, and
+ * nothing at all before level 3, while dying is still how you learn the
+ * fight.
+ *
+ * Dying used to cost a walk from the nearest waystone and nothing else, so
+ * pulling something far above you had no downside worth weighing; with the
+ * level gap making such fights hopeless, it needed one. XP rather than gold
+ * or gear because it is the thing you were spending the time on anyway, and a
+ * tenth is a few kills to earn back — enough to notice, not enough to stop
+ * anyone trying.
+ */
+export const DEATH_XP_SHARE = 0.1;
+export const DEATH_PENALTY_FROM = 3;
+
+export function deathXpLoss(progress: Progress): number {
+  if (progress.level < DEATH_PENALTY_FROM || progress.level >= MAX_LEVEL) return 0;
+  return Math.min(progress.xp, Math.round(xpToNext(progress.level) * DEATH_XP_SHARE));
+}
+
 /** A save's level and XP made sane: a hand-edited row costs some XP, never a session. */
 export function sanitiseProgress(rawLevel: unknown, rawXp: unknown): Progress {
   const level = typeof rawLevel === "number" && Number.isFinite(rawLevel)

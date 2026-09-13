@@ -1806,6 +1806,8 @@ body.no-hud :is(#compass, #minimap, #actionbar, #corner, #target-frame, #party, 
   animation: xp-float 1.4s ease-out forwards;
 }
 
+.xp-drop.loss { color: #ff8f7a; }
+
 @keyframes xp-float {
   from { opacity: 1; transform: translateY(0); }
   to { opacity: 0; transform: translateY(-34px); }

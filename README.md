@@ -565,6 +565,13 @@ play them falling — and return to their spawn after 12 s. Players wake after
 4 s at the **nearest waystone** to where they fell (the Ostra's spawn if it has
 none), and anything still locked onto them lets go.
 
+**Dying costs XP.** A tenth of what your level takes comes out of your
+progress through it (`deathXpLoss`) — never a level, and nothing before level
+3, while dying is still how the fight is learned. It used to cost only the walk
+back, which left pulling something far above you with no downside to weigh
+once the level gap made those fights hopeless. It floats off the XP bar in red
+and the death screen says how much.
+
 Player health persists (see the migration in `SqliteCharacterStore`), so logging
 out at 3 HP and back in is not a free heal.
 

@@ -78,8 +78,6 @@ smaller entries below; those are the first step towards them.
 - **Guilds.**
 - **Player-vs-player**, eventually: duels and an opt-in arena first.
 - **Leaderboards.** Highest level, first to 100, most elites felled.
-- **A death penalty.** Dying costs a walk from the nearest waystone and nothing
-  else, so danger has no weight.
 - **More music, and ambience.** Music is composed per region and follows fights
   (`music.ts`); still to come: night variations of each piece, an elite or boss
   theme, a stinger when a quest completes, and ambience under it all — wind on
