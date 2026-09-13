@@ -5,6 +5,7 @@ import {
   heightAt,
   type FlatZone,
   type LakeDefinition,
+  type SeaDefinition,
   type TerrainRegion,
   type TerrainSettings,
 } from "./terrain.js";
@@ -415,6 +416,23 @@ const TERRA_LAKES: LakeDefinition[] = [
   { x: -1180, z: 180, radius: 50, shore: 14, depth: 0.8 },
 ];
 
+/**
+ * The Morning Sea, along Terra's eastern edge, where the sun comes up. Sunward's
+ * plains run down to it, the Brightwater's lake country ends at it, and
+ * Redstep's mesas stand over it. Everything placed by hand is well inland: the
+ * furthest east is the Redstep Stone, at 2500.
+ */
+const TERRA_SEA: SeaDefinition = {
+  name: "The Morning Sea",
+  side: "east",
+  from: 2900,
+  wander: 250,
+  width: 1100,
+  fall: 220,
+  level: -12,
+  depth: 14,
+};
+
 /** Every place a person might stand or wake is levelled, so none of them is
  *  on a cliff. */
 function terraFlats(): FlatZone[] {
@@ -542,6 +560,7 @@ export const OSTRAS: Record<OstraId, OstraDefinition> = {
       flats: terraFlats(),
       regions: TERRA_REGIONS,
       lakes: TERRA_LAKES,
+      sea: TERRA_SEA,
     },
     settlements: ["daso", "fanshona"],
     // Gentle enough to learn the fight in. Level carries the danger further

@@ -17,7 +17,7 @@ import {
   type RoadDefinition,
   type RuinDefinition,
 } from "./ostras.js";
-import { heightAt, lakeLevel, lakeReach, regionAt, waterDepthAt } from "./terrain.js";
+import { heightAt, lakeLevel, lakeReach, regionAt, SAND_HEIGHT, seaDepthAt, seaRamp, waterDepthAt } from "./terrain.js";
 import { getVariant } from "./variants.js";
 
 /**
@@ -741,6 +741,9 @@ export function campsIn(ostra: OstraDefinition): readonly CampDefinition[] {
         // A hunting area is its variant's alone.
         if (areas.some((area) => dist(x, z, area.x, area.z) - radius - area.radius <= 25)) continue;
         if (ostra.terrain.lakes?.some((l) => dist(x, z, l.x, l.z) - radius * 0.5 <= lakeReach(l))) continue;
+        // Not on the shore either: a creature scattered to the edge of its
+        // camp should land on dry ground, not out past the depth it can wade.
+        if (ostra.terrain.sea && campAtSea(ostra, x, z, radius + 2)) continue;
         if (roadDistance(ostra, x, z) - radius <= 10) continue;
 
         list.push({ id: `w${i}_${j}`, kind, count, x, z, radius, level });
@@ -751,6 +754,14 @@ export function campsIn(ostra: OstraDefinition): readonly CampDefinition[] {
   camps = list;
   campCache.set(ostra.id, camps);
   return camps;
+}
+
+/** Whether any of a circle — its centre and four points on its edge — is
+ *  within a metre of the sea. */
+function campAtSea(ostra: OstraDefinition, x: number, z: number, radius: number): boolean {
+  const t = ostra.terrain;
+  return seaDepthAt(x, z, t) > -1 || seaDepthAt(x + radius, z, t) > -1 || seaDepthAt(x - radius, z, t) > -1
+    || seaDepthAt(x, z + radius, t) > -1 || seaDepthAt(x, z - radius, t) > -1;
 }
 
 const campBuckets = new Map<OstraId, Map<number, CampDefinition[]>>();
@@ -895,6 +906,9 @@ function generateWilds(
       const ground = heightAt(x, z, ostra.terrain);
       // Nothing grows in the water or on the drowned margin of it.
       if (lakes.some((l) => dist(x, z, l.x, l.z) < lakeReach(l) && ground < lakeLevel(l, ostra.terrain) + 0.3)) continue;
+      // Nor on the sand. A rock can stand in the shallows; a tree cannot.
+      const sea = ostra.terrain.sea;
+      if (sea && seaRamp(sea, x, z, ostra.terrain.seed) > 0 && ground < sea.level + (isTree ? SAND_HEIGHT : -1)) continue;
 
       h = rehash(h, 13);
       const size = h / 4294967296;
@@ -1031,6 +1045,41 @@ export function settlementProblems(): string[] {
         const blocker = town.buildings.find((b) => inside(b, tree.x, tree.z, tree.radius + 0.6));
         if (blocker) problems.push(`${where}: a tree grows through ${blocker.name} (${blocker.id})`);
         if (roadDistance(ostra, tree.x, tree.z) < tree.radius + 0.4) problems.push(`${where}: a tree stands on the road`);
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * Anywhere a sea's water would end in a straight edge instead of a shore.
+ *
+ * Only ground the land has started falling on is sea, so a hollow below the
+ * sea's level just short of where the fall begins would be dry, and the one
+ * just past it flooded — a wall of water standing along the line. The client
+ * draws the sea as one sheet on that assumption, too. Sampled every 16 m along
+ * the coast, through the band where the fall may begin.
+ */
+export function seaProblems(): string[] {
+  const problems: string[] = [];
+  for (const ostra of Object.values(OSTRAS)) {
+    const t = ostra.terrain;
+    const sea = t.sea;
+    if (!sea) continue;
+    const half = ostra.size / 2;
+    const toWorld = (out: number, along: number): [number, number] =>
+      sea.side === "east" ? [out, along] : sea.side === "west" ? [-out, along]
+        : sea.side === "north" ? [along, out] : [along, -out];
+    for (let along = -half; along <= half; along += 16) {
+      for (let out = sea.from - sea.wander; out <= sea.from + sea.wander; out += 16) {
+        const [x, z] = toWorld(out, along);
+        if (seaRamp(sea, x, z, t.seed) > 0) break;
+        const height = heightAt(x, z, t);
+        if (height <= sea.level + 0.5) {
+          problems.push(`${ostra.name}: ground at (${x}, ${z}) is ${height.toFixed(1)} m, at or below ${sea.name} `
+            + `(${sea.level} m) before the land falls to it — lower the sea or move \`from\``);
+          break;
+        }
       }
     }
   }

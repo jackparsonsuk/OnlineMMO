@@ -12,7 +12,7 @@ import {
   SPRINT_MULTIPLIER,
   STEP_DOWN,
 } from "./constants.js";
-import { heightAt, type TerrainSettings } from "./terrain.js";
+import { heightAt, MAX_WADE_DEPTH, seaDepthAt, type TerrainSettings } from "./terrain.js";
 
 /**
  * The single movement simulation, run in two places:
@@ -260,6 +260,8 @@ export function moveBody(
   world: MoveWorld,
   radius: number,
 ): void {
+  const fromX = state.x;
+  const fromZ = state.z;
   state.x += deltaX;
   state.z += deltaZ;
 
@@ -273,11 +275,68 @@ export function moveBody(
   state.x = clamp(state.x, -limit, limit);
   state.z = clamp(state.z, -limit, limit);
 
+  if (world.terrain?.sea) keepWading(state, fromX, fromZ, world.terrain);
+
   // Then stand on the ground. Height is derived from the final position rather
   // than integrated, so there is no vertical velocity to drift out of sync —
   // where you are horizontally completely determines how high you are.
   if (world.terrain) state.y = heightAt(state.x, state.z, world.terrain);
 }
+
+/**
+ * The sea past wading depth is a wall, like the edge of the Ostra, and for the
+ * same reason it is a pure function of where you are: the client knows it
+ * exactly, so walking into it predicts perfectly.
+ *
+ * A step that would end too deep keeps whichever half of it does not — the x
+ * or the z — so you slide along the drop-off rather than sticking to it.
+ * Where the drop-off runs on a diagonal both halves go deeper, so then the
+ * step is turned to run along the line of equal depth instead. A body already
+ * out too deep (knocked there, or a coast that moved under a saved character)
+ * may always move somewhere shallower, or it could never leave.
+ */
+function keepWading(state: MoveState, fromX: number, fromZ: number, terrain: TerrainSettings): void {
+  const depth = seaDepthAt(state.x, state.z, terrain);
+  if (depth <= MAX_WADE_DEPTH) return;
+  const was = seaDepthAt(fromX, fromZ, terrain);
+  if (depth <= was) return;
+  const allowed = was > MAX_WADE_DEPTH ? was : MAX_WADE_DEPTH;
+  if (seaDepthAt(state.x, fromZ, terrain) <= allowed) {
+    state.z = fromZ;
+    return;
+  }
+  if (seaDepthAt(fromX, state.z, terrain) <= allowed) {
+    state.x = fromX;
+    return;
+  }
+
+  const stepX = state.x - fromX;
+  const stepZ = state.z - fromZ;
+  state.x = fromX;
+  state.z = fromZ;
+  // Which way is deeper, sampled either side of where the step began.
+  const gx = seaDepthAt(fromX + SLOPE_PROBE, fromZ, terrain) - seaDepthAt(fromX - SLOPE_PROBE, fromZ, terrain);
+  const gz = seaDepthAt(fromX, fromZ + SLOPE_PROBE, terrain) - seaDepthAt(fromX, fromZ - SLOPE_PROBE, terrain);
+  const lengthSq = gx * gx + gz * gz;
+  if (!(lengthSq > 0)) return;
+  const into = (stepX * gx + stepZ * gz) / lengthSq;
+  if (into <= 0) return;
+  // The part of the step across the slope taken away, and a hair more, so a
+  // drop-off that curves towards you does not turn the slide back into the
+  // deep on the next step.
+  const length = Math.sqrt(lengthSq);
+  const slideX = fromX + stepX - gx * into - (gx / length) * SLIDE_MARGIN;
+  const slideZ = fromZ + stepZ - gz * into - (gz / length) * SLIDE_MARGIN;
+  if (seaDepthAt(slideX, slideZ, terrain) <= allowed) {
+    state.x = slideX;
+    state.z = slideZ;
+  }
+}
+
+/** Half the distance the sea's slope is sampled across, in metres. */
+const SLOPE_PROBE = 0.25;
+/** How far a slide along the drop-off also steps back from it. */
+const SLIDE_MARGIN = 0.01;
 
 /**
  * Push the player out of anything it overlaps.

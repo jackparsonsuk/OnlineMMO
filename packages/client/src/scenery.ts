@@ -11,7 +11,9 @@ import {
   lakeReach,
   regionOf,
   roadDistance,
+  SAND_HEIGHT,
   sceneryCell,
+  seaRamp,
   settlementsIn,
   slopeAt,
   type OstraDefinition,
@@ -471,6 +473,7 @@ export class SceneryStreamer implements ChunkListener {
     const lists: Partial<Record<GrassPool, number[]>> = {};
     const out = new Float32Array(16);
     const lakes = ostra.terrain.lakes ?? [];
+    const sea = ostra.terrain.sea;
 
     for (let n = 0; n < GRASS_PER_CHUNK; n++) {
       const h = hash2(cx * 131 + n, cz * 71 - n, 0x6a55);
@@ -493,6 +496,8 @@ export class SceneryStreamer implements ChunkListener {
       if (ostra.dungeon && n % 3 !== 0) continue;
       // Reeds at the water's edge, and in the shallows; nothing in the deep.
       let kind: GrassPool = ostra.dungeon ? "ash" : regionOf(ostra, x, z)?.grass ?? "grass";
+      // Nothing on the sand, or under the sea.
+      if (sea && y < sea.level + SAND_HEIGHT && seaRamp(sea, x, z, ostra.terrain.seed) > 0) continue;
       const lake = lakes.find((l) => Math.hypot(x - l.x, z - l.z) < lakeReach(l));
       if (lake) {
         const depth = lakeLevel(lake, ostra.terrain) - y;

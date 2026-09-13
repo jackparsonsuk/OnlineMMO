@@ -181,6 +181,7 @@ interface LabelLine {
 
 const REGION_FONT = "italic 600 15px ui-serif, Georgia, serif";
 const BAND_FONT = "600 11px ui-sans-serif, system-ui, sans-serif";
+const SEA_FONT = "italic 600 14px ui-serif, Georgia, serif";
 const LANDMARK_FONT = "600 12px ui-sans-serif, system-ui, sans-serif";
 const QUEST_FONT = "italic 600 12px ui-serif, Georgia, serif";
 const AREA_FONT = "italic 11px ui-serif, Georgia, serif";
@@ -707,6 +708,31 @@ export class Cartographer {
           font: BAND_FONT,
         }] : []),
       ], rx, ry);
+    }
+
+    // The sea, named out in the open water and turned to run along the coast:
+    // an eight-kilometre coast has room for the name, and the strip of water
+    // beside it does not have room for it lying flat.
+    const sea = this.ostra.terrain.sea;
+    if (sea) {
+      const half = this.ostra.size / 2;
+      const out = sea.from + sea.wander + (half - sea.from - sea.wander) * 0.5;
+      const sideways = sea.side === "east" || sea.side === "west";
+      const [sx, sy] = toPx(sea.side === "east" ? out : sea.side === "west" ? -out : 0,
+        sea.side === "north" ? out : sea.side === "south" ? -out : 0);
+      const text = sea.name.toUpperCase().split("").join(" ");
+      ctx.save();
+      ctx.font = SEA_FONT;
+      const width = ctx.measureText(text).width;
+      ctx.translate(sx, sy);
+      if (sideways) ctx.rotate(sea.side === "east" ? Math.PI / 2 : -Math.PI / 2);
+      ctx.fillStyle = "rgba(214, 236, 250, 0.7)";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, 0, 0);
+      ctx.restore();
+      this.placed.push(sideways
+        ? { x: sx - 9, y: sy - width / 2, w: 18, h: width }
+        : { x: sx - width / 2, y: sy - 9, w: width, h: 18 });
     }
 
     // Hunting grounds, ringed whether or not a quest wants you there — the

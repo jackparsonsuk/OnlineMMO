@@ -23,8 +23,9 @@ import { fbm, gradientNoise, ridged, smoothstep } from "./noise.js";
  *    can navigate by;
  *  - `rim`: a wall of peaks at the boundary, so the edge of the world is a
  *    place rather than an invisible fence.
- * Then `flats` blend all of it level under a settlement, and `lakes` carve
- * shallow basins with a bank around them.
+ * Then `flats` blend all of it level under a settlement, `lakes` carve
+ * shallow basins with a bank around them, and a `sea` tips one side of the
+ * Ostra down under the water.
  *
  * `regions` reshape all of that per area: a moor lifted into an upland, a fen
  * pressed nearly flat, mesa country cut into terraces. A region is the nearest
@@ -74,6 +75,40 @@ export interface TerrainSettings {
   flats: FlatZone[];
   regions?: TerrainRegion[];
   lakes?: LakeDefinition[];
+  sea?: SeaDefinition;
+}
+
+/**
+ * A sea along one edge of the Ostra.
+ *
+ * There is no drawn shoreline. From `from` outwards the land is tipped down,
+ * slowly at first and then steeply, until by `from + width` it has fallen by
+ * `fall` — and the coast is simply wherever that falling ground passes below
+ * `level`. So the sea comes in up a valley and a hill stands out into it as a
+ * headland, and the coast follows the country instead of a line someone
+ * chose. `wander` moves where the tipping starts, so even a dead-flat plain
+ * gets bays.
+ *
+ * `level` has to be below the ground all along where the tipping starts, or
+ * a hollow there would be cut off by a straight edge of water. Check it with
+ * the heights, not by eye.
+ */
+export interface SeaDefinition {
+  name: string;
+  /** Which edge of the Ostra it lies along. */
+  side: "east" | "west" | "north" | "south";
+  /** Distance from the centre where the land starts to fall towards it. */
+  from: number;
+  /** How far `from` wanders either way along the coast. */
+  wander: number;
+  /** Over how many metres the fall completes. */
+  width: number;
+  /** How far the land has fallen by then. */
+  fall: number;
+  /** Surface height. */
+  level: number;
+  /** The open seabed lies flat this far below the surface. */
+  depth: number;
 }
 
 /** How one region bends the ground. Everything defaults to "no change". */
@@ -225,14 +260,26 @@ function naturalHeight(x: number, z: number, t: TerrainSettings): number {
 
   if (t.rim) {
     const r = t.rim;
-    const ax = x < 0 ? -x : x;
-    const az = z < 0 ? -z : z;
+    let ax = x < 0 ? -x : x;
+    let az = z < 0 ? -z : z;
+    if (t.sea) {
+      // No wall of peaks along the shore: that side's edge is the sea.
+      const side = t.sea.side;
+      if (side === "east" && x > 0) ax = 0;
+      else if (side === "west" && x < 0) ax = 0;
+      else if (side === "north" && z > 0) az = 0;
+      else if (side === "south" && z < 0) az = 0;
+    }
     const edge = ax > az ? ax : az;
     const into = (edge - (r.halfExtent - r.width)) / r.width;
-    if (into > 0) {
+    // The rims of the two sides beside the sea sink as they near it, so they
+    // run out into the water as headlands rather than stopping in a cliff at
+    // the edge of the world.
+    const fade = into > 0 && t.sea ? 1 - seaRamp(t.sea, x, z, s) : 1;
+    if (into > 0 && fade > 0) {
       // Jagged, not a ramp: a ridged layer scaled up as you approach the edge.
       const crag = 0.55 + 0.45 * ridged(x / 260, z / 260, s + 401, 3);
-      height += smoothstep(into) * r.height * crag;
+      height += smoothstep(into) * r.height * crag * fade;
     }
   }
 
@@ -298,6 +345,18 @@ export function heightAt(x: number, z: number, terrain: TerrainSettings): number
     height = height * natural + levelOf(flat, terrain) * (1 - natural);
   }
 
+  if (terrain.sea) {
+    const sea = terrain.sea;
+    const t = seaRamp(sea, x, z, terrain.seed);
+    if (t > 0) {
+      // Squared, so the land leaves its natural shape without a crease and
+      // steepens towards the water.
+      height -= t * t * sea.fall;
+      const floor = sea.level - sea.depth;
+      if (height < floor) height = floor;
+    }
+  }
+
   if (terrain.lakes) {
     for (const lake of terrain.lakes) {
       const dx = x - lake.x;
@@ -328,8 +387,53 @@ export function heightAt(x: number, z: number, terrain: TerrainSettings): number
   return height;
 }
 
+/** Ground less than this far above the sea is sand: nothing grows on it, and
+ *  it is drawn as a beach. */
+export const SAND_HEIGHT = 1.6;
+
+/**
+ * Water deeper than this is a wall (see `moveBody`). There is no swimming, and
+ * a sea you could walk out into until it closed over your head would need it.
+ * Waist-deep on a person — 1.3 m was nearly over their head — and still deeper
+ * than any lake (0.9 at most), so only the sea ever stops anyone.
+ */
+export const MAX_WADE_DEPTH = 1;
+
+/**
+ * How far towards the sea's edge of the Ostra (x, z) is, from 0 where the land
+ * starts to fall to 1 where it has finished. Zero for anywhere inland, which
+ * is most of the map, and that is decided before any noise is sampled.
+ */
+export function seaRamp(sea: SeaDefinition, x: number, z: number, seed: number): number {
+  const out = sea.side === "east" ? x : sea.side === "west" ? -x : sea.side === "north" ? z : -z;
+  if (out <= sea.from - sea.wander) return 0;
+  const along = sea.side === "east" || sea.side === "west" ? z : x;
+  // A long swing of the whole coast, and broken ground in two dimensions on
+  // top of it — so a bay can reach in behind a headland, and the odd hill out
+  // in the shallows is left standing as an island.
+  let wobble = gradientNoise(along / 1400, 0.37, seed + 701) * 0.55 + fbm(x / 380, z / 380, seed + 702, 2) * 0.45;
+  // Noise only roughly keeps to [-1, 1], and the early return above counts on it.
+  wobble = wobble < -1 ? -1 : wobble > 1 ? 1 : wobble;
+  const t = (out - sea.from - sea.wander * wobble) / sea.width;
+  return t <= 0 ? 0 : t >= 1 ? 1 : t;
+}
+
+/** Depth of the sea at (x, z): positive in it, zero or less on land, and
+ *  -Infinity anywhere the land has not started falling towards it. */
+export function seaDepthAt(x: number, z: number, terrain: TerrainSettings): number {
+  const sea = terrain.sea;
+  if (!sea || seaRamp(sea, x, z, terrain.seed) <= 0) return -Infinity;
+  return sea.level - heightAt(x, z, terrain);
+}
+
 /** Depth of water standing at (x, z); zero or less on dry land. */
 export function waterDepthAt(x: number, z: number, terrain: TerrainSettings): number {
+  if (terrain.sea) {
+    // Dry shore reads 0 like any other dry land, not how far above the tide it
+    // is: the road router's wet grid tests against a negative number.
+    const depth = seaDepthAt(x, z, terrain);
+    if (depth > 0) return depth;
+  }
   if (!terrain.lakes) return 0;
   for (const lake of terrain.lakes) {
     const dx = x - lake.x;

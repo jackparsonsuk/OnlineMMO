@@ -103,7 +103,7 @@ handshake, so both sides predict on exactly the same `dt`.
 Circle-vs-circle push-out, resolved inside `applyInput` so client and server run
 the identical code. **A player collides only with what both sides know
 exactly**: scenery (each Ostra's `obstacles`, the generated trees and rocks),
-buildings and dungeon rock, and the ground. So your own movement predicts
+buildings and dungeon rock, the ground, and water too deep to wade. So your own movement predicts
 perfectly — you never see a correction walking into a rock or a wall.
 
 **Players pass through other players and through creatures**, as in WoW. They
@@ -1140,7 +1140,8 @@ permanent vertical rubber-banding. A function both sides call is identical by
 construction — no asset to load, no sampling convention to get subtly wrong.
 
 It is layered gradient noise (`noise.ts`): kilometre-scale uplands, rolling
-hills, ridged mountain ranges in patches, and a wall of peaks at the rim. The
+hills, ridged mountain ranges in patches, a wall of peaks at the rim, and a sea
+along one side (see A world eight kilometres wide). The
 noise is built from `Math.imul` hashing and plain arithmetic only — **no
 `Math.sin`, `Math.hypot` or `**` anywhere in `noise.ts`, `terrain.ts` or
 `worldgen.ts`**, because the spec lets each JS engine round those differently
@@ -1282,6 +1283,44 @@ pressed flat, mesas terraced — so the land and its look agree about borders.
 `heightAt` with a wandering shoreline and a bank that always rises above the
 water. The client draws the surface as a sheet covering every cell where the
 ground dips below it, so the water follows the carved shore exactly.
+
+**The Morning Sea** runs down Terra's eastern edge, where the sun comes up —
+below Sunward's plains, the end of the Brightwater and Redstep's mesas.
+Nobody draws its shoreline. From `from` (2900 m out, wandering 250 m either
+way) the land is tipped down, gently and then steeply, and the coast is simply
+wherever that falling ground passes below the sea's level. So the sea comes in
+up a low valley, a hill stands out into it as a headland, and one in the
+shallows is left as an island; the coast follows the country instead of a
+line. There is no rim of peaks along that side, and the north and south rims
+sink as they reach the water, so they run out into it rather than stopping in
+a cliff at the edge of the world. Ground less than 1.6 m above the water is
+sand: no trees, no grass, and the seabed under the shallows darkens with
+depth, which is most of what makes the water on top of it read as shallow or
+deep.
+
+That shape makes the client's job easy. Everything short of where the land
+starts falling stands above the sea, and everywhere past it, ground below the
+level *is* sea — so the surface is one sheet running from there out to six
+kilometres past the edge, under the land where there is land, and the horizon
+is water rather than the end of the world. The one thing that breaks it is a
+hollow below sea level just short of where the fall begins: water would stand
+in a straight edge along the line. `seaProblems()` samples for exactly that at
+boot and logs `[sea]`. The water's colour is darker than a lake's for the same
+look — a flat sheet facing the sky takes the whole of the sun and the sky
+light, and at a lake's colour the sea came out a cyan the haze could not pull
+back.
+
+**Deep water is a wall.** There is still no swimming, so a step that would
+end deeper than `MAX_WADE_DEPTH` (1 m, waist-deep; 1.3 was nearly over a
+person's head) is refused inside `moveBody`, for players and creatures alike.
+It is a pure function of position, like the edge of the Ostra, so the client
+predicts it exactly — measured at a 150 ms round trip, walking into it and
+along it gave no corrections at all. A refused step keeps whichever of its x
+and z halves stays shallow, so you slide along the drop-off; where the
+drop-off runs on a diagonal both halves go deeper, and then the step is turned
+along the line of equal depth instead. Something already out too deep may
+always move shallower, or it could never come back. Camps are kept a metre
+clear of the water all round, so nothing scatters into the sea.
 
 **Roads are routed, not drawn.** Each road lists only the places it must pass
 through; A* over a 32 m grid finds the way between them, where cost climbs

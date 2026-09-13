@@ -37,6 +37,7 @@ import {
   type OstraDefinition,
   type Rarity,
   type RuinDefinition,
+  type SeaDefinition,
   type Spell,
   type WaystoneDefinition,
 } from "@mmo/shared";
@@ -246,6 +247,7 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
     water.backFaceCulling = false;
     for (const lake of ostra.terrain.lakes) addLake(scene, root, ostra, lake, water);
   }
+  if (ostra.terrain.sea) addSea(scene, root, ostra, ostra.terrain.sea);
 
   for (const settlement of settlementsIn(ostra)) {
     buildSettlement(scene, ostra, settlement).parent = root;
@@ -561,6 +563,54 @@ function addLake(scene: Scene, root: TransformNode, ostra: OstraDefinition, lake
   data.normals = positions.map((_, k) => (k % 3 === 1 ? 1 : 0));
   data.applyToMesh(mesh);
   mesh.position.set(lake.x, level, lake.z);
+  mesh.material = material;
+  mesh.isPickable = false;
+  mesh.parent = root;
+}
+
+/**
+ * The sea's surface: one flat sheet at its level, from where the land starts
+ * falling towards it out to well past the edge of the Ostra.
+ *
+ * Nothing like a lake's cell-by-cell sheet is needed. Everywhere the land has
+ * not yet started to fall stands above the sea (`SeaDefinition` says why it
+ * has to), and everywhere it has, ground below the level really is sea — so
+ * the sheet can simply run on under the land, and the land hides it. Past the
+ * edge it goes on until the haze has swallowed it, so the horizon is water
+ * rather than the end of the world.
+ */
+function addSea(scene: Scene, root: TransformNode, ostra: OstraDefinition, sea: SeaDefinition): void {
+  const half = ostra.size / 2;
+  const beyond = half + 6000;
+  const near = sea.from - sea.wander;
+  // In the sea's own frame: `out` towards its edge, `along` the coast.
+  const corner = (out: number, along: number): [number, number] =>
+    sea.side === "east" ? [out, along] : sea.side === "west" ? [-out, along]
+      : sea.side === "north" ? [along, out] : [along, -out];
+  const positions: number[] = [];
+  for (const [out, along] of [[near, -beyond], [beyond, -beyond], [near, beyond], [beyond, beyond]] as const) {
+    const [x, z] = corner(out, along);
+    positions.push(x, 0, z);
+  }
+
+  // Darker than a lake's colour for the same look: a flat sheet facing the sky
+  // takes the whole of the sun and the sky light, and at a lake's colour a sea
+  // this big came out a bright cyan that the haze could not pull back.
+  const material = new StandardMaterial("sea", scene);
+  material.diffuseColor = Color3.FromHexString("#1f4c69");
+  material.specularColor = new Color3(0.4, 0.45, 0.5);
+  material.specularPower = 64;
+  material.emissiveColor = Color3.FromHexString("#061a26");
+  material.alpha = 0.8;
+  material.backFaceCulling = false;
+
+  const mesh = new Mesh("sea", scene);
+  const data = new VertexData();
+  data.positions = positions;
+  data.indices = [0, 1, 2, 1, 3, 2];
+  data.normals = [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0];
+  data.applyToMesh(mesh);
+  mesh.position.y = sea.level;
   mesh.material = material;
   mesh.isPickable = false;
   mesh.parent = root;

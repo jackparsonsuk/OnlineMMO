@@ -122,8 +122,11 @@ smaller entries below; those are the first step towards them.
   climb a 120 m peak at walking speed. You can jump, but collision is flat, so
   a jump clears nothing; low things (logs, fences) could be skipped when high
   enough in the air.
-- **Swimming / deep water.** Lakes are deliberately wadeable because there is no
-  swimming.
+- **Swimming.** Lakes are deliberately wadeable, and the Morning Sea is a wall
+  past waist depth (`MAX_WADE_DEPTH`), because there is no swimming.
+- **More to the coast.** The Morning Sea is empty: a fishing hamlet, a wreck,
+  something in the water, and a waystone on the shore. Redstep's terraces could
+  meet it as sea cliffs rather than a slope, and the water could move.
 
 ## Creatures and combat
 

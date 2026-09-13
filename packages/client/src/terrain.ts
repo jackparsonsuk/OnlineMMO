@@ -12,9 +12,12 @@ import {
   heightAt,
   lakeLevel,
   lakeReach,
+  MAX_WADE_DEPTH,
   regionAt,
   roadDistance,
+  SAND_HEIGHT,
   SCENERY_CELL,
+  seaRamp,
   settlementsIn,
   terrainRelief,
   type OstraDefinition,
@@ -66,6 +69,10 @@ export interface GroundPalette {
   regionHigh: Color3[];
   lakebed: Color3;
   water: Color3;
+  /** Beach, and the seabed under the shallows. */
+  sand: Color3;
+  /** Open sea, on the map. */
+  deepWater: Color3;
   dry: Color3;
   rock: Color3;
   peak: Color3;
@@ -87,6 +94,8 @@ export function groundPalette(ostra: OstraDefinition): GroundPalette {
     regionHigh: ostra.regions.map((r) => Color3.Lerp(Color3.FromHexString(r.ground), Color3.FromHexString(r.crest), 0.6)),
     lakebed: Color3.FromHexString("#4a4a36"),
     water: Color3.FromHexString("#3f7ea6"),
+    sand: Color3.FromHexString("#cbb98c"),
+    deepWater: Color3.FromHexString("#28577c"),
     // Sun-bleached meadow, for variety across a big map.
     dry: Color3.Lerp(grid, Color3.FromHexString("#b5a55e"), 0.55),
     rock: Color3.FromHexString(p.edge),
@@ -173,6 +182,22 @@ export function groundTone(
   // Roads over everything but water: a path should be visible in any region.
   const road = roadDistance(ostra, x, z);
   if (road < 1.2) Color3.LerpToRef(out, palette.dirt, road <= 0 ? 0.92 : 0.92 * (1 - road / 1.2), out);
+
+  const sea = ostra.terrain.sea;
+  if (sea && seaRamp(sea, x, z, ostra.terrain.seed) > 0) {
+    const above = height - sea.level;
+    if (asMap && above < 0) {
+      // The shallows you can wade pale, the open sea dark, so the map says
+      // where the shore can be walked.
+      Color3.LerpToRef(palette.water, palette.deepWater, Math.min(1, -above / (MAX_WADE_DEPTH * 3)), out);
+    } else if (above < SAND_HEIGHT) {
+      // Sand up the last metre and a half, faded in over its top half-metre;
+      // under the water it darkens with depth, which is most of what makes
+      // the water mesh on top read as shallow or deep.
+      Color3.LerpToRef(out, palette.sand, Math.min(1, (SAND_HEIGHT - above) / 0.5), out);
+      if (above < 0) out.scaleToRef(Math.max(0.45, 1 + above * 0.12), out);
+    }
+  }
 
   if (ostra.terrain.lakes) {
     for (const lake of ostra.terrain.lakes) {
