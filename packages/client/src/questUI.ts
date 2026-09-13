@@ -141,6 +141,11 @@ export class QuestUI {
     return !this.dialog.hidden || !this.journal.hidden;
   }
 
+  /** The name of whoever the dialogue is with, while it is open. */
+  get talkingTo(): string | undefined {
+    return this.dialog.hidden ? undefined : this.talking?.name;
+  }
+
   /** Esc: close whatever is open. Returns whether anything was. */
   close(): boolean {
     const was = this.isOpen;

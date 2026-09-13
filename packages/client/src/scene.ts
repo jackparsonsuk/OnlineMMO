@@ -50,7 +50,7 @@ import {
   hexColour,
 } from "./lowpoly.js";
 import { SceneryStreamer } from "./scenery.js";
-import { buildSettlement, buildVillager } from "./settlement.js";
+import { animateVillager, buildSettlement, buildVillager, type VillagerLife } from "./settlement.js";
 import { TerrainStreamer } from "./terrain.js";
 
 export interface World {
@@ -76,6 +76,8 @@ export interface World {
   /** Towns and lakes not built yet, until you come near (`DEFERRED_RANGE`). */
   deferred: Array<{ x: number; z: number; reach: number; build: () => void }>;
   deferredStarted: boolean;
+  /** Everyone standing in the towns built so far, to bring to life. */
+  villagers: Array<{ name: string; life: VillagerLife }>;
   ostra: OstraDefinition | undefined;
   sky: Mesh;
   /** Dimmed per Ostra (`OstraPalette.light`) along with the ambient. */
@@ -143,6 +145,7 @@ export function createWorld(canvas: HTMLCanvasElement): World {
     scenery: undefined,
     deferred: [],
     deferredStarted: false,
+    villagers: [],
     ostra: undefined,
     sky: buildSky(scene),
     sun,
@@ -236,6 +239,7 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
   world.scenery = new SceneryStreamer(scene, ostra);
   world.terrain = new TerrainStreamer(scene, ostra, world.scenery);
   world.deferred = [];
+  world.villagers = [];
 
   // A rim of mountains is boundary enough, and a dungeon's rock more than
   // enough; the low wall is for the small open Ostras.
@@ -264,7 +268,12 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
       x: settlement.x, z: settlement.z, reach: settlement.radius,
       build: () => {
         buildSettlement(scene, ostra, settlement).parent = root;
-        for (const villager of settlement.villagers) buildVillager(scene, ostra, villager).parent = root;
+        for (const villager of settlement.villagers) {
+          const body = buildVillager(scene, ostra, villager);
+          body.parent = root;
+          const life = (body.metadata as { villagerLife?: VillagerLife } | undefined)?.villagerLife;
+          if (life) world.villagers.push({ name: villager.name, life });
+        }
       },
     });
   }
@@ -278,6 +287,16 @@ export function applyOstra(world: World, ostra: OstraDefinition): void {
  * everyone starts, and past the fog from anywhere near Daso.
  */
 const DEFERRED_RANGE = 1500;
+
+let lastVillagerFrame = 0;
+
+/** Once per frame: villagers breathe, glance about, and turn to whoever is
+ *  near — `talkingTo` (a villager's name) gestures as it speaks. */
+export function animateVillagers(world: World, now: number, x: number, z: number, talkingTo: string | undefined): void {
+  const dt = Math.min(0.1, Math.max(0, (now - lastVillagerFrame) / 1000));
+  lastVillagerFrame = now;
+  for (const { name, life } of world.villagers) animateVillager(life, now, dt, x, z, name === talkingTo);
+}
 
 /** Stream the ground around where the camera is looking. Once per frame. */
 export function updateWorld(world: World, x: number, z: number): void {

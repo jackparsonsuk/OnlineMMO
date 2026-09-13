@@ -74,6 +74,11 @@ export class VendorUI {
     return !this.panel.hidden;
   }
 
+  /** The vendor's name, while trading. */
+  get talkingTo(): string | undefined {
+    return this.panel.hidden ? undefined : this.vendor?.name;
+  }
+
   open(vendor: VillagerDefinition): void {
     this.vendor = vendor;
     this.confirming = false;

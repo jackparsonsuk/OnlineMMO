@@ -109,10 +109,10 @@ smaller entries below; those are the first step towards them.
   Lantern House and everyone in it — was invented for the game. So were Daso's
   smithy, storehouse and cart shed and the people added with them (Mott,
   Brenna); the vault only gives Daso "a few small houses and an inn".
-- **Towns that feel lived in.** Villagers stand still facing out of their doors.
-  Idle animations, turning to face you when you talk, and a few walking a
-  route (a hauler to the cart shed, a fisher to the dock) would do more for
-  the towns now than more buildings.
+- **Towns that feel lived in.** Villagers breathe, glance about, turn to face
+  you and gesture as they talk (`animateVillager`); next, a few walking a
+  route (a hauler to the cart shed, a fisher to the dock), which needs their
+  position to be something the server and the talk range both know.
 - **More settlements.** Vareto (Daso is "in the west of Vareto"), and something
   for the empty south and east — Terra is mostly wilds.
 - **Rivers and bridges.** Roads already route round lakes; rivers would give

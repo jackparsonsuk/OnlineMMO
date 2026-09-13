@@ -53,7 +53,7 @@ import { Hud, type LevelGains } from "./hud.js";
 import { KeyboardInput } from "./input.js";
 import { MouseLook } from "./mouselook.js";
 import { Music } from "./music.js";
-import { applyOstra, createWorld } from "./scene.js";
+import { animateVillagers, applyOstra, createWorld } from "./scene.js";
 import { updateDaylight } from "./daylight.js";
 import { createSession, type OstraSession } from "./session.js";
 
@@ -543,6 +543,7 @@ function frame(now: number): void {
   if (session) {
     const self = session.selfPosition();
     music.update(currentOstra, self.x, self.z, room?.state.players.get(room.sessionId)?.inCombat ?? false);
+    animateVillagers(world, now, self.x, self.z, questUI.talkingTo ?? vendorUI.talkingTo);
     questUI.update(self.x, self.z);
     vendorUI.update(self.x, self.z);
     travelUI.update(self.x, self.z, room?.state.players.get(room.sessionId)?.inCombat ?? false);

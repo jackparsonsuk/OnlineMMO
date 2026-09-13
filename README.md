@@ -1486,6 +1486,16 @@ levels are measured outward from it: the woods round the town are level 1, the
 Gate Circle 7. A new character wakes among people with work for them rather
 than alone in a ring of standing stones.
 
+**Its people move.** Villagers used to stand exactly still, facing out of
+their doors, and turn nowhere when spoken to; the towns read as rows of
+statues. Now each one breathes, shifts its weight, glances about now and then,
+and turns to face whoever comes within seven metres — body slowly, head a
+little ahead of it — then back to its door when you leave, and gestures while
+you are talking to it or trading (`animateVillager` in `settlement.ts`). The
+head and arms hang from neck and shoulder joints so they turn where a person
+would. It is all drawn only: where a villager stands is fixed data, so the
+talk range and the server never need to know which way they face.
+
 Fourteen buildings round the yard — **The Felled Oak**, the timber shed, the saw
 pit, a smithy, a storehouse, a cart shed and the loggers' houses — with a ring
 of woodland that actually blocks you, opened where the roads come in. All three

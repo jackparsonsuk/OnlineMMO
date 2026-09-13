@@ -893,17 +893,25 @@ export function buildVillager(
   const trouser = tint(villager.colour, 0.55);
   const apron = tint(villager.colour, 1.25);
 
-  const put = (name: string, model: VoxelModel, y: number, x: number): void => {
+  const put = (name: string, model: VoxelModel, y: number, x: number, parent: TransformNode = pivot): Mesh => {
     const mesh = voxelMesh(scene, name, model, "centre");
     mesh.position.set(x, y, 0);
     mesh.material = material;
-    mesh.parent = pivot;
+    mesh.parent = parent;
+    return mesh;
+  };
+  /** A joint to turn a part about, rather than the part's own middle. */
+  const joint = (name: string, x: number, y: number): TransformNode => {
+    const node = new TransformNode(name, scene);
+    node.position.set(x, y, 0);
+    node.parent = pivot;
+    return node;
   };
 
   // A working body: a smock with an apron over it, sleeves, and a face. They
   // stand in doorways all day and you talk to them from a metre away, so they
   // are the models seen closest of anything in the game.
-  put("villagerBody", build(16, 16, 10, (v) => {
+  const body = put("villagerBody", build(16, 16, 10, (v) => {
     v.fill(0, 0, 0, 16, 16, 10, cloth);
     v.fill(3, 0, 8, 10, 11, 2, apron);
     v.fill(0, 0, 0, 16, 2, 10, tint(LEATHER_BELT, 1));
@@ -913,6 +921,8 @@ export function buildVillager(
     v.bevelAll();
   }), 0.6, 0);
 
+  // The head turns about the neck, and the arms swing from the shoulder.
+  const neck = joint("villagerNeck", 0, 0.86);
   put("villagerHead", build(10, 10, 11, (v) => {
     v.fill(0, 0, 0, 10, 10, 10, SKIN_TONE);
     v.fill(0, 7, 0, 10, 3, 10, HAIR_TONE);
@@ -924,15 +934,17 @@ export function buildVillager(
     v.fill(4, 3, 10, 2, 2, 1, SKIN_TONE);
     v.speckle(SKIN_TONE, 103, [tint(SKIN_TONE, 0.95), tint(SKIN_TONE, 1.04)], 0.2);
     v.bevelAll();
-  }), 1.02, 0);
+  }), 0.16, 0, neck);
 
   const arm = build(4, 14, 5, (v) => {
     v.fill(0, 0, 0, 4, 14, 5, cloth);
     v.fill(0, 0, 0, 4, 3, 5, SKIN_TONE);
     v.speckle(cloth, 104, [tint(cloth, 0.88), tint(cloth, 1.1)], 0.3);
   });
-  put("villagerArm", arm, 0.58, -0.31);
-  put("villagerArm", arm, 0.58, 0.31);
+  const leftShoulder = joint("villagerShoulder", -0.31, 0.8);
+  const rightShoulder = joint("villagerShoulder", 0.31, 0.8);
+  put("villagerArm", arm, -0.22, 0, leftShoulder);
+  put("villagerArm", arm, -0.22, 0, rightShoulder);
 
   const leg = build(5, 12, 5, (v) => {
     v.fill(0, 0, 0, 5, 12, 5, trouser);
@@ -942,5 +954,94 @@ export function buildVillager(
   put("villagerLeg", leg, 0.18, -0.13);
   put("villagerLeg", leg, 0.18, 0.13);
 
+  const life: VillagerLife = {
+    pivot, body, neck, leftShoulder, rightShoulder,
+    x: villager.x, z: villager.z, homeYaw: villager.yaw,
+    // Each on their own clock, so a street does not breathe in unison.
+    phase: (villager.x * 12.9898 + villager.z * 78.233) % 6.283,
+    lookUntil: 0, lookYaw: 0, talkUntil: 0,
+  };
+  pivot.metadata = { villagerLife: life };
   return pivot;
+}
+
+// --- villagers living ----------------------------------------------------------
+
+/** What animates one villager: the joints `buildVillager` made, and their mood. */
+export interface VillagerLife {
+  pivot: TransformNode;
+  body: Mesh;
+  neck: TransformNode;
+  leftShoulder: TransformNode;
+  rightShoulder: TransformNode;
+  x: number;
+  z: number;
+  /** Where they face when nobody is about: out of their door. */
+  homeYaw: number;
+  phase: number;
+  /** A glance to one side, now and then: until when, and how far. */
+  lookUntil: number;
+  lookYaw: number;
+  /** Talking with their hands, until this. */
+  talkUntil: number;
+}
+
+/** Within this, a villager turns to face you. */
+const NOTICE_RANGE = 7;
+/** Past this nobody can see them move, so they are left alone. */
+const ANIMATE_RANGE = 70;
+
+/**
+ * One frame of a villager's life.
+ *
+ * They used to stand exactly still, facing out of their doors, and turn
+ * nowhere when spoken to — the towns read as rows of statues. Now each
+ * breathes, shifts its arms, glances about now and then, and turns to face
+ * whoever comes near: body first, slowly, the head a little ahead of it. A
+ * villager being talked to (`talking`) gestures as it speaks. All of it is
+ * drawn only; a villager's place is fixed, and nothing about them is sent.
+ */
+export function animateVillager(life: VillagerLife, now: number, dt: number, playerX: number, playerZ: number, talking: boolean): void {
+  const dx = playerX - life.x;
+  const dz = playerZ - life.z;
+  const range = Math.sqrt(dx * dx + dz * dz);
+  if (range > ANIMATE_RANGE) return;
+  const t = now / 1000 + life.phase;
+
+  // Turn: to you when near, home again when you have gone.
+  const noticed = range < NOTICE_RANGE;
+  const facing = noticed ? Math.atan2(dx, dz) : life.homeYaw;
+  const turn = wrapAngle(facing - life.pivot.rotation.y);
+  life.pivot.rotation.y += turn * Math.min(1, dt * (noticed ? 3.2 : 1.2));
+
+  // The head leads, and when nobody is near, glances about by itself.
+  if (!noticed && now > life.lookUntil) {
+    const glancing = Math.sin(t * 7.1) > 0.4;
+    life.lookYaw = glancing ? Math.sin(t * 3.3) * 0.7 : 0;
+    life.lookUntil = now + 1500 + ((Math.abs(Math.sin(t * 5.7)) * 3500) | 0);
+  }
+  const headTarget = noticed ? Math.max(-0.6, Math.min(0.6, wrapAngle(Math.atan2(dx, dz) - life.pivot.rotation.y))) : life.lookYaw;
+  life.neck.rotation.y += (headTarget - life.neck.rotation.y) * Math.min(1, dt * 4);
+  life.neck.rotation.x = Math.sin(t * 1.1) * 0.03;
+
+  // Breathing, and a weight shifting from foot to foot.
+  life.body.scaling.y = 1 + Math.sin(t * 1.7) * 0.015;
+  life.pivot.rotation.z = Math.sin(t * 0.45) * 0.012;
+
+  if (talking) life.talkUntil = now + 600;
+  if (now < life.talkUntil) {
+    // Hands out, making a point.
+    life.rightShoulder.rotation.x = -0.55 + Math.sin(t * 5.2) * 0.25;
+    life.rightShoulder.rotation.z = -0.15;
+    life.leftShoulder.rotation.x = -0.2 + Math.sin(t * 3.9 + 1) * 0.12;
+  } else {
+    const ease = Math.min(1, dt * 3);
+    life.rightShoulder.rotation.x += (Math.sin(t * 0.9) * 0.05 - life.rightShoulder.rotation.x) * ease;
+    life.rightShoulder.rotation.z += (0 - life.rightShoulder.rotation.z) * ease;
+    life.leftShoulder.rotation.x += (Math.sin(t * 0.9 + 2) * 0.05 - life.leftShoulder.rotation.x) * ease;
+  }
+}
+
+function wrapAngle(a: number): number {
+  return Math.atan2(Math.sin(a), Math.cos(a));
 }
