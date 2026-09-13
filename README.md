@@ -266,16 +266,29 @@ testing.
 
 Composed as it plays (`music.ts`), because nothing is loaded — so there are no
 tracks, only a small composer. Each place has a **piece**: a key, a mode, a
-pace, how bright it sounds, and a round of four chords. The Westwood is a warm
-dorian, the Heartland an open mixolydian, the Greywood and the Highmoor slow
-aeolian over a low drone, Sunward a bright major, the Brightwater a lydian,
-Redstep and Ashfall phrygian, Lowfen dark and slow, a town a little livelier
-than the woods round it, and a dungeon almost nothing but a hum. Four voices
-play the round a little differently every time: a pad swelling across each
-bar, a bass under it, sparse plucked chord tones, and now and then a short tune
-stepping through the scale from a note of the chord. One round in five is
-played thin, pad and bass only, so it breathes. Everything goes through a
-reverb whose impulse is generated decaying noise.
+pace, how bright it sounds, two or three rounds of four chords — and its own
+instruments and air. A pad swells across each bar with a bass under it, plucked
+chord tones fall on the half-beats, and now and then a short tune steps through
+the scale from a note of the chord; everything goes through a reverb whose
+impulse is generated decaying noise.
+
+The first version gave every place the same instruments in a different key,
+and moving between zones sounded like the same tune moved up or down. Now the
+pluck is a lute in the Westwood and the towns, a harp in the Heartland and
+the Greywood, glass bells in the Brightwater, a dry square-wave rasp in
+Redstep and Ashfall; the pad is soft in the green country and a sawtooth
+in the hard. And the hard country is meant to unsettle. **The Highmoor** is
+locrian over a tritone drone that never resolves, with a trembling pad, wind
+rising and falling, a slow heartbeat and a bell a long way off, tuned a little
+flat of anything in the key. **Redstep** has a semitone grinding in the pad,
+war drums that fall off any beat you could count, wind, and something low that
+groans. Ashfall groans more; Lowfen drips and trembles; a dungeon is a hum, a
+heartbeat and water.
+
+It varies as it goes: each time round it takes one of the piece's rounds at
+random, how busy it is rises and falls from round to round, a tune is
+sometimes an octave higher, and one round in five is played thin, pad and bass
+only, so it breathes.
 
 **It follows you.** Where you stand picks the piece (a town within 70 m of its
 edge, otherwise the region), and the change waits for the next bar line, so it
