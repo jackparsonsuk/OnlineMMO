@@ -964,6 +964,18 @@ export class CharacterScreen {
     return lines.join("");
   }
 
+  /**
+   * What wearing an item you do not have yet would change — for a quest's
+   * reward choices, where a list of stats on its own leaves you opening the
+   * character screen to remember what you are wearing. The same comparison
+   * as the tooltip, so the two can never tell you different things.
+   */
+  compareWorn(key: ItemKey): string {
+    const item = describeItem(key);
+    if (!item) return "";
+    return classCanUse(this.profile.classId, item) ? this.comparisonHtml(item) : "";
+  }
+
   /** What wearing this would change, computed through the same `wear` and
    *  `characterStats` the server uses — including anything it would displace. */
   private comparisonHtml(item: Item): string {

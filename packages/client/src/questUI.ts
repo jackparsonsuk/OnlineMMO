@@ -17,6 +17,7 @@ import {
   TALK_RANGE,
   villagerName,
   type ClassId,
+  type ItemKey,
   type QuestDefinition,
   type QuestLog,
   type VillagerDefinition,
@@ -39,6 +40,8 @@ export interface QuestHooks {
   complete(quest: string, choice: number): void;
   /** A line worth telling the player — progress, a quest ready to hand in. */
   notify(text: string): void;
+  /** What wearing a reward would change against what is worn now, as HTML. */
+  compare(item: ItemKey): string;
 }
 
 const EMPTY_LOG: QuestLog = { active: {}, done: [] };
@@ -264,7 +267,7 @@ export class QuestUI {
         ` style="--rarity:${rarityHex(item.rarity)}"${choosing ? "" : " disabled"}>` +
         `<b>${escapeHtml(item.name)}</b><small>${RARITY[item.rarity].name} · ` +
         `<span class="${short ? "short" : ""}">requires level ${item.requiredLevel}</span></small>` +
-        `<small class="stats">${stats}</small></button>`;
+        `<small class="stats">${stats}</small>${this.hooks.compare(key)}</button>`;
     }).join("");
 
     // What it pays you, now — a quest you have outgrown pays less, and a grey

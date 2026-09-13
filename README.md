@@ -989,7 +989,11 @@ creature's.
 your choosing from two or three, and XP. The item choices come from
 `questRewardItems`, which is a pure function of the quest and the character's
 id. The client shows exactly the choices the server will honour, and asking
-again cannot reroll them; they are of the quest's level. The XP is a **share of
+again cannot reroll them; they are of the quest's level. Each card says what
+wearing it would change against what you have on now — the character
+screen's own comparison (`compareWorn`), so the two cannot disagree; a vendor's
+stock carries the same line. A list of stats alone left you opening the pack
+to remember what was in the slot. The XP is a **share of
 a whole level at the quest's level** (`xpShare` — half a level for most, a
 whole one for Mother Silt), scaled like a kill by how far you are from it
 (`questXp`), so a Daso errand done at 20 is grey and pays nothing. A share

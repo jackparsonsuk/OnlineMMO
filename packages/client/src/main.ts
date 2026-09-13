@@ -99,6 +99,7 @@ const questUI = new QuestUI({
   abandon: (quest) => sendToRoom?.("questAbandon", { quest }),
   complete: (quest, choice) => sendToRoom?.("questComplete", { quest, choice }),
   notify: (text) => hud.flash(text, "#f0d98a"),
+  compare: (item) => characterScreen.compareWorn(item),
 });
 
 const vendorUI = new VendorUI({
@@ -106,6 +107,7 @@ const vendorUI = new VendorUI({
   sell: (vendor, item) => sendToRoom?.("vendorSell", { vendor, item }),
   sellAll: (vendor) => sendToRoom?.("vendorSellAll", { vendor }),
   sellGoods: (vendor, good) => sendToRoom?.("vendorSellGoods", { vendor, good }),
+  compare: (item) => characterScreen.compareWorn(item),
 });
 
 const travelUI = new TravelUI({

@@ -2059,6 +2059,10 @@ h3 .quest-level { margin-left: 10px; padding-left: 0; }
 .quest-item small { font-size: 10.5px; color: #8b98a5; }
 .quest-item small.stats { color: #6dcf7e; }
 .quest-item small .short { color: #ff8f7a; }
+/* Against what you wear now — the same lines as the pack's tooltip. */
+:is(.quest-item, .vendor-item) .tt-compare { margin-top: 5px; padding-top: 5px; gap: 1px 7px; font-size: 10.5px; }
+:is(.quest-item, .vendor-item) .tt-compare-title { font-size: 10px; }
+.vendor-item .tt-compare .up { color: #6dcf7e; }
 .quest-item.picked { border-color: var(--rarity); box-shadow: 0 0 0 1px var(--rarity), 0 0 14px color-mix(in srgb, var(--rarity) 40%, transparent); }
 
 #quest-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }

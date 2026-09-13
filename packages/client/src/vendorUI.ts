@@ -39,6 +39,8 @@ export interface VendorHooks {
   sellAll(vendor: string): void;
   /** All of one good, or with none named, the whole satchel. */
   sellGoods(vendor: string, good?: GoodId): void;
+  /** What wearing a piece of stock would change against what is worn now. */
+  compare(item: ItemKey): string;
 }
 
 function escapeHtml(value: string): string {
@@ -126,7 +128,7 @@ export class VendorUI {
       return `<button type="button" class="vendor-item" data-act="buy" data-index="${index}"` +
         ` style="--rarity:${rarityHex(item.rarity)}"${cannot ? " disabled" : ""}>` +
         `<b>${escapeHtml(item.name)}</b><small class="stats">${stats}</small>` +
-        `<span class="price">${price} gold</span></button>`;
+        `<span class="price">${price} gold</span>${this.hooks.compare(key)}</button>`;
     }).join("");
 
     const pack = this.inventory.map((key) => {
