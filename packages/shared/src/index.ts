@@ -4,6 +4,7 @@ export * from "./constants.js";
 export * from "./dungeons.js";
 export * from "./elites.js";
 export * from "./enemies.js";
+export * from "./goods.js";
 export * from "./items.js";
 export * from "./levels.js";
 export * from "./movement.js";

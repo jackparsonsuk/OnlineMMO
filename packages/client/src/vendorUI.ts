@@ -2,7 +2,11 @@ import {
   buyPrice,
   DEFAULT_CLASS,
   describeItem,
+  GOOD_IDS,
+  GOODS,
+  goodsValue,
   INVENTORY_SIZE,
+  isGoodId,
   packValue,
   RARITY,
   rarityHex,
@@ -12,13 +16,16 @@ import {
   TALK_RANGE,
   vendorStock,
   type ClassId,
+  type GoodId,
+  type Goods,
   type ItemKey,
   type VillagerDefinition,
 } from "@mmo/shared";
 
 /**
  * Trading with a vendor (E beside Mott in Daso or Corran in Fanshona): their
- * stock on top, your pack underneath, and a button that sells the lot.
+ * stock on top, your satchel and pack underneath, and a button that sells the
+ * lot.
  *
  * It decides nothing. Buying and selling are requests; the server checks gold,
  * room and distance, and answers with a new profile, which is the only thing
@@ -30,6 +37,8 @@ export interface VendorHooks {
   buy(vendor: string, index: number): void;
   sell(vendor: string, item: ItemKey): void;
   sellAll(vendor: string): void;
+  /** All of one good, or with none named, the whole satchel. */
+  sellGoods(vendor: string, good?: GoodId): void;
 }
 
 function escapeHtml(value: string): string {
@@ -42,6 +51,7 @@ export class VendorUI {
   private readonly panel: HTMLElement;
   private vendor: VillagerDefinition | undefined;
   private inventory: ItemKey[] = [];
+  private goods: Goods = {};
   private gold = 0;
   private level = 1;
   private classId: ClassId = DEFAULT_CLASS;
@@ -77,10 +87,11 @@ export class VendorUI {
     return was;
   }
 
-  /** The pack, gold and level, whenever the server says they changed. */
-  setProfile(inventory: ItemKey[], gold: number, level: number, classId: ClassId): void {
+  /** The pack, satchel, gold and level, whenever the server says they changed. */
+  setProfile(inventory: ItemKey[], goods: Goods, gold: number, level: number, classId: ClassId): void {
     this.classId = classId;
     this.inventory = inventory;
+    this.goods = goods;
     this.gold = gold;
     this.level = level;
     this.confirming = false;
@@ -126,11 +137,26 @@ export class VendorUI {
         `<button type="button" data-act="sell" data-item="${escapeHtml(key)}">Sell · ${sellPrice(item)}</button></div>`;
     }).join("");
 
+    // Goods have no rarity, and no reason to ask before selling: a perch is a
+    // perch, and there will be more of them.
+    const carried = GOOD_IDS.filter((id) => (this.goods[id] ?? 0) > 0);
+    const satchel = carried.map((id) => {
+      const good = GOODS[id];
+      const count = this.goods[id] ?? 0;
+      return `<div class="vendor-row good">` +
+        `<span><b>${escapeHtml(good.name)} <em>×${count}</em></b><small>${good.price} gold each</small></span>` +
+        `<button type="button" data-act="sellGood" data-good="${id}">Sell · ${good.price * count}</button></div>`;
+    }).join("");
+
     const value = packValue(this.inventory);
     this.panel.innerHTML =
       `<header><b>${escapeHtml(vendor.name)}</b><span class="gold">${this.gold} gold</span>` +
       `<button type="button" data-act="close" title="Close (Esc)">×</button></header>` +
       `<h4>For sale</h4><div class="vendor-stock">${stock}</div>` +
+      (carried.length > 0
+        ? `<h4>Your satchel <button type="button" class="sell-goods" data-act="sellGoods">Sell all · ${goodsValue(this.goods)} gold</button></h4>` +
+          `<div class="vendor-pack">${satchel}</div>`
+        : "") +
       `<h4>Your pack <small>${this.inventory.length} / ${INVENTORY_SIZE}</small></h4>` +
       (pack ? `<div class="vendor-pack">${pack}</div>` : `<p class="quest-none">Nothing to sell.</p>`) +
       (this.inventory.length > 0
@@ -155,6 +181,14 @@ export class VendorUI {
         if (item) this.hooks.sell(id, item);
         return;
       }
+      case "sellGood": {
+        const good = target.dataset["good"];
+        if (isGoodId(good)) this.hooks.sellGoods(id, good);
+        return;
+      }
+      case "sellGoods":
+        this.hooks.sellGoods(id);
+        return;
       case "sellAll":
         if (!this.confirming) {
           this.confirming = true;

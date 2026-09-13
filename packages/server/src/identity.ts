@@ -70,6 +70,7 @@ export function createCharacter(
     waystones: [],
     inventory: [],
     equipment: {},
+    goods: {},
     createdAt: now,
     lastSeenAt: now,
   };

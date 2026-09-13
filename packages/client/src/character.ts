@@ -13,6 +13,9 @@ import {
   FAMILY_NAMES,
   FERVOUR_DAMAGE_BONUS,
   GEAR_NAMES,
+  GOOD_IDS,
+  GOODS,
+  goodsValue,
   INVENTORY_SIZE,
   leechFraction,
   maxHealthFor,
@@ -32,6 +35,8 @@ import {
   type EquipSlot,
   type Equipment,
   type GearSlot,
+  type GoodKind,
+  type Goods,
   type Item,
   type ItemFamily,
   type ItemKey,
@@ -60,6 +65,7 @@ export interface CharacterProfile {
   level: number;
   inventory: ItemKey[];
   equipment: Equipment;
+  goods: Goods;
 }
 
 export interface CharacterScreenHooks {
@@ -137,6 +143,11 @@ const GLYPHS: Record<string, string> = {
   soul: "M12 3c3 4 6 6 6 10.5a6 6 0 0 1-12 0c0-3 2-4.5 3-6.5 0 2 1 3 2 3.2C11 7 11.5 5 12 3z",
 };
 
+/** The same, for goods: one drawing per kind. */
+const GOOD_GLYPHS: Record<GoodKind, string> = {
+  fish: "M6 12c2.5-3.5 6-5 9-5 3 0 5 2 6.5 5-1.5 3-3.5 5-6.5 5-3 0-6.5-1.5-9-5z M6 12 2.5 8.5v7z M17 10.8v.4",
+};
+
 function glyphFor(gear: GearSlot, family: ItemFamily | undefined): string {
   if ((gear === "weapon" || gear === "offhand") && family && GLYPHS[family]) return GLYPHS[family]!;
   return GLYPHS[gear] ?? GLYPHS.sigil!;
@@ -189,6 +200,7 @@ export class CharacterScreen {
   private readonly packGrid: HTMLElement;
   private readonly packCount: HTMLElement;
   private readonly abilityList: HTMLElement;
+  private readonly satchel: HTMLElement;
   private readonly heading: HTMLElement;
   private readonly summary: HTMLElement;
   private readonly tooltip: HTMLElement;
@@ -196,7 +208,7 @@ export class CharacterScreen {
   private readonly tabs: HTMLElement[];
   private readonly slotViews = new Map<EquipSlot, SlotView>();
 
-  private profile: CharacterProfile = { classId: DEFAULT_CLASS, level: 1, inventory: [], equipment: {} };
+  private profile: CharacterProfile = { classId: DEFAULT_CLASS, level: 1, inventory: [], equipment: {}, goods: {} };
   private name = "";
   private open = false;
   private openedAt = 0;
@@ -223,6 +235,7 @@ export class CharacterScreen {
         <div class="char-summary"></div>
         <header>
           <button type="button" class="char-tab active" data-tab="pack">Pack</button>
+          <button type="button" class="char-tab" data-tab="satchel">Satchel</button>
           <button type="button" class="char-tab" data-tab="abilities">Abilities</button>
           <button type="button" class="char-close" title="Close (I or Esc)">×</button>
         </header>
@@ -230,6 +243,7 @@ export class CharacterScreen {
           <div class="pack-grid"></div>
           <footer><span class="pack-count"></span><span class="pack-hint">Click to wear · drag onto a slot · right-click for more</span></footer>
         </section>
+        <section class="char-satchel" data-page="satchel" hidden></section>
         <section class="char-abilities" data-page="abilities" hidden></section>
       </aside>
       <div class="char-tooltip" hidden></div>
@@ -241,6 +255,7 @@ export class CharacterScreen {
     this.packGrid = this.root.querySelector(".pack-grid") as HTMLElement;
     this.packCount = this.root.querySelector(".pack-count") as HTMLElement;
     this.abilityList = this.root.querySelector(".char-abilities") as HTMLElement;
+    this.satchel = this.root.querySelector(".char-satchel") as HTMLElement;
     this.heading = this.root.querySelector(".char-heading") as HTMLElement;
     this.summary = this.root.querySelector(".char-summary") as HTMLElement;
     this.tooltip = this.root.querySelector(".char-tooltip") as HTMLElement;
@@ -592,6 +607,7 @@ export class CharacterScreen {
   private renderAll(): void {
     this.renderSlots();
     this.renderPack();
+    this.renderSatchel();
     this.renderAbilities();
     this.renderHeading();
     this.renderSummary();
@@ -688,6 +704,31 @@ export class CharacterScreen {
       rows.filter((row): row is [string, string, string?] => row !== false).map(([label, value, note]) =>
         `<div class="row"${note ? ` title="${escapeHtml(note)}"` : ""}><span>${label}</span><b>${value}</b></div>`).join("") +
       (heavyPieces > 0 && resource === "mana" ? `<div class="warn">${heavyPieces} heavy · mana −${heavyPieces * 5}%</div>` : "");
+  }
+
+  /**
+   * The satchel: everything gathered, by kind, with what a vendor pays. A list
+   * rather than a grid of cells, because a good has no look worth a cell of
+   * its own and its count is the thing you want to read.
+   */
+  private renderSatchel(): void {
+    const goods = this.profile.goods;
+    const carried = GOOD_IDS.filter((id) => (goods[id] ?? 0) > 0);
+    if (carried.length === 0) {
+      this.satchel.innerHTML = `<p class="abilities-note">Empty. Fish you catch go here, not in your pack, and any vendor will buy them.</p>`;
+      return;
+    }
+    this.satchel.innerHTML = carried.map((id) => {
+      const good = GOODS[id];
+      const count = goods[id] ?? 0;
+      const full = count >= good.stack;
+      return `<div class="good-row">` +
+        `<span class="good-glyph">${glyphSvg(GOOD_GLYPHS[good.kind])}</span>` +
+        `<div><b>${escapeHtml(good.name)}</b><span class="good-count${full ? " full" : ""}">${count} / ${good.stack}</span>` +
+        `<p>${escapeHtml(good.lore)}</p></div>` +
+        `<span class="good-price">${good.price * count} gold</span></div>`;
+    }).join("") +
+      `<footer><span>Worth ${goodsValue(goods)} gold to any vendor</span></footer>`;
   }
 
   /**

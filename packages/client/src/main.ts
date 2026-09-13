@@ -12,6 +12,10 @@ import {
   type Equipment,
   getOstra,
   getQuest,
+  GOODS,
+  isGoodId,
+  sanitiseGoods,
+  type Goods,
   type QuestLog,
   questMarker,
   isClassId,
@@ -95,6 +99,7 @@ const vendorUI = new VendorUI({
   buy: (vendor, index) => sendToRoom?.("vendorBuy", { vendor, index }),
   sell: (vendor, item) => sendToRoom?.("vendorSell", { vendor, item }),
   sellAll: (vendor) => sendToRoom?.("vendorSellAll", { vendor }),
+  sellGoods: (vendor, good) => sendToRoom?.("vendorSellGoods", { vendor, good }),
 });
 
 const travelUI = new TravelUI({
@@ -385,6 +390,7 @@ interface ProfileMessage {
   quests?: QuestLog;
   gold?: number;
   waystones?: string[];
+  goods?: Goods;
 }
 
 /** What the server sends when a player steps into a Gate. */
@@ -519,16 +525,18 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
       classId = payload.classId;
       hud.buildAbilityBar(classId);
     }
+    const goods = sanitiseGoods(payload.goods);
     characterScreen.setProfile({
       classId,
       level: payload.level ?? level,
       inventory: payload.inventory ?? [],
       equipment: payload.equipment ?? {},
+      goods,
     });
     applyProgress(payload.level ?? level, payload.xp ?? 0, 0);
     hud.setPower(characterScreen.power);
     applyQuests(payload.quests, payload.gold);
-    vendorUI.setProfile(payload.inventory ?? [], payload.gold ?? 0, level, classId);
+    vendorUI.setProfile(payload.inventory ?? [], goods, payload.gold ?? 0, level, classId);
     applyWaystones(payload.waystones ?? []);
   });
   // A stone woken by walking up to it: the news, and a new door on the maps.
@@ -542,8 +550,11 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   next.onMessage("travelled", (payload: { name: string }) => {
     hud.flash(payload.name, "#9fd8ff");
   });
-  next.onMessage("sold", (payload: { count: number; gold: number }) => {
-    hud.flash(`Sold ${payload.count} item${payload.count === 1 ? "" : "s"} for ${payload.gold} gold`, "#f0c83c");
+  next.onMessage("sold", (payload: { count: number; gold: number; goods?: boolean; good?: string }) => {
+    const what = isGoodId(payload.good) ? GOODS[payload.good].name
+      : payload.goods ? (payload.count === 1 ? "good" : "goods")
+        : payload.count === 1 ? "item" : "items";
+    hud.flash(`Sold ${payload.count} ${what} for ${payload.gold} gold`, "#f0c83c");
     audio.play("pickup");
   });
   next.onMessage("bought", (payload: { item: ItemKey; price: number }) => {

@@ -1,4 +1,4 @@
-import type { ClassId, Equipment, ItemKey, OstraId, QuestLog } from "@mmo/shared";
+import type { ClassId, Equipment, Goods, ItemKey, OstraId, QuestLog } from "@mmo/shared";
 
 /**
  * A character as it survives between sessions. Position and Ostra live here
@@ -42,6 +42,8 @@ export interface CharacterRecord {
   /** Waystones woken, as `waystoneKey` keys across every Ostra — what fast
    *  travel is allowed to reach. */
   waystones: string[];
+  /** The satchel: goods by id, apart from the pack. */
+  goods: Goods;
   createdAt: number;
   lastSeenAt: number;
 }
@@ -57,6 +59,7 @@ export type CharacterPosition =
     quests: QuestLog;
     gold: number;
     waystones: string[];
+    goods: Goods;
   };
 
 /**

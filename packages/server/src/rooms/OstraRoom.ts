@@ -88,6 +88,12 @@ import {
   buyPrice,
   packValue,
   vendorStock,
+  addGoods,
+  GOOD_IDS,
+  goodsCount,
+  goodsValue,
+  isGoodId,
+  type Goods,
   castSteps,
   isMoving,
   isDodging,
@@ -217,6 +223,8 @@ interface Session {
   /** Waystones woken, as `waystoneKey` keys — across every Ostra, because
    *  this is the character's list and it is saved whole. */
   waystones: string[];
+  /** The satchel. Private, like the pack. */
+  goods: Goods;
   /** When their recent chat lines were sent, for the flood limit. */
   chatTimes: number[];
 }
@@ -440,6 +448,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       this.onVendorSell(client, message?.vendor, message?.item));
     this.onMessage("vendorSellAll", (client, message: { vendor?: unknown }) =>
       this.onVendorSell(client, message?.vendor, undefined));
+    this.onMessage("vendorSellGoods", (client, message: { vendor?: unknown; good?: unknown }) =>
+      this.onVendorSellGoods(client, message?.vendor, message?.good));
     this.onMessage("vendorBuy", (client, message: { vendor?: unknown; index?: unknown }) =>
       this.onVendorBuy(client, message?.vendor, message?.index));
     // Parties live outside any one room (see parties.ts); the room only says
@@ -668,6 +678,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       quests: { active: { ...character.quests.active }, done: [...character.quests.done] },
       gold: character.gold,
       waystones: [...character.waystones],
+      goods: { ...character.goods },
       chatTimes: [],
     });
     this.announcePresence(client.sessionId);
@@ -809,6 +820,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         quests: session.quests,
         gold: session.gold,
         waystones: session.waystones,
+        goods: session.goods,
       });
     }
 
@@ -1331,6 +1343,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       quests: session.quests,
       gold: session.gold,
       waystones: session.waystones,
+      goods: session.goods,
     });
   }
 
@@ -1468,6 +1481,33 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     session.gold += gold;
     this.sendProfile(client.sessionId, session);
     client.send("sold", { count: sold.length, gold });
+  }
+
+  /**
+   * Sell goods from the satchel: all of one kind, or — with no kind — all of
+   * it. Every vendor buys goods: a smith has no use for a pike, but a town
+   * that trades in fish will always find one.
+   */
+  private onVendorSellGoods(client: Client, vendor: unknown, good: unknown): void {
+    const session = this.sessions.get(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    if (!session || !player || !this.vendorNear(player, vendor)) return;
+
+    let sold: Goods;
+    if (good === undefined) {
+      sold = session.goods;
+      session.goods = {};
+    } else {
+      if (!isGoodId(good) || !session.goods[good]) return;
+      sold = { [good]: session.goods[good] };
+      delete session.goods[good];
+    }
+    const count = goodsCount(sold);
+    if (count === 0) return;
+    const gold = goodsValue(sold);
+    session.gold += gold;
+    this.sendProfile(client.sessionId, session);
+    client.send("sold", { count, gold, goods: true, ...(good !== undefined ? { good } : {}) });
   }
 
   /** Buy one piece of the vendor's stock — the same list `vendorStock` gives
@@ -1709,6 +1749,14 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         session.inventory = [];
         this.sendProfile(client.sessionId, session);
         break;
+      case "goods": {
+        // Some of one good, or with none named, a few of every one.
+        const count = Math.round(number(message["count"], 10, 1, 1000));
+        const ids = isGoodId(message["good"]) ? [message["good"]] : GOOD_IDS;
+        for (const id of ids) addGoods(session.goods, id, count);
+        this.sendProfile(client.sessionId, session);
+        break;
+      }
       case "heal":
         player.health = player.maxHealth;
         player.resource = player.maxResource;
@@ -2501,6 +2549,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         quests: session.quests,
         gold: session.gold,
         waystones: session.waystones,
+        goods: session.goods,
       });
 
       // With an auth context, so the reserved seat carries the account — see

@@ -105,6 +105,7 @@ export class DevMenu {
         <div class="row">
           <button type="button" data-act="scatter">Scatter one of each</button>
           <button type="button" data-act="clear">Empty bag</button>
+          <button type="button" data-act="goods">Ten of every good</button>
         </div>
       </section>
       <section>
@@ -250,6 +251,9 @@ export class DevMenu {
         break;
       case "clear":
         this.hooks.send({ cmd: "clearBag" });
+        break;
+      case "goods":
+        this.hooks.send({ cmd: "goods", count: 10 });
         break;
       case "kill":
         this.hooks.send({ cmd: "killNear", radius: 25 });

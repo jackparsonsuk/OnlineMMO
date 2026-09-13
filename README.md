@@ -1083,6 +1083,29 @@ empty. Rarer gear is found, never bought. Like quest rewards, the stock is a
 pure function of the vendor and your level (`vendorStock`): the client shows
 exactly what the server will sell, and it changes only when you level.
 
+## Goods and the satchel
+
+Things you gather rather than wear — fish first, and timber, ore and food as
+other trades arrive — are **goods** (`goods.ts`), and they are nothing like
+items. An item is one of a kind: a key with a seed, a rolled name, stats, a
+place on the body. A perch is a perch. So goods are plain counts by id, kept
+in a **satchel** beside the pack (the Satchel tab on the character screen),
+never in its thirty slots.
+
+Stacks in the pack were the obvious alternative, and wrong twice over. Every
+pack operation — sell, wear, destroy, pick up — finds an item by its key, and a
+key whose count changes stops being the same key, so all of them would have had
+to learn about stacks. And a full pack is what sends you back to town after a
+run of camps; a trade should not be stopped by it. (Quests count what you
+collect rather than carry it for the same reason.)
+
+Each good has a `stack`, the most one character carries — a hundred of a fish.
+Past it a catch is let go, which keeps anyone from hoarding a lake. Any vendor
+buys goods, one kind at a time or the whole satchel at once, without asking
+first: a perch is a perch, and there will be more of them. The satchel is
+saved as a JSON blob of counts, and a load keeps only ids this build knows,
+held to their stacks.
+
 ## Accounts
 
 Sign in with an email and password; a session token (JWT, one week) authorises
@@ -1462,9 +1485,9 @@ build next live in [TODO.md](TODO.md).
   needs a reverse proxy or a host that terminates it.
 - **SQLite means one process per realm.** The `CharacterStore` interface exists
   so Postgres can replace it; nothing else needs to change.
-- **No economy.** Items drop, are worn, or are destroyed; nothing buys, sells,
-  repairs or trades them, and there is nowhere to store them beyond thirty
-  carried slots.
+- **A thin economy.** Vendors buy items and goods and sell plain gear, but
+  nothing repairs or trades between players, gold buys nothing else, and there
+  is nowhere to store items beyond thirty carried slots.
 - **The top of the loot table is thin.** Elites drop mythic and legendary, but
   World and Ostra rarity need a raid, and none exist yet. World items do not yet enforce
   "one in the realm", Ostra items are not yet bound to an Ostra, and there are
