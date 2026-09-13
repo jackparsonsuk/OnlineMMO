@@ -467,6 +467,36 @@ export function forestAt(ostra: OstraDefinition, x: number, z: number): number {
   return Math.min(1, density);
 }
 
+/**
+ * How dead a spot is, 0 (living ground) to 1 (blighted).
+ *
+ * The Risen are the dead of the Ostra, and a Risen standing in a meadow is a
+ * creature with nowhere it belongs. Blight is where they belong: round every
+ * ruin and the Gate Circle, where people were before and something went
+ * wrong; all of Ashfall; and old burial ground in slow patches elsewhere.
+ * Trees in it grow dead (`generateWilds`), so you can see a Risen's country
+ * before you meet one. Kept off the towns: nobody lives in a graveyard.
+ */
+export function blightAt(ostra: OstraDefinition, x: number, z: number): number {
+  const wilds = ostra.wilds;
+  if (!wilds) return 0;
+  // Patches a few hundred metres across, on about a tenth of the land.
+  let blight = smoothstep((fbm(x / 520, z / 520, wilds.seed + 23, 3) - 0.2) / 0.1);
+  const region = regionOf(ostra, x, z);
+  if (region?.grass === "ash") blight = 1;
+  for (const ruin of ostra.ruins) {
+    const d = dist(x, z, ruin.x, ruin.z) - ruin.radius;
+    if (d < 240) blight = Math.max(blight, smoothstep(1 - d / 240));
+  }
+  // The Gate Circle, which the dead gather round (see Herla's quest).
+  if (ostra.id === "terra") blight = Math.max(blight, smoothstep(1 - dist(x, z, 0, 0) / 420));
+  for (const settlement of settlementsIn(ostra)) {
+    const d = dist(x, z, settlement.x, settlement.z) - settlement.radius;
+    blight *= smoothstep((d - 120) / 220);
+  }
+  return blight;
+}
+
 // --- ruins -------------------------------------------------------------------------
 
 export interface RuinParts {
@@ -652,18 +682,114 @@ export function levelAt(ostra: OstraDefinition, x: number, z: number): number {
   return Math.min(MAX_ENEMY_LEVEL, high, low + Math.floor(t * (high - low + 1)));
 }
 
-/** Pick a creature by the region's weights, from a unit roll. */
-function pickCreature(region: RegionDefinition | undefined, roll: number, wooded: number): EnemyKind {
-  if (!region) return wooded > 0.5 ? (roll < 0.7 ? "spider" : "zombie") : (roll < 0.25 ? "spider" : "zombie");
-  const entries = Object.entries(region.creatures) as Array<[EnemyKind, number]>;
-  let total = 0;
-  for (const [, weight] of entries) total += weight;
-  let point = roll * total;
-  for (const [kind, weight] of entries) {
-    point -= weight;
-    if (point < 0) return kind;
+/** What a camp's ground is like, for deciding what would live there. */
+interface Site {
+  /** `forestAt`: 0 open, 1 thick forest. */
+  forest: number;
+  /** `blightAt`: 0 living, 1 dead. */
+  blight: number;
+  /** Metres to the nearest lake's edge or the sea's shore. */
+  water: number;
+  /** Metres to the nearest ruin's edge. */
+  ruin: number;
+  slope: number;
+  grass: RegionDefinition["grass"] | undefined;
+}
+
+function siteAt(ostra: OstraDefinition, x: number, z: number): Site {
+  let water = Infinity;
+  for (const lake of ostra.terrain.lakes ?? []) water = Math.min(water, dist(x, z, lake.x, lake.z) - lakeReach(lake));
+  // Ground only a few metres above the sea is its shore.
+  if (ostra.terrain.sea && seaDepthAt(x, z, ostra.terrain) > -6) water = Math.min(water, 0);
+  let ruin = Infinity;
+  for (const r of ostra.ruins) ruin = Math.min(ruin, dist(x, z, r.x, r.z) - r.radius);
+  return {
+    forest: forestAt(ostra, x, z),
+    blight: blightAt(ostra, x, z),
+    water,
+    ruin,
+    slope: slopeAt(x, z, ostra.terrain),
+    grass: regionOf(ostra, x, z)?.grass,
+  };
+}
+
+/**
+ * How well a spot suits a kind of creature, from nearly 0 to 1.
+ *
+ * Camps used to take their creature from the region's odds alone, spread
+ * evenly over the land, so a Risen was as likely in an open meadow as a
+ * spider was — and the world read as creatures scattered on it rather than
+ * living in it. Now each kind has ground it belongs on, and the region's odds
+ * only choose between the kinds that would live there:
+ *
+ * - spiders in thick forest, where they can web;
+ * - wolves at the edges of woods, and out on the moors;
+ * - Risen in blight — ruins, the Gate Circle, burial ground, ash;
+ * - boars on open grass;
+ * - wretches by water, and all through the reeds;
+ * - golems among rocks and slopes, and by the ruins they were built to guard;
+ * - wisps in ash, and on the dry red ground.
+ *
+ * Nothing is quite 0, so a region with only ill-suited kinds still has
+ * something; but see `campsIn` for how little ground like that holds.
+ */
+function habitat(kind: EnemyKind, site: Site): number {
+  const floor = 0.03;
+  const near = (metres: number, reach: number): number => smoothstep(1 - metres / reach);
+  let fit: number;
+  switch (kind) {
+    case "spider":
+      fit = smoothstep((site.forest - 0.35) / 0.4);
+      break;
+    case "wolf": {
+      // Highest where wood meets open ground.
+      const edge = 1 - Math.abs(site.forest - 0.5) * 2;
+      fit = Math.max(smoothstep(edge / 0.7) * 0.9, site.grass === "heather" ? 0.8 : 0.15);
+      break;
+    }
+    case "zombie":
+      fit = site.blight;
+      break;
+    case "boar":
+      fit = smoothstep((0.45 - site.forest) / 0.35) * (1 - site.blight * 0.7) * smoothstep((0.4 - site.slope) / 0.25);
+      break;
+    case "wretch":
+      // Far enough from the water to hunt its banks and the meadows round it.
+      fit = Math.max(near(site.water, 280), site.grass === "reeds" ? 0.85 : 0);
+      break;
+    case "golem":
+      fit = Math.max(smoothstep((site.slope - 0.12) / 0.25), near(site.ruin, 180) * 0.9, site.grass === "dry" ? 0.35 : 0);
+      break;
+    case "wisp":
+      fit = site.grass === "ash" ? 1 : site.grass === "dry" ? 0.6 : site.blight * 0.2;
+      break;
   }
-  return entries[entries.length - 1]![0];
+  return Math.max(floor, fit);
+}
+
+/**
+ * Pick a creature for a site, from a unit roll: the region's odds for each
+ * kind, times how well it suits the ground. Also returns how well the site
+ * suits the best of the region's creatures (`fit`, 0-1), which `campsIn` uses
+ * to leave ground nothing wants emptier.
+ */
+function pickCreature(region: RegionDefinition | undefined, site: Site, roll: number): { kind: EnemyKind; fit: number } {
+  const odds: Partial<Record<EnemyKind, number>> = region?.creatures ?? { spider: 1, zombie: 1 };
+  const entries = Object.entries(odds) as Array<[EnemyKind, number]>;
+  let total = 0;
+  let fit = 0;
+  const weights = entries.map(([kind, weight]) => {
+    const suits = habitat(kind, site);
+    fit = Math.max(fit, suits);
+    total += weight * suits;
+    return weight * suits;
+  });
+  let point = roll * total;
+  for (let i = 0; i < entries.length; i++) {
+    point -= weights[i]!;
+    if (point < 0) return { kind: entries[i]![0], fit };
+  }
+  return { kind: entries[entries.length - 1]![0], fit };
 }
 
 /** Pack size for a generated camp. Wolves run in packs; golems alone. */
@@ -753,7 +879,12 @@ export function campsIn(ostra: OstraDefinition): readonly CampDefinition[] {
 
         const level = levelAt(ostra, x, z);
         h = rehash(h, 3);
-        const kind = pickCreature(regionOf(ostra, x, z), h / 4294967296, forestAt(ostra, x, z));
+        const { kind, fit } = pickCreature(regionOf(ostra, x, z), siteAt(ostra, x, z), h / 4294967296);
+        // Ground that suits nothing in its region holds few camps: open
+        // country is quieter than a wood full of spiders, not the same density
+        // of whatever was left over.
+        h = rehash(h, 5);
+        if (h / 4294967296 >= 0.2 + 0.8 * smoothstep(fit / 0.6)) continue;
         h = rehash(h, 4);
         const count = campSize(kind, h / 4294967296, level);
         const radius = 4 + count * 1.2;
@@ -955,8 +1086,11 @@ function generateWilds(
         if (ground > snowLine) continue;
         if (slopeAt(x, z, ostra.terrain) > TREE_MAX_SLOPE) continue;
         h = rehash(h, 15);
-        const species = region ? region.trees[Math.floor((h / 4294967296) * region.trees.length)]! : "oak";
-        // High ground turns any wood to pine.
+        let species = region ? region.trees[Math.floor((h / 4294967296) * region.trees.length)]! : "oak";
+        // Blighted ground grows dead wood, so the Risen's country shows.
+        h = rehash(h, 16);
+        if (h / 4294967296 < blightAt(ostra, x, z) * 0.85) species = "dead";
+        // High ground turns any living wood to pine.
         const kind = ground > 40 && species !== "dead" ? "pine" : species;
         const shape = TREE_SHAPES[kind];
         const height = shape.height + size * shape.heightRange;

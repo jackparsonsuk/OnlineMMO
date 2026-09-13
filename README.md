@@ -1566,6 +1566,25 @@ tests the 3×3 cells around it, in a fixed order so both sides sum contacts
 identically. Without it, every body would test tens of thousands of trees
 every tick.
 
+**Creatures live where they belong.** Generated camps used to take their kind
+from the region's odds alone, spread evenly over the land, so a Risen was as
+likely in a meadow as a spider in a wood, and the world read as creatures
+scattered on it rather than living in it. Now each kind has ground it suits
+(`habitat` in `worldgen.ts`), and the region's odds only choose between the
+kinds that would live there: spiders in thick forest, wolves at wood edges
+and on the moors, boars on open grass, wretches by water and in the reeds,
+golems on rocky slopes and by ruins, wisps in ash and on dry red ground, and
+Risen in **blight**. Ground that suits nothing in its region keeps a camp only
+a fifth as often, so open country is quieter than a wood full of spiders
+rather than full of whatever was left over. The Heartland and the Westwood
+gained boars for their fields.
+
+**Blight** (`blightAt`) is where the dead walk: round every ruin and the Gate
+Circle, all of Ashfall, and slow patches of old burial ground on about a tenth
+of the rest, kept away from the towns. Trees in it grow dead, so a Risen's
+country shows before the Risen does. Hunting areas and the hand-placed camps
+are unchanged: they are placed for a reason already.
+
 **Camps sleep.** A camp's creatures only exist while a player is within 190 m
 of it, and are removed 20 s after nobody is within 280 m and nothing in it is
 fighting. Terra holds ~21000 creatures; the server simulates and replicates the

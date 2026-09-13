@@ -382,12 +382,12 @@ const TERRA_REGIONS: RegionDefinition[] = [
   {
     id: "heartland", name: "The Heartland", x: 0, z: 0, relief: 0.65, mountains: 0.25, walls: 0.35,
     ground: "#41703f", crest: "#79a355", woods: 0.7, trees: ["oak", "oak", "pine", "birch"],
-    rock: "grey", grass: "grass", creatures: { zombie: 3, spider: 2, wolf: 1 }, levels: [5, 10],
+    rock: "grey", grass: "grass", creatures: { zombie: 3, spider: 2, wolf: 1, boar: 2 }, levels: [5, 10],
   },
   {
     id: "westwood", name: "Westwood", x: -1500, z: -150, relief: 0.6, mountains: 0.15, walls: 0.3,
     ground: "#3b673a", crest: "#6c974d", woods: 1.15, trees: ["oak", "oak", "pine", "birch"],
-    rock: "grey", grass: "grass", creatures: { wolf: 3, spider: 2, zombie: 1 }, levels: [1, 5],
+    rock: "grey", grass: "grass", creatures: { wolf: 3, spider: 2, zombie: 1, boar: 1 }, levels: [1, 5],
   },
   {
     id: "greywood", name: "Greywood", x: -2400, z: 1950, lift: 12, relief: 1.35, mountains: 1.4, walls: 1.2,
@@ -402,7 +402,7 @@ const TERRA_REGIONS: RegionDefinition[] = [
   {
     id: "brightwater", name: "Brightwater", x: 2350, z: 2250, relief: 0.7, mountains: 0.3, walls: 0.9,
     ground: "#487a4a", crest: "#8ab45e", woods: 0.55, trees: ["birch", "birch", "oak"],
-    rock: "grey", grass: "grass", creatures: { wretch: 3, boar: 2, spider: 1 }, levels: [22, 27],
+    rock: "grey", grass: "grass", creatures: { wretch: 5, boar: 1.5, spider: 1 }, levels: [22, 27],
   },
   {
     id: "sunward", name: "Sunward", x: 2500, z: 100, relief: 0.75, mountains: 0.2, walls: 0.8,
