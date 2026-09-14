@@ -2,6 +2,7 @@ import { Matrix, Vector3, Viewport } from "@babylonjs/core/Maths/math.js";
 import type { Scene } from "@babylonjs/core/scene.js";
 import {
   armourReduction,
+  canSlot,
   canWear,
   characterStats,
   classCanUse,
@@ -48,6 +49,7 @@ import {
   type StatTotals,
   type Wearer,
 } from "@mmo/shared";
+import { SPELL_DRAG } from "./hud.js";
 import type { Rig } from "./rigs.js";
 
 /**
@@ -217,6 +219,8 @@ export class CharacterScreen {
   private profile: CharacterProfile = { classId: DEFAULT_CLASS, level: 1, inventory: [], equipment: {}, goods: {}, trades: {} };
   private name = "";
   private open = false;
+  /** Which of the panel's pages is showing. */
+  private tab = "pack";
   private openedAt = 0;
   private closedAt = 0;
   /** Keys that arrived since the last profile — lit until looked at. */
@@ -269,6 +273,14 @@ export class CharacterScreen {
     this.tabs = [...this.root.querySelectorAll<HTMLElement>(".char-tab")];
 
     for (const tab of this.tabs) tab.onclick = () => this.showTab(tab.dataset["tab"] ?? "pack");
+    // An ability picked up from the spellbook, for the bar to catch.
+    this.abilityList.addEventListener("dragstart", (event) => {
+      const row = (event.target as HTMLElement).closest<HTMLElement>(".ability-row.slottable");
+      const spell = row?.dataset["spell"];
+      if (!spell || !event.dataTransfer) return;
+      event.dataTransfer.setData(SPELL_DRAG, spell);
+      event.dataTransfer.effectAllowed = "copyMove";
+    });
     (this.root.querySelector(".char-close") as HTMLElement).onclick = () => this.setOpen(false);
 
     this.buildSlots();
@@ -332,6 +344,7 @@ export class CharacterScreen {
       document.body.classList.remove("portrait");
       this.fresh.clear();
     }
+    this.markSpellbook();
     this.hooks.openChanged(open, this.shift());
   }
 
@@ -756,15 +769,16 @@ export class CharacterScreen {
   }
 
   /**
-   * The spellbook: every ability the class has, in bar order, and when each
-   * is learned. The road ahead as much as what you have.
+   * The spellbook: every ability the class has, in the order it learns them,
+   * and when each is learned — the road ahead as much as what you have. What
+   * you have learned drags onto the bar, as in WoW.
    */
   private renderAbilities(): void {
     const { classId, level } = this.profile;
     const definition = CLASSES[classId];
     const resource = definition.resource === "fervour" ? "Fervour" : "mana";
     this.abilityList.innerHTML =
-      `<p class="abilities-note">${escapeHtml(definition.description)}</p>` +
+      `<p class="abilities-note">${escapeHtml(definition.description)} Drag an ability onto a slot of your bar; drag one off the bar to clear it. The left button always Strikes.</p>` +
       definition.abilities.map(({ spell: id, level: at }) => {
         const spell = SPELLS[id];
         const known = level >= at;
@@ -775,7 +789,8 @@ export class CharacterScreen {
           : spell.castMs > 0 ? ` · ${spell.castMs / 1000}s, standing`
             : spell.kind === "hold" ? " · hold" : spell.kind === "channel" ? " · channel" : "";
         const cooldown = how + (spell.cooldownMs >= 1000 ? ` · ${spell.cooldownMs / 1000}s cooldown` : "");
-        return `<div class="ability-row${known ? "" : " locked"}">` +
+        const slottable = known && canSlot(classId, id);
+        return `<div class="ability-row${known ? "" : " locked"}${slottable ? " slottable" : ""}" data-spell="${id}"${slottable ? ` draggable="true"` : ""}>` +
           `<span class="key">${at}</span>` +
           `<div><b>${escapeHtml(spell.name)}</b>` +
           `<small>${known ? `${cost}${cooldown}` : `Learned at level ${at}`}</small>` +
@@ -784,10 +799,18 @@ export class CharacterScreen {
   }
 
   private showTab(tab: string): void {
+    this.tab = tab;
     for (const button of this.tabs) button.classList.toggle("active", button.dataset["tab"] === tab);
     for (const page of this.root.querySelectorAll<HTMLElement>("[data-page]")) {
       page.hidden = page.dataset["page"] !== tab;
     }
+    this.markSpellbook();
+  }
+
+  /** The bar stays up over the screen while the spellbook is showing, so
+   *  there is somewhere to drag an ability to. */
+  private markSpellbook(): void {
+    document.body.classList.toggle("spellbook", this.open && this.tab === "abilities");
   }
 
   // --- hover, tooltips, menus -------------------------------------------------------

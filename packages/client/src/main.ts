@@ -2,6 +2,10 @@ import type { Room, SeatReservation } from "@colyseus/sdk";
 import { Client } from "@colyseus/sdk";
 import {
   baseStats,
+  canSlot,
+  defaultBar,
+  sanitiseBar,
+  type Bar,
   canWear,
   CLASSES,
   classUsesFamily,
@@ -160,6 +164,38 @@ function markParty(): void {
 /** Your class and where you are on the curve, as the server last said. */
 let classId: ClassId = DEFAULT_CLASS;
 let level = 1;
+/** The ability bar as arranged: the server keeps it, and gives it back in the
+ *  profile; until then, the class's default. */
+let bar: Bar = defaultBar(DEFAULT_CLASS);
+
+/** The bar changed — rearranged by hand, or a new ability dropped into it. */
+function applyBar(next: Bar, save: boolean): void {
+  bar = [...next];
+  session?.setBar(bar);
+  if (save) sendToRoom?.("setBar", { bar });
+}
+hud.onBarChange = (next) => applyBar(next, true);
+
+/**
+ * Learning an ability puts it on the bar, as in WoW: in the first empty slot,
+ * unless it is there already. A full bar leaves it in the spellbook, which the
+ * level-up banner has just pointed at.
+ */
+function slotLearned(reached: number): void {
+  let next: Bar | undefined;
+  for (const spell of spellsLearnedAt(classId, reached)) {
+    const current = next ?? bar;
+    if (!canSlot(classId, spell) || current.includes(spell)) continue;
+    const empty = current.indexOf(null);
+    if (empty < 0) continue;
+    next = [...current];
+    next[empty] = spell;
+  }
+  if (next) {
+    hud.setBar(next);
+    applyBar(next, true);
+  }
+}
 
 /** Put the right mark over every villager, and the right hint in the bubble.
  *  Level matters: a quest you are too low for is no "!" yet. */
@@ -241,6 +277,7 @@ function applyProgress(nextLevel: number, xp: number, gained: number): void {
       spellsLearnedAt(classId, reached).map((id) => SPELLS[id].name),
       levelGains(reached),
     );
+    slotLearned(reached);
   }
   if (gained > 0) audio.play("levelUp", 1);
 }
@@ -452,6 +489,7 @@ interface ProfileMessage {
   waystones?: string[];
   goods?: Goods;
   trades?: Trades;
+  bar?: unknown;
 }
 
 /** What the server sends when a player steps into a Gate. */
@@ -552,6 +590,7 @@ function frame(now: number): void {
 /** A session for a room, with what the rest of the client hangs off it. */
 function startSession(next: Room<unknown, WorldState>, ostra: OstraDefinition): OstraSession {
   const started = createSession(world, next, ostra, hud, keyboard, cameraYaw, audio, classId);
+  started.setBar(bar);
   started.onPlayerClick = (sessionId, name, x, y) => partyUI.showPlayerMenu(sessionId, name, x, y);
   // A member's session id is their connection wherever they are, so the
   // roster from before a Gate still marks anyone already here; the server
@@ -570,7 +609,7 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
 
   hud.setOstra(ostra);
   hud.setStatus("connected");
-  hud.buildAbilityBar(classId);
+  hud.buildAbilityBar(classId, bar);
   // A new Ostra is new villagers; mark them from what we already know.
   questUI.close();
   vendorUI.close();
@@ -583,10 +622,22 @@ function enter(client: Client, next: Room<unknown, WorldState>, ostra: OstraDefi
   // message rather than in replicated state. Asked for rather than pushed: a
   // send from the room's onJoin would race this handler being registered,
   // which is the same trap the character id fell into.
+  let barLoaded = false;
   next.onMessage("profile", (payload: ProfileMessage) => {
     if (isClassId(payload.classId) && payload.classId !== classId) {
       classId = payload.classId;
-      hud.buildAbilityBar(classId);
+      hud.buildAbilityBar(classId, bar);
+    }
+    // The bar as the server kept it — from the first profile in a room only.
+    // Profiles are resent after every pickup and trade, and one already on
+    // its way when you drag something would put the slot back.
+    if (payload.bar !== undefined && !barLoaded) {
+      barLoaded = true;
+      const kept = sanitiseBar(payload.bar, classId);
+      if (kept.join() !== bar.join()) {
+        hud.setBar(kept);
+        applyBar(kept, false);
+      }
     }
     const goods = sanitiseGoods(payload.goods);
     const trades = sanitiseTrades(payload.trades);

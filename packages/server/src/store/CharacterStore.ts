@@ -1,4 +1,4 @@
-import type { ClassId, Equipment, Goods, ItemKey, OstraId, QuestLog, Trades } from "@mmo/shared";
+import type { Bar, ClassId, Equipment, Goods, ItemKey, OstraId, QuestLog, Trades } from "@mmo/shared";
 
 /**
  * A character as it survives between sessions. Position and Ostra live here
@@ -46,6 +46,8 @@ export interface CharacterRecord {
   goods: Goods;
   /** Total XP earned in each trade. */
   trades: Trades;
+  /** The ability bar as its player arranged it. */
+  bar: Bar;
   createdAt: number;
   lastSeenAt: number;
 }
@@ -63,6 +65,7 @@ export type CharacterPosition =
     waystones: string[];
     goods: Goods;
     trades: Trades;
+    bar: Bar;
   };
 
 /**

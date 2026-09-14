@@ -225,7 +225,11 @@ smaller entries below; those are the first step towards them.
   material rather than 10 on five — but a busy fight is still a few hundred.
   Merging each rig's static parts would cut it further.
 - **Settings.** Key rebinding, volume, view distance, and invert-Y (mouse
-  sensitivity is on the Esc menu already).
+  sensitivity is on the Esc menu already). The bar's keys are one table
+  (`BAR_KEYS` in `input.ts`), so rebinding them is a settings screen and a
+  place to keep the choice.
+- **More bars.** One bar of ten, as WoW's first; a second row, or a bar that
+  swaps on a modifier, once a class has more abilities than slots.
 - **A class that dodges on right-click.** `ClassDefinition.guard` is there
   for it; only the Warrior (block) exists.
 - **Block, shields and weapons.** Block works bare-handed; a shield could

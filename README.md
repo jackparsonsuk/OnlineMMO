@@ -30,7 +30,8 @@ one.
 | `npm run typecheck` | Type-checks all three packages |
 
 Controls: the **mouse** looks and aims, **left click** Strikes (on the move),
-**right click** blocks (hold), **2–9** abilities, **WASD** move, **Shift**
+**right click** blocks (hold), **1–6, F, G, T, V** your ability bar (arranged
+from the spellbook), **WASD** move, **Shift**
 sprint (out of combat), **Space** jump, **Q** dodge, **R** Second Wind (a heal),
 **Alt** held for a cursor, **Esc** to close things (and, with nothing left to
 close, the game menu: log out, sign out, sound), **M** map
@@ -395,7 +396,8 @@ but it draws *immediately*, which is most of what makes a hit feel like a hit.
 The mouse is the camera all the time, with no button held, and the buttons are
 the fight: **left click Strikes, right click is the class's guard** — a
 **block** for the Warrior (`ClassDefinition.guard`; a lighter class would dodge
-on it instead), and the rest of the kit stays on **2–6**. It is the browser's
+on it instead), and the rest of the kit is on a bar you arrange yourself (see
+The ability bar). It is the browser's
 pointer lock (`mouselook.ts`): the game holds the mouse whenever you are in
 the world and nothing is open, lets go while **Alt** is held or any window is
 (the pack, the map, a dialogue, the menu), and takes it back when the window
@@ -782,6 +784,39 @@ blow both happen: `guardUpAt` within `PERFECT_BLOCK_MS` (350) of the blow
 landing. Latency moves that window rather than shrinking it — you raise the
 guard about a round trip before the blow looks like it lands.
 
+### The ability bar
+
+**Yours to arrange, as in WoW.** Ten slots on **1–6, F, G, T and V** — the
+number row as far as a hand on WASD reaches, then the letters under the index
+finger (E, Q, R and C are taken) — each holding one ability or nothing
+(`Bar`, `BAR_SIZE` in `classes.ts`; the keys are `BAR_KEYS` in `input.ts`).
+Drag an ability from the spellbook onto a slot to put it there — moving it, if
+it was already on the bar, since nothing goes on twice — drag one slot onto
+another to swap them, and drag one off the bar to empty it. It only works with
+a cursor, which is how it should be: with the mouse held the buttons are the
+fight. While the spellbook is open the bar stays up over the character screen
+(`body.spellbook`), so there is somewhere to drop.
+
+Beside it, apart, is what every character has on keys of its own: **Strike on
+the left button whatever the bar holds**, the guard, the dodge and the heal.
+Strike can go on the bar too, and on a new character it does, on 1 — the bar
+starts as the whole kit in the order it is learned (`defaultBar`), so it is
+also the road ahead, locked slots showing the level that unlocks them. A bar
+key held beats the button held, so reaching for Cleave mid-swing casts Cleave.
+
+**Learning puts it on the bar**, in the first empty slot, as WoW does
+(`slotLearned` in `main.ts`); with none empty it waits in the spellbook the
+banner just pointed at.
+
+**The server keeps it and checks nothing against it.** The wire carries the
+ability, never the slot, so the bar is only which key casts what — the server
+stores it (`characters.bar`, JSON) to give it back in the profile, sanitised
+(`sanitiseBar`: this class's own castable abilities, each once, exactly ten
+slots; a save from before bars gets the default) and saved with everything
+else. The client takes the bar from the first profile in a room only:
+profiles are resent after every pickup, and one already on the wire when you
+drag something would put the slot back.
+
 ### Fervour
 
 Rage, rethought. It does not come from being hit or hitting so much as from
@@ -1066,7 +1101,9 @@ the level it asks of you, and what wearing it would change — computed through
 the same `wear` and `characterStats` the server uses, class base stats
 included. Click to wear, drag onto a slot, right-click to choose a hand or
 destroy; click a worn item to take it off. The Abilities tab is the spellbook:
-every ability of your class, what it costs, and the level each is learned at.
+every ability of your class, what it costs, and the level each is learned at;
+what you have learned drags onto the bar, which stays up over the screen while
+the tab is open (see The ability bar).
 
 ### Old saves
 

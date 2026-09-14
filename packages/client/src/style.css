@@ -1166,6 +1166,11 @@ body.portrait :is(#compass, #minimap, #actionbar, #corner, #target-frame, #castb
   pointer-events: none;
 }
 
+/* ...except the bar's slots, over the screen, while the spellbook is up:
+   that is where its abilities are dragged to. */
+body.spellbook #actionbar { opacity: 1; z-index: 5; }
+body.spellbook #actionbar :is(#vitals, #xp) { opacity: 0; }
+
 /* --- title screen -------------------------------------------------------- */
 
 #title {
@@ -2411,11 +2416,34 @@ body.portrait #chat { opacity: 0; pointer-events: none; }
   #compass { width: min(260px, calc(100vw - 520px)); min-width: 160px; }
 }
 
-/* Dodge and Second Wind: every class's, on Q and R, set apart from the bar. */
+/* Strike, the guard, Dodge and Second Wind: every class's, on keys of their
+   own, set apart from the bar. */
 .ability.utility { width: 64px; border-color: rgb(127 191 154 / 26%); }
 .ability.utility .key { color: #a8e6b4; }
-.ability.utility:first-of-type { margin-left: 0; }
-.ability:not(.utility) + .ability.utility { margin-left: 8px; }
+.bar-slots + .ability.utility { margin-left: 8px; }
+
+/* The bar's own slots: yours to arrange, so they take the pointer (the
+   action bar around them does not), and there are ten of them, so they are
+   narrower than they were when there were six. */
+.bar-slots { display: contents; }
+.bar-slots .ability { width: 68px; pointer-events: auto; }
+.bar-slots .ability .name { font-size: 11.5px; }
+.bar-slots .ability:not(.has-pips) .pips { display: none; }
+.bar-slots .ability[draggable="true"] { cursor: grab; }
+/* An empty slot: only its key, so you can see where something could go. */
+.ability.empty { background: rgb(0 0 0 / 18%); border-style: dashed; border-color: rgb(214 188 132 / 12%); }
+.ability.empty .key { opacity: 0.55; }
+/* Something dragged over it. */
+.ability.drop { border-color: var(--gold); box-shadow: inset 0 0 0 1px rgb(214 188 132 / 45%); }
+
+/* The spellbook's rows that can be dragged onto the bar. */
+.ability-row.slottable { cursor: grab; }
+.ability-row.slottable:hover { border-color: rgb(214 188 132 / 30%); }
+
+@media (max-width: 1000px) {
+  .bar-slots .ability { width: 56px; }
+  .bar-slots .ability .name { font-size: 10px; }
+}
 
 /* --- the game menu (Esc) ------------------------------------------------------ */
 

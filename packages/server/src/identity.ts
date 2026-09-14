@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   DEFAULT_CLASS,
+  defaultBar,
   getOstra,
   PLAYER_MAX_HEALTH,
   STARTING_OSTRA,
@@ -72,6 +73,7 @@ export function createCharacter(
     equipment: {},
     goods: {},
     trades: {},
+    bar: defaultBar(DEFAULT_CLASS),
     createdAt: now,
     lastSeenAt: now,
   };

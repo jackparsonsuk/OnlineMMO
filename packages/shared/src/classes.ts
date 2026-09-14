@@ -13,7 +13,7 @@
 
 import type { Item, ItemFamily } from "./items.js";
 import { MAX_LEVEL } from "./levels.js";
-import type { SpellId } from "./spells.js";
+import { isSpellId, SPELLS, type SpellId } from "./spells.js";
 import type { PrimaryStat, StatBlock } from "./stats.js";
 
 export type ClassId = "warrior";
@@ -154,6 +154,54 @@ export function knowsSpell(classId: ClassId, level: number, spell: SpellId): boo
 /** Abilities learned on reaching exactly this level — for the level-up banner. */
 export function spellsLearnedAt(classId: ClassId, level: number): SpellId[] {
   return CLASSES[classId].abilities.filter((ability) => ability.level === level).map((ability) => ability.spell);
+}
+
+// --- the ability bar --------------------------------------------------------------
+//
+// Yours to arrange, as in WoW: a row of slots, each holding one ability or
+// nothing, dragged into place from the spellbook. The bar is only which key
+// casts what — the wire carries the ability, never the slot — so the server
+// keeps it for no reason but to give it back next time, and checks nothing
+// about a cast against it.
+
+/** Slots on the bar. The keys they sit on are the client's (`BAR_KEYS`). */
+export const BAR_SIZE = 10;
+
+/** Which ability each slot holds, in order; null for an empty one. */
+export type Bar = Array<SpellId | null>;
+
+/** Whether this class can put this ability on its bar: its own, and cast. */
+export function canSlot(classId: ClassId, spell: SpellId): boolean {
+  return learnedAt(classId, spell) !== undefined && SPELLS[spell].kind !== "passive";
+}
+
+/** A new character's bar: everything it will learn, in the order it learns
+ *  it, so the bar is also the road ahead until it is rearranged. */
+export function defaultBar(classId: ClassId): Bar {
+  const bar: Bar = CLASSES[classId].abilities.map((ability) => ability.spell).filter((spell) => canSlot(classId, spell));
+  while (bar.length < BAR_SIZE) bar.push(null);
+  return bar.slice(0, BAR_SIZE);
+}
+
+/**
+ * A bar as stored or sent, made safe: exactly `BAR_SIZE` slots, each this
+ * class's own castable ability or empty, and none twice. Anything that is not
+ * a list at all — a save from before bars — is the default.
+ */
+export function sanitiseBar(raw: unknown, classId: ClassId): Bar {
+  if (!Array.isArray(raw)) return defaultBar(classId);
+  const seen = new Set<SpellId>();
+  const bar: Bar = [];
+  for (let i = 0; i < BAR_SIZE; i++) {
+    const value: unknown = raw[i];
+    if (isSpellId(value) && canSlot(classId, value) && !seen.has(value)) {
+      seen.add(value);
+      bar.push(value);
+    } else {
+      bar.push(null);
+    }
+  }
+  return bar;
 }
 
 // --- Fervour ------------------------------------------------------------------------

@@ -117,6 +117,8 @@ import {
   tradeLevel,
   type WatersId,
   castSteps,
+  sanitiseBar,
+  type Bar,
   cooldownSteps,
   holdCost,
   holdPower,
@@ -275,6 +277,8 @@ interface Session {
   goods: Goods;
   /** Total XP in each trade. */
   trades: Trades;
+  /** The ability bar, as arranged. Kept only to be saved and given back. */
+  bar: Bar;
   /** A line in the water: what lives there, when it bites, and when the
    *  bite is gone. `Player.fishing` says which of those it is at. */
   fishing: { waters: WatersId; biteAt: number; windowEnd: number } | undefined;
@@ -552,6 +556,12 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     if (context.devTools) {
       this.onMessage("dev", (client, message: Record<string, unknown>) => this.onDev(client, message ?? {}));
     }
+    // The bar, rearranged. Nothing about a cast is checked against it, so all
+    // that matters is that what is kept is well-formed.
+    this.onMessage("setBar", (client, message: { bar?: unknown }) => {
+      const session = this.sessions.get(client.sessionId);
+      if (session) session.bar = sanitiseBar(message?.bar, session.classId);
+    });
     this.onMessage("target", (client, message: { id?: unknown }) => {
       const session = this.sessions.get(client.sessionId);
       if (!session) return;
@@ -769,6 +779,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       waystones: [...character.waystones],
       goods: { ...character.goods },
       trades: { ...character.trades },
+      bar: [...character.bar],
       fishing: undefined,
       fishReadyAt: 0,
       chatTimes: [],
@@ -914,6 +925,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         waystones: session.waystones,
         goods: session.goods,
         trades: session.trades,
+        bar: session.bar,
       });
     }
 
@@ -1634,6 +1646,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       waystones: session.waystones,
       goods: session.goods,
       trades: session.trades,
+      bar: session.bar,
     });
   }
 
@@ -3052,6 +3065,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         waystones: session.waystones,
         goods: session.goods,
         trades: session.trades,
+        bar: session.bar,
       });
 
       // With an auth context, so the reserved seat carries the account — see

@@ -1,14 +1,20 @@
 import {
+  BAR_SIZE,
+  canSlot,
   CLASSES,
   fervourMultiplier,
+  isSpellId,
+  learnedAt,
   MAX_LEVEL,
   SPELLS,
   xpToNext,
+  type Bar,
   type ClassId,
   type OstraDefinition,
   type ResourceKind,
   type SpellId,
 } from "@mmo/shared";
+import { BAR_KEYS } from "./input.js";
 
 const RESOURCE_NAMES: Record<ResourceKind, string> = { fervour: "Fervour", mana: "Mana" };
 
@@ -16,8 +22,14 @@ interface AbilitySlot {
   root: HTMLElement;
   cool: HTMLElement;
   meta: HTMLElement;
+  /** What it holds; undefined for an empty slot. */
+  spell: SpellId | undefined;
   learnedAt: number;
 }
+
+/** Drag data: an ability from the spellbook, or a slot of the bar. */
+export const SPELL_DRAG = "application/x-ostracon-spell";
+const SLOT_DRAG = "application/x-ostracon-slot";
 
 /**
  * What crossing a level handed a character, ready to read out. Derived in
@@ -87,7 +99,14 @@ export class Hud {
   private shownMaxResource = -1;
   /** Set by main; returns whether sound is now muted. */
   onToggleSound: (() => boolean) | undefined;
-  private slots = new Map<SpellId, AbilitySlot>();
+  /** Set by main: the player rearranged the bar. */
+  onBarChange: ((bar: Bar) => void) | undefined;
+  /** The bar's slots, in order, then the fixed Strike on the left button. */
+  private slots: AbilitySlot[] = [];
+  private bar: Bar = [];
+  private classId: ClassId | undefined;
+  /** Mid-drag from a slot of the bar: which, and whether it landed on the bar. */
+  private draggingSlot: { index: number; dropped: boolean } | undefined;
   private level = 1;
 
   private bannerTimer: number | undefined;
@@ -298,12 +317,14 @@ export class Hud {
     this.targetFrame.classList.toggle("dead", target.dead);
   }
 
-  /** Light the Strike slot's chain pips: 0 means no chain in progress. */
+  /** Light the Strike slots' chain pips: 0 means no chain in progress. */
   setCombo(step: number): void {
     if (step === this.shownCombo) return;
     this.shownCombo = step;
-    const pips = this.slots.get("strike")?.root.querySelectorAll(".pips i");
-    pips?.forEach((pip, index) => pip.classList.toggle("lit", index < step));
+    for (const slot of this.slots) {
+      if (slot.spell !== "strike") continue;
+      slot.root.querySelectorAll(".pips i").forEach((pip, index) => pip.classList.toggle("lit", index < step));
+    }
   }
 
   /**
@@ -323,45 +344,47 @@ export class Hud {
 
     // Grey what you cannot currently afford, so the bar answers "why did
     // nothing happen?" before you have to ask it.
-    for (const [id, slot] of this.slots) {
-      slot.root.classList.toggle("unaffordable", value < SPELLS[id].cost);
+    for (const slot of this.slots) {
+      slot.root.classList.toggle("unaffordable", slot.spell !== undefined && value < SPELLS[slot.spell].cost);
     }
   }
 
   /**
-   * Build the ability bar for a class: every ability it will ever learn, in
-   * order, the ones not yet learned shown locked with the level that brings
-   * them \u2014 so the bar is also the road ahead.
+   * Build the ability bar for a class: its slots as arranged, each on its
+   * key, and then what every class has on keys of its own \u2014 Strike on the
+   * left button, the guard, the dodge and the heal. An ability not yet
+   * learned shows locked with the level that brings it, so a new
+   * character's bar, which holds everything in learning order, is also the
+   * road ahead.
    */
-  buildAbilityBar(classId: ClassId): void {
+  buildAbilityBar(classId: ClassId, bar: Bar): void {
+    this.classId = classId;
+    this.bar = [...bar];
     this.abilities.innerHTML = "";
-    this.slots.clear();
+    this.slots = [];
     this.shownCombo = -1;
-    const resource = RESOURCE_NAMES[CLASSES[classId].resource];
 
-    CLASSES[classId].abilities.filter(({ spell }) => SPELLS[spell].kind !== "passive").forEach(({ spell: id, level }, index) => {
-      const spell = SPELLS[id];
+    const slots = document.createElement("div");
+    slots.className = "bar-slots";
+    this.abilities.appendChild(slots);
+    BAR_KEYS.forEach(({ label }, index) => {
       const root = document.createElement("div");
-      root.className = index === 0 ? "ability mouse-key" : "ability";
-      root.title = spell.description;
-      root.innerHTML =
-        // The first ability is the left mouse button; the rest keep their numbers.
-        `<span class="key">${index === 0 ? "LMB" : index + 1}</span>` +
-        `<span class="name">${spell.name}</span>` +
-        `<span class="meta" data-cost="${spell.cost > 0 ? `${spell.cost} ${resource}` : "free"}"></span>` +
-        (id === "strike" ? `<span class="pips"><i></i><i></i><i></i></span>` : "") +
-        `<span class="cool"></span>`;
-      this.abilities.appendChild(root);
-
-      this.slots.set(id, {
+      root.innerHTML = `<span class="key">${label}</span><span class="name"></span><span class="meta"></span>` +
+        `<span class="pips"><i></i><i></i><i></i></span><span class="cool"></span>`;
+      slots.appendChild(root);
+      const slot: AbilitySlot = {
         root,
         cool: root.querySelector(".cool") as HTMLElement,
         meta: root.querySelector(".meta") as HTMLElement,
-        learnedAt: level,
-      });
+        spell: undefined,
+        learnedAt: 0,
+      };
+      this.slots.push(slot);
+      this.wireSlot(slot, index);
     });
+    this.fillSlots();
 
-    // Every class's two, on their own keys, set apart from the class's bar.
+    // Every class's own, on keys of their own, set apart from the bar.
     const utility = (key: string, name: string, meta: string, title: string): HTMLElement => {
       const root = document.createElement("div");
       root.className = key.length > 1 ? "ability utility mouse-key" : "ability utility";
@@ -371,6 +394,14 @@ export class Hud {
       this.abilities.appendChild(root);
       return root.querySelector(".cool") as HTMLElement;
     };
+    // The left button is always Strike, whatever the bar holds.
+    const strike = utility("LMB", "Strike", "free", SPELLS.strike.description);
+    const strikeRoot = strike.parentElement as HTMLElement;
+    strikeRoot.classList.add("has-pips");
+    strikeRoot.insertAdjacentHTML("beforeend", `<span class="pips"><i></i><i></i><i></i></span>`);
+    const strikeMeta = strikeRoot.querySelector(".meta") as HTMLElement;
+    strikeMeta.dataset["cost"] = "free";
+    this.slots.push({ root: strikeRoot, cool: strike, meta: strikeMeta, spell: "strike", learnedAt: 1 });
     // Right-click is the class's guard: a block, or a second key for Dodge.
     const guard = CLASSES[classId].guard;
     if (guard === "block") {
@@ -396,11 +427,105 @@ export class Hud {
   }
 
   private drawLocks(): void {
-    for (const slot of this.slots.values()) {
-      const locked = slot.learnedAt > this.level;
+    for (const slot of this.slots) {
+      const locked = slot.spell !== undefined && slot.learnedAt > this.level;
       slot.root.classList.toggle("locked", locked);
       slot.meta.textContent = locked ? `Level ${slot.learnedAt}` : slot.meta.dataset["cost"] ?? "";
     }
+  }
+
+  /** The bar, as the server keeps it: put each slot's ability in it. */
+  setBar(bar: Bar): void {
+    this.bar = [...bar];
+    this.fillSlots();
+  }
+
+  /** Draw what each of the bar's slots holds. */
+  private fillSlots(): void {
+    if (!this.classId) return;
+    const resource = RESOURCE_NAMES[CLASSES[this.classId].resource];
+    for (let index = 0; index < BAR_SIZE; index++) {
+      const slot = this.slots[index];
+      if (!slot) continue;
+      const id = this.bar[index] ?? undefined;
+      const spell = id ? SPELLS[id] : undefined;
+      slot.spell = id;
+      slot.learnedAt = id ? learnedAt(this.classId, id) ?? 0 : 0;
+      slot.root.className = spell ? "ability" : "ability empty";
+      slot.root.classList.toggle("has-pips", id === "strike");
+      slot.root.draggable = spell !== undefined;
+      slot.root.title = spell
+        ? `${spell.description}\nDrag to move it; drag it off the bar to clear the slot.`
+        : "Empty. Drag an ability here from the spellbook (I, then Abilities).";
+      (slot.root.querySelector(".name") as HTMLElement).textContent = spell?.name ?? "";
+      const cost = !spell ? ""
+        : spell.hold ? `${spell.cost}–${spell.hold.fullCost} ${resource}`
+          : spell.cost > 0 ? `${spell.cost} ${resource}` : "free";
+      slot.meta.dataset["cost"] = cost;
+    }
+    this.drawLocks();
+    this.shownResource = -1;
+    this.shownCombo = -1;
+  }
+
+  /**
+   * Dragging on the bar, as in WoW: drop an ability from the spellbook onto a
+   * slot to put it there (moving it, if it was already on the bar), drag a
+   * slot onto another to swap them, and drag one off the bar to empty it.
+   * Only while there is a cursor — the character screen, or Alt — since with
+   * the mouse held the buttons are the fight.
+   */
+  private wireSlot(slot: AbilitySlot, index: number): void {
+    const root = slot.root;
+    const accepts = (event: DragEvent): boolean =>
+      event.dataTransfer?.types.includes(SPELL_DRAG) === true || event.dataTransfer?.types.includes(SLOT_DRAG) === true;
+    root.addEventListener("dragstart", (event) => {
+      if (!slot.spell || !event.dataTransfer) return;
+      event.dataTransfer.setData(SLOT_DRAG, String(index));
+      event.dataTransfer.effectAllowed = "move";
+      this.draggingSlot = { index, dropped: false };
+    });
+    root.addEventListener("dragend", () => {
+      const dragging = this.draggingSlot;
+      this.draggingSlot = undefined;
+      // Let go anywhere but the bar: the slot is cleared.
+      if (dragging && !dragging.dropped) this.changeBar((bar) => { bar[dragging.index] = null; });
+    });
+    root.addEventListener("dragover", (event) => {
+      if (!accepts(event)) return;
+      event.preventDefault();
+      root.classList.add("drop");
+    });
+    root.addEventListener("dragleave", () => root.classList.remove("drop"));
+    root.addEventListener("drop", (event) => {
+      root.classList.remove("drop");
+      const data = event.dataTransfer;
+      if (!data || !accepts(event)) return;
+      event.preventDefault();
+      const from = data.getData(SLOT_DRAG);
+      if (from !== "" && this.draggingSlot) {
+        this.draggingSlot.dropped = true;
+        const other = Number(from);
+        this.changeBar((bar) => { [bar[index], bar[other]] = [bar[other] ?? null, bar[index] ?? null]; });
+        return;
+      }
+      const spell = data.getData(SPELL_DRAG);
+      if (!isSpellId(spell) || !this.classId || !canSlot(this.classId, spell)) return;
+      this.changeBar((bar) => {
+        // Already on the bar: it moves here, and what was here goes there.
+        const already = bar.indexOf(spell);
+        if (already >= 0) bar[already] = bar[index] ?? null;
+        bar[index] = spell;
+      });
+    });
+  }
+
+  private changeBar(change: (bar: Bar) => void): void {
+    const next = [...this.bar];
+    change(next);
+    this.bar = next;
+    this.fillSlots();
+    this.onBarChange?.(next);
   }
 
   /** A cast with a cast time has started: fill the bar over its length. */
@@ -465,8 +590,8 @@ export class Hud {
   /** Sweep the cooldown shade on each slot, from the share of each cooldown
    *  still to run. Cheap enough to run every frame. */
   setCooldowns(left: (id: SpellId) => number): void {
-    for (const [id, slot] of this.slots) {
-      const height = `${Math.min(1, Math.max(0, left(id))) * 100}%`;
+    for (const slot of this.slots) {
+      const height = slot.spell ? `${Math.min(1, Math.max(0, left(slot.spell))) * 100}%` : "0%";
       if (slot.cool.style.height !== height) slot.cool.style.height = height;
     }
   }

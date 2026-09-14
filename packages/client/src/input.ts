@@ -5,11 +5,31 @@
  * step* — not how many OS key-repeat events happened to fire in between.
  */
 
-type Action = "forward" | "back" | "left" | "right" | "sprint" | "jump" | "dodge" | "heal" | "guard"
-  | "spell1" | "spell2" | "spell3" | "spell4" | "spell5" | "spell6" | "spell7" | "spell8" | "spell9";
+import { BAR_SIZE } from "@mmo/shared";
 
-/** How many slots the ability bar has keys for. */
-export const ABILITY_KEYS = 9;
+type Action = "forward" | "back" | "left" | "right" | "sprint" | "jump" | "dodge" | "heal" | "guard" | "attack"
+  | `slot${number}`;
+
+/**
+ * The keys the bar's slots sit on, in order, and what the bar prints on each.
+ * The number row as far as a hand on WASD reaches without letting go of the
+ * keys it steers with, then the letters under the index finger: F and G
+ * beside D, T above them, V below. E is talking, Q the dodge, R the heal and
+ * C the character screen, so none of those.
+ */
+export const BAR_KEYS: ReadonlyArray<{ code: string; label: string }> = [
+  { code: "Digit1", label: "1" },
+  { code: "Digit2", label: "2" },
+  { code: "Digit3", label: "3" },
+  { code: "Digit4", label: "4" },
+  { code: "Digit5", label: "5" },
+  { code: "Digit6", label: "6" },
+  { code: "KeyF", label: "F" },
+  { code: "KeyG", label: "G" },
+  { code: "KeyT", label: "T" },
+  { code: "KeyV", label: "V" },
+];
+if (BAR_KEYS.length !== BAR_SIZE) throw new Error("BAR_KEYS must have a key for every slot on the bar");
 
 const BINDINGS: Record<string, Action> = {
   KeyW: "forward", ArrowUp: "forward",
@@ -18,20 +38,11 @@ const BINDINGS: Record<string, Action> = {
   KeyD: "right", ArrowRight: "right",
   // Space jumps, as it does in every game with a jump. The mouse's left
   // button is Strike and its right the guard (see the mouse handlers below);
-  // the rest of the bar is 2-6, under the fingers that are not steering, and
-  // 1 still swings for anyone who reaches for it.
+  // the bar's slots are on BAR_KEYS.
   Space: "jump",
   KeyQ: "dodge",
   KeyR: "heal",
-  Digit1: "spell1",
-  Digit2: "spell2",
-  Digit3: "spell3",
-  Digit4: "spell4",
-  Digit5: "spell5",
-  Digit6: "spell6",
-  Digit7: "spell7",
-  Digit8: "spell8",
-  Digit9: "spell9",
+  ...Object.fromEntries(BAR_KEYS.map(({ code }, index) => [code, `slot${index + 1}` as Action])),
   // Out of combat only — the server decides, the client predicts the same.
   ShiftLeft: "sprint", ShiftRight: "sprint",
 };
@@ -80,14 +91,14 @@ export class KeyboardInput {
     // left down.
     const onMouseDown = (event: MouseEvent) => {
       if (!document.pointerLockElement) return;
-      if (event.button === 0) this.held.add("spell1");
+      if (event.button === 0) this.held.add("attack");
       if (event.button === 2) {
         this.held.add("guard");
         this.guardQueued = true;
       }
     };
     const onMouseUp = (event: MouseEvent) => {
-      if (event.button === 0) this.held.delete("spell1");
+      if (event.button === 0) this.held.delete("attack");
       if (event.button === 2) this.held.delete("guard");
     };
 
@@ -113,18 +124,23 @@ export class KeyboardInput {
   }
 
   /**
-   * Which ability slot is held, 1-based; 0 for none. Held rather than
+   * Which bar slot's key is held, 1-based; 0 for none. Held rather than
    * edge-triggered — the server gates each ability on its own cooldown and
    * cost, so holding a key auto-repeats and spamming it gains nothing.
    *
-   * A higher slot wins when several are held: reaching for Cleave while
-   * still leaning on 1 should cast Cleave.
+   * A later slot wins when several are held: reaching for Cleave while still
+   * leaning on 1 should cast Cleave.
    */
   castSlot(): number {
-    for (let slot = ABILITY_KEYS; slot >= 1; slot--) {
-      if (this.held.has(`spell${slot}` as Action)) return slot;
+    for (let slot = BAR_SIZE; slot >= 1; slot--) {
+      if (this.held.has(`slot${slot}`)) return slot;
     }
     return 0;
+  }
+
+  /** The left button held, with the game holding the mouse: Strike. */
+  attacking(): boolean {
+    return this.held.has("attack");
   }
 
   jumping(): boolean {

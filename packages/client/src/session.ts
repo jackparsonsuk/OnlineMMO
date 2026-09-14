@@ -18,6 +18,9 @@ import {
   gatherSpots,
   getQuest,
   CLASSES,
+  canSlot,
+  defaultBar,
+  type Bar,
   type ClassId,
   DIFFICULTY_COLOUR,
   DODGE_COOLDOWN_STEPS,
@@ -133,6 +136,8 @@ export interface OstraSession {
   setGathering(wanted: ReadonlyArray<{ quest: string; objective: number }>): void;
   /** Your Fishing level, for the prompt at the water's edge. */
   setFishingLevel(level: number): void;
+  /** The bar as arranged: which ability each slot's key casts. */
+  setBar(bar: Bar): void;
   /** Which stones this character has woken, for the prompt and the maps. */
   setWaystones(attuned: readonly string[]): void;
   /** Your level: what the world map's region bands are read against. */
@@ -328,10 +333,11 @@ export function createSession(
 ): OstraSession {
   const scene = world.scene;
   const born = performance.now();
-  /** Your bar, in order: key N casts `bar[N - 1]`. Passives are never cast. */
-  const bar = CLASSES[classId].abilities
-    .map((ability) => ability.spell)
-    .filter((id) => SPELLS[id].kind !== "passive");
+  /** Your bar, as you arranged it: slot N's key casts `bar[N - 1]`. The left
+   *  button is Strike whatever is on it. */
+  let bar: Bar = defaultBar(classId);
+  /** Every ability the class can cast, for the ground markers. */
+  const kit = CLASSES[classId].abilities.map((ability) => ability.spell).filter((id) => canSlot(classId, id));
   const resourceKind = CLASSES[classId].resource;
   /** What right-click does for this class. */
   const guard = CLASSES[classId].guard;
@@ -382,7 +388,7 @@ export function createSession(
     whirlwind: 0xffd28a,
     battleCry: 0xffc46b,
   };
-  for (const id of bar) {
+  for (const id of kit) {
     if (SPELLS[id].targeting !== "self") castArcs.set(id, createCastArc(scene, SPELLS[id], ARC_COLOURS[id]));
   }
 
@@ -1450,16 +1456,19 @@ export function createSession(
       const guardPressed = keyboard.takeGuard();
       const blocking = guard === "block" && keyboard.guardHeld() && (selfPlayer?.health ?? 0) > 0;
       // With a line out, the left button strikes at the fish, not the air.
-      let slot = keyboard.castSlot();
+      let attacking = keyboard.attacking();
       const angling = (selfPlayer?.fishing ?? FISHING_NONE) !== FISHING_NONE || now - fishAskedAt < FISH_ASK_MS;
-      if (slot !== 1) {
+      if (!attacking) {
         hookHeld = false;
       } else if (angling || hookHeld) {
         if (!hookHeld && selfPlayer && selfPlayer.fishing !== FISHING_NONE) room.send("fishHook");
         hookHeld = true;
-        slot = 0;
+        attacking = false;
       }
-      const wanted = blocking ? undefined : bar[slot - 1];
+      // A bar key wins over the button: reaching for Cleave while the button
+      // is still down should cast Cleave. The button is always Strike.
+      const slot = keyboard.castSlot();
+      const wanted = blocking ? undefined : (slot > 0 ? bar[slot - 1] ?? undefined : undefined) ?? (attacking ? "strike" : undefined);
       const alive = (selfPlayer?.health ?? 0) > 0;
       // The server counts only the inputs of a living player.
       if (alive) step++;
@@ -2302,6 +2311,7 @@ export function createSession(
     gather,
     setGathering,
     setFishingLevel: (level) => { fishingLevel = level; },
+    setBar: (next) => { bar = [...next]; },
     setWaystones: (keys) => {
       attuned = keys;
       cartographer.setAttuned(keys);
