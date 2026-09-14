@@ -35,8 +35,8 @@ Put the filenames exactly as written below; the code will look for them.
   haze behind. A lone armoured warrior with sword and shield on the path,
   small in frame, looking out at it. *In, with the logo painted in top right.
   It is 1024×572; a 2560×1440 version under the same name would be sharper on
-  large screens. The title screen's panel sits bottom right, so keep that
-  corner quiet in any redo.*
+  large screens. The title screen's panel sits in the middle, so keep the
+  centre quiet in any redo.*
 - [x] ~~`logo.png`~~ — not needed while the logo is part of the title art.
 
 ### Ability icons (13)
