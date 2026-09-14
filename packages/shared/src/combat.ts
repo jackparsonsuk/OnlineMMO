@@ -227,3 +227,45 @@ export function isInArc(
   const angle = Math.acos(Math.min(1, Math.max(-1, cosAngle)));
   return angle <= arc / 2;
 }
+
+/**
+ * Is `target` inside a straight band `length` long and `width` wide, running
+ * out from the origin along `yaw`? Shockwave's shape. Like `isInArc`, measured
+ * to the target's surface, so the band is as generous at its far end as at
+ * its near one.
+ */
+export function isInLine(
+  originX: number,
+  originZ: number,
+  yaw: number,
+  targetX: number,
+  targetZ: number,
+  targetRadius: number,
+  length: number,
+  width: number,
+): boolean {
+  const toX = targetX - originX;
+  const toZ = targetZ - originZ;
+  const facingX = Math.sin(yaw);
+  const facingZ = Math.cos(yaw);
+  const along = toX * facingX + toZ * facingZ;
+  if (along < -targetRadius || along > length + targetRadius) return false;
+  const across = Math.abs(toX * facingZ - toZ * facingX);
+  return across <= width / 2 + targetRadius;
+}
+
+/** Whether a spell cast from the origin along `yaw` reaches the target: the
+ *  one test both the server's resolver and the client's prediction call. */
+export function isInSpellShape(
+  spell: { range: number; arc: number; line?: number },
+  originX: number,
+  originZ: number,
+  yaw: number,
+  targetX: number,
+  targetZ: number,
+  targetRadius: number,
+): boolean {
+  return spell.line !== undefined
+    ? isInLine(originX, originZ, yaw, targetX, targetZ, targetRadius, spell.range, spell.line)
+    : isInArc(originX, originZ, yaw, targetX, targetZ, targetRadius, spell.range, spell.arc);
+}

@@ -30,10 +30,10 @@ one.
 | `npm run typecheck` | Type-checks all three packages |
 
 Controls: the **mouse** looks and aims, **left click** Strikes (on the move),
-**right click** blocks (hold), **2–6** abilities, **WASD** move, **Shift**
+**right click** blocks (hold), **2–9** abilities, **WASD** move, **Shift**
 sprint (out of combat), **Space** jump, **Q** dodge, **R** Second Wind (a heal),
-**Alt** held for a cursor, **Tab** to lock a target, **Esc** to let go (and,
-with nothing left to close, the game menu: log out, sign out, sound), **M** map
+**Alt** held for a cursor, **Esc** to close things (and, with nothing left to
+close, the game menu: log out, sign out, sound), **M** map
 (scroll to zoom, drag to pan), **I** (or **C**) character and pack, **E** talk
 to a villager (or, facing open water, fish), **J** quest log, **P** party, **Enter** chat, **H** this list,
 scroll to zoom, walk into a Gate ring to travel.
@@ -417,13 +417,16 @@ sensitivity, kept per browser).
 to be a 0.9 s standing cast every 1.8 s; its damage scaled with the time between
 swings, so a fight lasts as long. You move at 72% while an ability key is held
 and 45% behind a guard (`ATTACK_MOVE_FACTOR`, `BLOCK_MOVE_FACTOR`), read from
-the input itself so the prediction agrees. Sunder and Cleave keep their short
-plant-your-feet windups.
+the input itself so the prediction agrees. Nothing a Warrior does roots them:
+the commitment is in the ability — a wind-up you are slowed through, a run you
+cannot steer — not in standing still (see The Warrior).
 
 **Block** (hold right click) takes 80% off a blow from the front — within about
 70° of where you face, judged from the creature or a slam's centre — and says
 "Blocked". Behind a guard you cannot swing, and Fervour drains rather than
 builds. `Player.blocking` is replicated, so everyone sees the guard go up.
+Raised in the last 350 ms before the blow, with Shield Bash learned, it is a
+**perfect block**: nothing taken, and the creature staggers.
 
 **Aim is the camera.** The reticle is the middle of the screen and never
 moves — the mouse moves the world under it, which is what makes it feel like
@@ -488,11 +491,12 @@ deciding anything:
 
 - **Bodies animate** (`rigs.ts`). Every figure is built around shoulder, hip and
   waist pivots and posed procedurally each frame: walk cycles from measured
-  speed, a three-beat Strike chain, an overarm throw, a Sunder slam, a Cleave
-  sweep, a shield shove, a war cry, flinches, falls, and creatures climbing out
-  of the ground when a camp wakes.
+  speed, a three-beat Strike chain, a shoulder-first charge, a leap with the
+  blade raised, a Crushing Blow held overhead and trembling, a Whirlwind spin, a
+  Shockwave slam, a Cleave sweep, a shield shove, a war cry, flinches, falls,
+  and creatures climbing out of the ground when a camp wakes.
 - **Impact is predicted.** At the moment the blade connects (`castContact`) the
-  client runs the same `isInArc` test the server will, and plays the flash,
+  client runs the same `isInSpellShape` test the server will, and plays the flash,
   the shards, the thud and a small camera shake *then* — not a round trip
   later. The server's `cast` message follows with the numbers.
 - **Hitstop.** A struck body's animation freezes for ~55 ms. It is the cheapest
@@ -516,9 +520,10 @@ paints exactly that wedge on the ground, filling as the windup runs, so
 stepping out of the red is stepping out of the hit. The Risen is a slow
 overhead you should never take twice; the spider barely warns you at all.
 
-Heavy blows (every third Strike, Sunder, Shield Bash) **stagger**: the windup is
-cancelled and the creature can't attack for 700 ms. Hitting a Risen's overhead
-with a finisher is a blow you never take. Hits also **knock back** — a
+Heavy blows (every third Strike, Charge's arrival, Shockwave, a full Crushing
+Blow, a perfect block) **stagger**: the windup is cancelled and the creature
+can't attack for 700 ms. Hitting a Risen's overhead with a finisher is a blow
+you never take. Hits also **knock back** — a
 decaying velocity spent through `moveBody`, so a shoved creature still stops at
 a tree.
 
@@ -530,10 +535,13 @@ rhythm instead of a metronome.
 Creatures chase whoever has hurt them most, not whoever is nearest, with a 10%
 edge to the current quarry so two players trading blows don't make it
 flip-flop. A player who has done damage is chased 4 m further than the aggro
-radius, so a Heroic Throw from the edge of range is never free. Hitting one member
+radius, so a blow from the edge of range is never free. Hitting one member
 of a camp brings camp-mates within 7 m. A creature that leashes home heals to
 full — otherwise it could be chipped down from the edge of its leash one pull
-at a time.
+at a time. **Battle Cry taunts** everything within 12 m: threat 30% over
+whoever had the most, plus a little, so it holds against a friend still
+hitting — but a friend doing far more wins it back, as a tank should have to
+keep earning it (`taunt` in `enemyAI.ts`).
 
 ### Recovering
 
@@ -543,22 +551,27 @@ drains away (see below). "In combat" means you dealt or took damage in
 the last 5 s, *or something is hunting you*. It is replicated on the player,
 because sprint is denied in combat and the client has to predict that.
 
-**Some attacks need you standing still.** Swinging while strafing made every
-telegraph trivial: you could keep hitting while walking out of each blow. Now,
-as in WoW, an ability has a **cast time** (`castMs`) or is instant. Sunder
-(0.5 s) and Cleave (0.7 s) take time and must be performed standing: they will
-not start on the move, and moving (or jumping, dodging or raising a guard)
-before one lands cancels it — nothing paid, cooldown given back, "Interrupted"
-on the cast bar. Strike, Heroic Throw, Shield Bash and Battle Cry are instant
-and work on the run. You are
-never rooted; getting out of the red just costs you the swing.
+**Cast times wait for a caster.** An ability can have a **cast time**
+(`castMs`) that must be performed standing: it will not start on the move, and
+moving (or jumping, dodging or raising a guard) before it lands cancels it —
+nothing paid, cooldown given back, "Interrupted" on the cast bar. Sunder and
+Cleave used to, as in WoW, because swinging while strafing made every telegraph
+trivial. With mouse aim a plant-your-feet windup fought the controls, so the
+Warrior's commitments are now shaped differently — a hold you are slowed
+through, a spin that drains you, a run you cannot steer — and no Warrior ability
+has a cast time. The rule stays for the first caster.
 
 A cast is counted in **input steps, not milliseconds** (`castSteps`). The
 server advances it once per input it applies (`stepCast`) and the client once
-per input it sends (`stepLocalCast`), so both land it — or cancel it, on the
-first input with movement — at the same input; wall-clock time would let
-latency decide. Cost is paid when it lands; aim follows the target throughout.
-A cancel is also sent as `castCancelled` in case the two ever disagree.
+per input it sends (`stepLocalCast`), so both land it — or cancel it — at the
+same input; wall-clock time would let latency decide. So are holds, channels
+and **cooldowns** (`cooldownSteps`): `Session.step` counts the inputs the server
+has applied, the client counts the same inputs as it sends them, and a spell is
+ready at the same input on both sides. Cooldowns used to be wall-clock on each
+side, which was harmless while a disagreement only cost a picture; a Charge the
+client predicted and the server thought was pressed a round trip too early would
+be a rubber band. A cancel is also sent as `castCancelled` in case the two ever
+disagree.
 
 Cooldowns are enforced server-side, so holding the button auto-attacks and
 spamming it gains nothing.
@@ -702,26 +715,79 @@ rate is what keeps a Warrior of level N, in gear of level N, about as many
 blows from killing a creature of level N as a new one is from a Risen, since
 creatures grow too (`levelHealthScale`, +30% of base health a level).
 
-| Key | Ability | Learned | Fervour | Shape | Role |
+| Ability | Learned | Kind | Fervour | Shape | Role |
 | --- | --- | --- | --- | --- | --- |
-| Left click | **Strike** | 1 | builds | 2.4 m cone | Best sustained damage, on the move; every third blow staggers |
-| 2 | **Heroic Throw** | 3 | builds | 13 m narrow cone | Open before it closes |
-| 3 | **Sunder** | 6 | 35 | 4.6 m ring | The answer to being surrounded |
-| 4 | **Cleave** | 10 | 20 | 3.2 m half-circle | Everything in front of you |
-| 5 | **Shield Bash** | 15 | 15 | 2.6 m cone | The interrupt: staggers one foe |
-| 6 | **Battle Cry** | 22 | — | self | Fills Fervour, and it does not drain for 10 s |
+| **Strike** | 1 | instant | +4 | 2.4 m cone | Best sustained damage, on the move; every third blow staggers |
+| **Charge** | 2 | dash | +20 | runs 5–18 m | The way in: rush what you look at and stagger it |
+| **Cleave** | 4 | instant | 20 | 3.2 m half-circle | Everything in front of you |
+| **Shockwave** | 6 | instant | 25 | 9 × 2.2 m line | Staggers everything along the ground where you aim |
+| **Crushing Blow** | 8 | hold | 20–45 | 2.6 m cone | Hold to wind up (1 s), release: up to 2.6× damage; full staggers |
+| **Shield Bash** | 10 | passive | +15 | — | A perfect block: nothing taken, the attacker staggers |
+| **Heroic Leap** | 12 | dash | — | leaps 4–16 m, 4.2 m ring | Over and down on them, hurling everything back |
+| **Execute** | 14 | instant | 30 | 2.6 m cone | 3.2× on anything under 30%; a kill gives back 20 |
+| **Whirlwind** | 17 | channel | 9 a pulse | 3.6 m ring | Hold to spin: a ring of blows every 0.45 s, on the move |
+| **Battle Cry** | 20 | instant | fills | 12 m | Full Fervour held for 10 s, and everything near turns on you |
 
-The whole kit is on the bar from the start; what you have not learned is shown
-locked, with the level that brings it, so the bar is also the road ahead. The
-server checks `knowsSpell` on every cast. Every ability still resolves through
-one `isInArc()` call; a ring is an arc of 2π, and a self-cast is a spell with
-`targeting: "self"`, so adding one is a table entry rather than a new code path.
+**Why this kit.** The first one — Heroic Throw, Sunder, Cleave, Shield Bash,
+Battle Cry — was designed for tab-targeting and standing casts, and it showed
+once the mouse became the aim: a thrown axe you pointed a camera at, two
+windups that rooted you in front of a telegraph, and an interrupt that was a
+key rather than a moment. Each replacement keeps the job and changes how it is
+done. **Charge** reaches something before it reaches you, as Throw did, but
+the reach is you. **Whirlwind** answers a crowd, as Sunder did, on the move and
+at a price per half-second. **Shield Bash** is still the interrupt, as a
+well-timed guard. **Crushing Blow** asks the Fervour question in a new place —
+how much of the wind-up to spend — and **Execute** asks it at the end of a
+fight. **Shockwave** is the interrupt with reach, **Heroic Leap** the way over.
+Something arrives every couple of levels through the first twenty, where most of
+the world is.
+
+**Kinds** (`SpellKind`). *Instant* lands the step it is pressed. A *hold*
+(Crushing Blow) winds up while its key is held and lands on release, as strong
+as the steps it was held for; held past full and a 0.6 s grace it lets go by
+itself, and a dodge, a guard or a dash breaks it for nothing. The cast bar
+fills over the wind-up. A *channel* (Whirlwind) pulses while held and paid for,
+the first pulse as the key goes down, and its cooldown starts when it ends.
+Others see both through a `channel` message (the raised blade, the spin). A
+*dash* moves you (below). A *passive* is never cast. Every blow resolves through
+one `isInSpellShape()` call — a wedge, a ring (a wedge of 2π) or a line — so
+adding one is a table entry rather than a new code path. The server checks
+`knowsSpell` on every cast.
+
+**Charge and Heroic Leap are dashes, predicted like the dodge.** Moving you is
+the one thing an ability cannot leave to the server, or every Charge would
+start a round trip late and end in a correction. So a dash is decided entirely
+by the input that starts it: `MoveInput.dash` says which, `aim` which way and
+`reach` how far, and `applyInput` (`startDash`) clamps the distance, works out
+the steps and the velocity — and for a leap, the push-off that brings you down
+as the steps run out — and runs it on both sides alike, stopping at trees like
+anything else. Nothing about the creature ever enters the step, since the
+client only knows it late. The client picks the distance from what it can see:
+the middle of the creature the reticle is on for a Charge (refused, with a
+line on screen, closer than 5 m or beyond 18), or where the reticle meets the
+ground for a leap. A Charge **halts** on the input where the client sees it
+reach the creature's edge (`MoveInput.halt`), so the server stops it on the
+same one. Before the step sees a dash, the server's `admitDash` checks it is
+learned, ready, not from behind a guard, and — for a Charge — that something
+alive stood within 3 m of where it ends, where this player saw it; if not, the
+step never hears of it, which only a lying client should ever see. The blow
+lands as the dash ends (`landDash`): a Charge's on the one creature it ran at,
+if it reached it; a leap's on everything around where it came down. Tested at
+`COLYSEUS_LATENCY=150`: a Charge ends at the creature's edge with client and
+server agreeing to the millimetre, and a leap pressed the moment its cooldown
+reads ready is admitted.
+
+**Shield Bash** is timing, judged on the server's clock where the guard and the
+blow both happen: `guardUpAt` within `PERFECT_BLOCK_MS` (350) of the blow
+landing. Latency moves that window rather than shrinking it — you raise the
+guard about a round trip before the blow looks like it lands.
 
 ### Fervour
 
 Rage, rethought. It does not come from being hit or hitting so much as from
 **staying in the fight**: while you are in combat it rises on its own, 4 a
-second (full in 25), and a landed Strike or Throw stokes it by 4 more. **While
+second (full in 25), and landing blows stokes it: 4 for a Strike, 20 for a
+Charge, 15 for a perfect block (`Spell.builds`). **While
 it is high, everything you do hits harder** — up to +35% at full. Out of combat
 it drains at 20 a second, and on death it is gone.
 
@@ -1893,7 +1959,7 @@ build next live in [TODO.md](TODO.md).
   "one in the realm", Ostra items are not yet bound to an Ostra, and there are
   no Souls to find.
 - **Gear does not change your body or your swing.** Strike is the same blade
-  whatever you hold, Shield Bash needs no shield, and armour is not drawn on
+  whatever you hold, a perfect block needs no shield, and armour is not drawn on
   the rig.
 - **Content stops at level 30.** Terra runs 1–30; the Ascendant and Barals are
   still courtyards with a camp or two at 35 and ~70, so the curve to 100 has

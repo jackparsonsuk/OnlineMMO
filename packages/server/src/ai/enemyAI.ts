@@ -138,7 +138,7 @@ const CAUGHT_REACH = 3;
 const KNOCK_DECAY = 9;
 
 /** A player who has hurt it is chased this much further than one who hasn't,
- *  so a Heroic Throw from the edge of range is never free. */
+ *  so a blow from the edge of range is never free. */
 const PROVOKED_REACH = 4;
 
 export function createBrain(x: number, z: number, campId: string, maxHealth: number): EnemyBrain {
@@ -217,6 +217,20 @@ export function takeHit(
   brain.windupTarget = undefined;
   brain.staggerUntil = now + STAGGER_MS;
   brain.nextAttackAt = Math.max(brain.nextAttackAt, brain.staggerUntil);
+}
+
+/**
+ * A Battle Cry: turn on the one who shouted. Threat to beat everyone else's
+ * by a margin, so it holds for a while against a friend still hitting it —
+ * but only threat, so a friend who keeps on doing far more wins it back, as
+ * a tank should have to keep earning it.
+ */
+export function taunt(brain: EnemyBrain, sessionId: string): void {
+  if (brain.returning) return;
+  let top = 0;
+  for (const amount of brain.threat.values()) top = Math.max(top, amount);
+  brain.threat.set(sessionId, Math.max(brain.threat.get(sessionId) ?? 0, top * 1.3 + 20));
+  brain.quarry = sessionId;
 }
 
 /** A camp-mate got hit nearby: come and help, without stealing the threat. */

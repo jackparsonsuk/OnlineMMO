@@ -765,14 +765,18 @@ export class CharacterScreen {
     const resource = definition.resource === "fervour" ? "Fervour" : "mana";
     this.abilityList.innerHTML =
       `<p class="abilities-note">${escapeHtml(definition.description)}</p>` +
-      definition.abilities.map(({ spell: id, level: at }, index) => {
+      definition.abilities.map(({ spell: id, level: at }) => {
         const spell = SPELLS[id];
         const known = level >= at;
-        const cost = spell.cost > 0 ? `${spell.cost} ${resource}` : "Free";
-        const cooldown = (spell.castMs > 0 ? ` · ${spell.castMs / 1000}s, standing` : " · instant")
-          + (spell.cooldownMs >= 1000 ? ` · ${spell.cooldownMs / 1000}s cooldown` : "");
+        const cost = spell.kind === "passive" ? "Passive"
+          : spell.hold ? `${spell.cost}–${spell.hold.fullCost} ${resource}`
+            : spell.cost > 0 ? `${spell.cost} ${resource}${spell.kind === "channel" ? " a pulse" : ""}` : "Free";
+        const how = spell.kind === "passive" ? ""
+          : spell.castMs > 0 ? ` · ${spell.castMs / 1000}s, standing`
+            : spell.kind === "hold" ? " · hold" : spell.kind === "channel" ? " · channel" : "";
+        const cooldown = how + (spell.cooldownMs >= 1000 ? ` · ${spell.cooldownMs / 1000}s cooldown` : "");
         return `<div class="ability-row${known ? "" : " locked"}">` +
-          `<span class="key">${index + 1}</span>` +
+          `<span class="key">${at}</span>` +
           `<div><b>${escapeHtml(spell.name)}</b>` +
           `<small>${known ? `${cost}${cooldown}` : `Learned at level ${at}`}</small>` +
           `<p>${escapeHtml(spell.description)}</p></div></div>`;

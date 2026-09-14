@@ -30,7 +30,6 @@ import {
   ENEMY_RESPAWN_MS,
   EnemyState,
   FERVOUR_DRAIN_PER_SECOND,
-  FERVOUR_PER_BLOW,
   FERVOUR_PER_SECOND,
   fervourMultiplier,
   findGate,
@@ -56,7 +55,7 @@ import {
   HEALTH_REGEN_FRACTION_PER_SECOND,
   INVENTORY_SIZE,
   isEquipSlot,
-  isInArc,
+  isInSpellShape,
   GATE_ARRIVAL_OFFSET,
   GATE_RADIUS,
   getOstra,
@@ -118,7 +117,14 @@ import {
   tradeLevel,
   type WatersId,
   castSteps,
+  cooldownSteps,
+  holdCost,
+  holdPower,
+  msToSteps,
+  PERFECT_BLOCK_MS,
+  SPELLS,
   isMoving,
+  isDashing,
   isDodging,
   BLOCK_ARC,
   BLOCK_REDUCTION,
@@ -160,6 +166,7 @@ import {
   rally,
   stepEnemy,
   takeHit,
+  taunt,
   type AITarget,
   type EnemyBrain,
 } from "../ai/enemyAI.js";
@@ -201,8 +208,23 @@ interface Session {
   suppressedGate: string | undefined;
   /** Set once a transfer is under way; their input stops being simulated. */
   transferring: boolean;
-  /** Wall-clock ms when each spell may be cast again. */
-  nextCastAt: Partial<Record<SpellId, number>>;
+  /**
+   * Inputs applied so far. Cooldowns, holds and channels are counted in these
+   * rather than in milliseconds, and the client counts the same inputs as it
+   * sends them — so it agrees with us about when Charge is ready, which is the
+   * difference between a charge and a rubber band. See `cooldownSteps`.
+   */
+  step: number;
+  /** The step at which each spell may be cast again. */
+  readyAt: Partial<Record<SpellId, number>>;
+  /** A hold being wound up: steps held so far, and the latest aim. */
+  holding: { spell: Spell; steps: number; aim: number } | undefined;
+  /** A channel under way: steps since it started. */
+  channel: { spell: Spell; steps: number } | undefined;
+  /** A dash admitted and not yet landed, and for a Charge, what it is at. */
+  dash: { spell: Spell; target: string | undefined } | undefined;
+  /** Wall-clock ms when the guard went up, for a perfect block. */
+  guardUpAt: number;
   classId: ClassId;
   /** Live level and XP; written back to the store on save. `level` is also
    *  replicated on the player, for everyone's nametags. */
@@ -314,6 +336,15 @@ const EVENT_RANGE = 180;
 
 /** A hit on one creature brings camp-mates this close to join in. */
 const RALLY_RADIUS = 7;
+
+/**
+ * A Charge is admitted if something alive, as the charger saw it, stands
+ * within this many metres of the surface of where the run ends. The client
+ * aims the end a little past the creature's middle, and a creature turning to
+ * meet you keeps coming, so this is roomy; it is only there to stop a Charge
+ * at nothing being a free eighteen-metre dash.
+ */
+const CHARGE_END_SLACK = 3;
 
 /** A fallen elite lies this long before its body is gone. */
 const ELITE_CORPSE_MS = 15_000;
@@ -577,16 +608,25 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         // keeps the server's ack aligned with the client's pending-input list,
         // so its rollback replays exactly the frames we haven't applied yet.
         for (const input of this.inputs.get(sessionId)) {
+          session.step++;
+          // Before the step sees it: a dash that is not allowed never starts.
+          this.admitDash(sessionId, session, player, input);
+          const dashing = isDashing(player);
           applyInput(player, input, ctx.dt, playerWorld, this.canSprint(session, player, now));
           // A raised guard, for a class whose guard is a block. Set before the
           // cast step, which will not start a swing behind a shield.
-          player.blocking = input.block === true && getClass(session.classId).guard === "block";
+          const blocking = input.block === true && getClass(session.classId).guard === "block";
+          if (blocking && !player.blocking) session.guardUpAt = now;
+          player.blocking = blocking;
           // Anything but standing still reels the line in: moving, jumping,
           // dodging, a raised guard (all `isMoving`), an ability or the heal.
-          if (session.fishing && (isMoving(input) || input.cast || input.heal)) {
+          if (session.fishing && (isMoving(input) || input.cast || input.heal || input.dash)) {
             this.endFishing(sessionId, session, player, "cancelled", now);
           }
           this.stepCast(sessionId, session, player, input, now);
+          // A dash that has come to its end — run out, halted, or down from a
+          // leap — lands its blow.
+          if (session.dash && (dashing || input.dash) && !isDashing(player)) this.landDash(sessionId, session, player, now);
           if (input.heal) this.tryHeal(sessionId, session, player, now);
         }
 
@@ -697,7 +737,12 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       // Covers arriving through a Gate and logging in on top of one alike.
       suppressedGate: this.gateContaining(x, z)?.id,
       transferring: false,
-      nextCastAt: {},
+      step: 0,
+      readyAt: {},
+      holding: undefined,
+      channel: undefined,
+      dash: undefined,
+      guardUpAt: 0,
       pendingCast: undefined,
       classId: character.classId,
       level: character.level,
@@ -1071,13 +1116,45 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
    */
   private stepCast(sessionId: string, session: Session, player: Player, input: MoveInput, now: number): void {
     const moving = isMoving(input);
+    const wanted = spellFromWire(input.cast);
+    // What breaks a wind-up or a spin: a dodge, a raised guard, or a dash.
+    const broken = input.dodge === true || player.blocking || input.dash !== 0;
+
+    const holding = session.holding;
+    if (holding) {
+      if (broken) {
+        this.endHold(sessionId, session, player, false, now);
+      } else if (wanted?.id === holding.spell.id && holding.steps < msToSteps(holding.spell.hold!.fullMs + holding.spell.hold!.graceMs)) {
+        holding.steps++;
+        if (Number.isFinite(input.aim)) holding.aim = input.aim;
+        return;
+      } else {
+        // Let go, or held past full and its grace: bring it down.
+        this.endHold(sessionId, session, player, true, now);
+      }
+      return;
+    }
+
+    const channel = session.channel;
+    if (channel) {
+      if (broken || wanted?.id !== channel.spell.id) {
+        this.endChannel(sessionId, session, player);
+        return;
+      }
+      channel.steps++;
+      if (channel.steps % msToSteps(channel.spell.channel!.pulseMs) === 0) {
+        this.pulseChannel(sessionId, session, player, input.aim, now);
+      }
+      return;
+    }
+
     const pending = session.pendingCast;
     if (pending) {
       if (moving) {
         // Moved: the cast is lost, costs nothing, and can be tried again at
         // once — as in WoW, a cancelled cast does not start its cooldown.
         session.pendingCast = undefined;
-        delete session.nextCastAt[pending.spell.id];
+        delete session.readyAt[pending.spell.id];
         this.clients.getById(sessionId)?.send("castCancelled", { spell: pending.spell.id });
         return;
       }
@@ -1090,35 +1167,49 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       }
       return;
     }
-    // No swinging from behind a raised shield: the guard is the choice.
-    if (input.cast && !player.blocking) this.tryCast(sessionId, session, player, input.cast, input.aim, moving, now);
+    // No swinging from behind a raised shield, or out of a dodge: the guard is
+    // the choice, and a dodge pressed with a key held is getting out of it.
+    if (wanted && !player.blocking && !input.dodge) this.tryCast(sessionId, session, player, wanted, input.aim, moving, now);
   }
 
   /**
-   * Start a cast: an instant one resolves now, one with a cast time waits
-   * for `stepCast` to finish it. Nothing with a cast time starts on the move.
+   * Start a cast: an instant one resolves now, one with a cast time waits for
+   * `stepCast` to finish it, and a hold or a channel begins. Nothing with a
+   * cast time starts on the move. Dashes are started by `admitDash`, before
+   * the step, and passives are never cast.
    */
   private tryCast(
     sessionId: string,
     session: Session,
     player: Player,
-    wire: number,
+    spell: Spell,
     aim: number,
     moving: boolean,
     now: number,
   ): void {
-    const spell = spellFromWire(wire);
-    if (!spell) return;
-
+    if (spell.kind === "dash" || spell.kind === "passive") return;
     // Only what this class learns, and only once you are level enough. The
     // client greys the rest out; this is what makes that true.
     if (!knowsSpell(session.classId, session.level, spell.id)) return;
-    if (now < (session.nextCastAt[spell.id] ?? 0)) return;
+    if (session.step < (session.readyAt[spell.id] ?? 0)) return;
     if (player.resource < spell.cost) return;
+
+    if (spell.kind === "hold") {
+      session.holding = { spell, steps: 0, aim: Number.isFinite(aim) ? aim : player.yaw };
+      this.broadcastNear(player.x, player.z, "channel", { by: sessionId, spell: spell.id, on: true });
+      return;
+    }
+    if (spell.kind === "channel") {
+      session.channel = { spell, steps: 0 };
+      this.broadcastNear(player.x, player.z, "channel", { by: sessionId, spell: spell.id, on: true });
+      // The first pulse lands as the key goes down.
+      this.pulseChannel(sessionId, session, player, aim, now);
+      return;
+    }
+
     const steps = castSteps(spell);
     if (steps > 0 && moving) return;
-
-    session.nextCastAt[spell.id] = now + spell.cooldownMs;
+    session.readyAt[spell.id] = session.step + cooldownSteps(spell);
     if (steps > 0) {
       session.pendingCast = { spell, stepsLeft: steps, aim: Number.isFinite(aim) ? aim : player.yaw };
       return;
@@ -1127,10 +1218,118 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   }
 
   /**
-   * Resolve one cast, instant or at the end of its cast time.
+   * A hold ends: brought down (`strike`), or broken by a dodge, a guard or a
+   * dash, which costs nothing and starts no cooldown. The blow is as strong as
+   * the steps it was held for, and costs to match — or whatever Fervour is
+   * left, if that is less but still the price of the lightest.
+   */
+  private endHold(sessionId: string, session: Session, player: Player, strike: boolean, now: number): void {
+    const holding = session.holding;
+    if (!holding) return;
+    session.holding = undefined;
+    this.broadcastNear(player.x, player.z, "channel", { by: sessionId, spell: holding.spell.id, on: false });
+    if (!strike || player.health === 0) {
+      this.clients.getById(sessionId)?.send("castCancelled", { spell: holding.spell.id });
+      return;
+    }
+    session.readyAt[holding.spell.id] = session.step + cooldownSteps(holding.spell);
+    this.completeCast(sessionId, session, player, holding.spell, holding.aim, now, holdPower(holding.spell, holding.steps));
+  }
+
+  /** One pulse of a channel: pay for it and hit the shape, or end it if it
+   *  cannot be paid for. */
+  private pulseChannel(sessionId: string, session: Session, player: Player, aim: number, now: number): void {
+    const channel = session.channel;
+    if (!channel) return;
+    if (player.resource < channel.spell.cost) {
+      this.endChannel(sessionId, session, player);
+      return;
+    }
+    this.completeCast(sessionId, session, player, channel.spell, aim, now);
+  }
+
+  /** A channel ends, however it ends; its cooldown starts now. */
+  private endChannel(sessionId: string, session: Session, player: Player): void {
+    const channel = session.channel;
+    if (!channel) return;
+    session.channel = undefined;
+    session.readyAt[channel.spell.id] = session.step + cooldownSteps(channel.spell);
+    this.broadcastNear(player.x, player.z, "channel", { by: sessionId, spell: channel.spell.id, on: false });
+  }
+
+  /**
+   * Before the step sees an input: is the dash it asks for allowed? Learned,
+   * off cooldown, not from behind a guard — and for a Charge, something alive
+   * where it ends, as this player saw the world. If not, the step never hears
+   * of it; the client, which only asks when it believes all that too, will be
+   * corrected, which should only ever happen to a client that lied.
+   */
+  private admitDash(sessionId: string, session: Session, player: Player, input: MoveInput): void {
+    // Only ever started, never trusted as a stop for anything but a dash.
+    if (!input.dash) return;
+    const spell = spellFromWire(input.dash);
+    const rule = spell?.dash;
+    const allowed = spell !== undefined && rule !== undefined && player.health > 0 && !input.block
+      && knowsSpell(session.classId, session.level, spell.id)
+      && session.step >= (session.readyAt[spell.id] ?? 0);
+    let target: string | undefined;
+    if (allowed && spell.id === "charge") target = this.chargeTarget(sessionId, player, input);
+    if (!allowed || (spell.id === "charge" && target === undefined)) {
+      input.dash = 0;
+      return;
+    }
+    session.readyAt[spell.id] = session.step + cooldownSteps(spell);
+    session.dash = { spell, target };
+    // A dash breaks a wind-up or a spin; `stepCast` sees `input.dash` too.
+    if (session.pendingCast) session.pendingCast = undefined;
+  }
+
+  /** The creature a Charge ends at: alive, and within reach of where it ends,
+   *  measured where this player saw it. The nearest such, if several. */
+  private chargeTarget(sessionId: string, player: Player, input: MoveInput): string | undefined {
+    const rule = SPELLS.charge.dash!;
+    const aim = Number.isFinite(input.aim) ? input.aim : player.yaw;
+    const reach = Math.max(rule.minRange, Math.min(rule.maxRange, Number.isFinite(input.reach) ? input.reach : 0));
+    const endX = player.x + Math.sin(aim) * reach;
+    const endZ = player.z + Math.cos(aim) * reach;
+    const seen = this.rewind.lastSeenBy(sessionId);
+    let best: string | undefined;
+    let bestRange = Infinity;
+    for (const [enemyId, enemy] of this.state.enemies) {
+      if (enemy.state === EnemyState.Dead) continue;
+      const range = Math.hypot(seen.value(enemy, "x") - endX, seen.value(enemy, "z") - endZ)
+        - this.archetypeFor(enemy).radius;
+      if (range <= CHARGE_END_SLACK && range < bestRange) {
+        best = enemyId;
+        bestRange = range;
+      }
+    }
+    return best;
+  }
+
+  /** A dash has ended: a Charge's blow on what it ran at, if it reached it;
+   *  a leap's on everything around where it came down. */
+  private landDash(sessionId: string, session: Session, player: Player, now: number): void {
+    const dash = session.dash;
+    if (!dash) return;
+    session.dash = undefined;
+    if (player.health === 0) return;
+    const fervour = getClass(session.classId).resource === "fervour" ? player.resource : 0;
+    const yaw = Math.atan2(player.dashX, player.dashZ);
+    const hits = this.resolveSpell(sessionId, player, dash.spell, session, yaw, 0, fervour, now, {
+      only: dash.spell.id === "charge" ? dash.target : undefined,
+    });
+    this.broadcastNear(player.x, player.z, "cast", { by: sessionId, spell: dash.spell.id, yaw, combo: 0, power: 0, hits });
+    this.landed(session, player, dash.spell, hits, now);
+  }
+
+  /**
+   * Resolve one cast: an instant, the end of a cast time, a hold let go
+   * (`power`, 0 to 1), or one pulse of a channel.
    *
    * Every spell runs through the same shape test — a ring is just an arc of
-   * 2*PI — so adding a spell is a table entry rather than a new code path.
+   * 2*PI, a line a band — so adding a spell is a table entry rather than a new
+   * code path.
    */
   private completeCast(
     sessionId: string,
@@ -1139,13 +1338,17 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     spell: Spell,
     aim: number,
     now: number,
+    power = 0,
   ): void {
-    // Paid on completion, as in WoW; something may have drained it since.
+    // Paid on completion, as in WoW; something may have drained it since. A
+    // hold costs more the longer it was held, but lands on what is left if
+    // that still covers the lightest.
     if (player.resource < spell.cost) return;
+    const cost = Math.min(player.resource, holdCost(spell, power));
     // A spender hits with the Fervour it is cashing in; what it costs is the
     // bonus on every blow after it. That is the whole trade.
     const fervour = getClass(session.classId).resource === "fervour" ? player.resource : 0;
-    player.resource -= spell.cost;
+    player.resource -= cost;
 
     if (spell.targeting === "self") {
       this.castOnSelf(sessionId, session, player, spell, now);
@@ -1165,43 +1368,61 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     // Aim is client-supplied, like facing always was: it is only a direction,
     // and the shape test still bounds what it can reach.
     const yaw = Number.isFinite(aim) ? aim : player.yaw;
-    const hits = this.resolveSpell(sessionId, player, spell, session, yaw, combo, fervour, now);
+    const hits = this.resolveSpell(sessionId, player, spell, session, yaw, combo, fervour, now, { power });
 
     // Everyone nearby sees the cast, so a fight between other players and a
     // camp is something you can watch rather than a set of numbers changing.
     // The caster is told either way: silence on a miss is indistinguishable
     // from a dropped packet.
     this.broadcastNear(player.x, player.z, "cast", {
-      by: sessionId, spell: spell.id, yaw, combo, hits,
+      by: sessionId, spell: spell.id, yaw, combo, power: Math.round(power * 100) / 100, hits,
     });
+    this.landed(session, player, spell, hits, now);
+  }
 
+  /** What landing a blow does for the caster: they are fighting, and a blow
+   *  that builds stokes Fervour. Only a landed one: otherwise the way to build
+   *  it would be to stand in a field swinging at the air. */
+  private landed(session: Session, player: Player, spell: Spell, hits: readonly CastHit[], now: number): void {
     if (hits.length === 0) return;
     session.combatUntil = now + COMBAT_LINGER_MS;
-
-    // A free blow that lands stokes Fervour. Only a landed one: otherwise the
-    // way to build it would be to stand in a field swinging at the air.
-    if (spell.builds && getClass(session.classId).resource === "fervour") {
-      player.resource = Math.min(player.maxResource, player.resource + FERVOUR_PER_BLOW);
-    }
+    if (getClass(session.classId).resource !== "fervour") return;
+    let gained = spell.builds ?? 0;
+    // Execute gives back for each kill it makes.
+    if (spell.execute) gained += spell.execute.refund * hits.filter((hit) => hit.killed).length;
+    if (gained > 0) player.resource = Math.min(player.maxResource, player.resource + gained);
   }
 
   /**
    * A spell with no target: something the caster does to themselves. Battle
    * Cry is the only one — Fervour to full, held there from draining for a
-   * while — but it is shaped like a table entry so the next is too.
+   * while, and everything near turned on the one who shouted — but it is
+   * shaped like a table entry so the next is too.
    */
   private castOnSelf(sessionId: string, session: Session, player: Player, spell: Spell, now: number): void {
     if (spell.id === "battleCry") {
       player.resource = player.maxResource;
       session.fervourHoldUntil = now + BATTLE_CRY_HOLD_MS;
     }
+    if (spell.taunt) {
+      for (const [enemyId, enemy] of this.state.enemies) {
+        const brain = this.brains.get(enemyId);
+        if (!brain || enemy.state === EnemyState.Dead) continue;
+        if (Math.hypot(enemy.x - player.x, enemy.z - player.z) > spell.taunt) continue;
+        taunt(brain, sessionId);
+        session.combatUntil = now + COMBAT_LINGER_MS;
+      }
+    }
     this.broadcastNear(player.x, player.z, "cast", {
-      by: sessionId, spell: spell.id, yaw: player.yaw, combo: 0, hits: [],
+      by: sessionId, spell: spell.id, yaw: player.yaw, combo: 0, power: 0, hits: [],
     });
   }
 
-  /** Apply a spell to whatever it catches, and describe what happened.
-   *  `fervour` is the caster's before paying for this cast. */
+  /**
+   * Apply a spell to whatever it catches, and describe what happened.
+   * `fervour` is the caster's before paying for this cast; `power` how far a
+   * hold was wound up; `only` restricts it to one creature (a Charge's).
+   */
   private resolveSpell(
     sessionId: string,
     player: Player,
@@ -1211,29 +1432,34 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
     combo: number,
     fervour: number,
     now: number,
+    options: { power?: number; only?: string } = {},
   ): CastHit[] {
     // Where this player saw the world when they cast, not where it is now.
     const seen = this.rewind.lastSeenBy(sessionId);
     // Level and gear add to the spell through its attribute; Fervour
-    // multiplies the lot.
+    // multiplies the lot, and so does a hold's wind-up.
     const totals = session.stats.totals;
-    const base = spellDamage(spell, totals) * fervourMultiplier(fervour);
+    const power = options.power ?? 0;
+    const hold = spell.hold;
+    const base = spellDamage(spell, totals) * fervourMultiplier(fervour) * (hold ? 1 + (hold.fullDamage - 1) * power : 1);
     const critChance = critChanceFor(totals);
     const finisher = spell.id === "strike" && combo === STRIKE_COMBO_LENGTH;
+    // Only a full wind-up staggers.
+    const stagger = hold ? power >= 1 : spell.stagger;
+    const knockback = finisher ? COMBO_FINISHER_KNOCKBACK
+      : hold ? spell.knockback + (hold.fullKnockback - spell.knockback) * power
+        : spell.knockback;
 
     const caught: Array<{ id: string; enemy: Enemy; range: number }> = [];
 
     for (const [enemyId, enemy] of this.state.enemies) {
       if (enemy.state === EnemyState.Dead) continue;
+      if (options.only !== undefined && enemyId !== options.only) continue;
       const archetype = this.archetypeFor(enemy);
 
       const x = seen.value(enemy, "x");
       const z = seen.value(enemy, "z");
-      const inside = isInArc(
-        player.x, player.z, yaw,
-        x, z, archetype.radius,
-        spell.range, spell.arc,
-      );
+      const inside = isInSpellShape(spell, player.x, player.z, yaw, x, z, archetype.radius);
       if (!inside) continue;
 
       caught.push({ id: enemyId, enemy, range: Math.hypot(x - player.x, z - player.z) });
@@ -1266,8 +1492,11 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         continue;
       }
       const crit = Math.random() < critChance;
+      // Execute: far more against something nearly finished.
+      const finishing = spell.execute !== undefined && enemy.health <= enemy.maxHealth * spell.execute.below;
       const amount = Math.max(1, Math.round(
-        base * gap.dealt * (finisher ? COMBO_FINISHER_MULTIPLIER : 1) * (crit ? CRIT_MULTIPLIER : 1),
+        base * gap.dealt * (finisher ? COMBO_FINISHER_MULTIPLIER : 1) * (crit ? CRIT_MULTIPLIER : 1)
+          * (finishing ? spell.execute!.multiplier : 1),
       ));
       dealt += Math.min(amount, enemy.health);
       enemy.health = Math.max(0, enemy.health - amount);
@@ -1283,8 +1512,7 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         const dx = enemy.x - player.x;
         const dz = enemy.z - player.z;
         const length = Math.hypot(dx, dz) || 1;
-        const knockback = finisher ? COMBO_FINISHER_KNOCKBACK : spell.knockback;
-        staggered = (spell.stagger || finisher) && gap.staggers;
+        staggered = (stagger || finisher) && gap.staggers;
         const archetype = this.archetypeFor(enemy);
         takeHit(brain, archetype, sessionId, amount, dx / length, dz / length, knockback, staggered, now);
         // A golem shrugs it off; tell the client so it doesn't claim otherwise.
@@ -2083,6 +2311,8 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
   private standStill(player: Player): void {
     player.vy = 0;
     player.dodgeLeft = 0;
+    player.dashLeft = 0;
+    player.dashKind = 0;
   }
 
   /**
@@ -2334,6 +2564,13 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       const off = Math.abs(Math.atan2(Math.sin(bearing - player.yaw), Math.cos(bearing - player.yaw)));
       blocked = off <= BLOCK_ARC;
     }
+    // Shield Bash: a guard raised just before the blow takes all of it, and
+    // throws its maker off balance.
+    if (blocked && source && now - session.guardUpAt <= PERFECT_BLOCK_MS
+      && knowsSpell(session.classId, session.level, "shieldBash")) {
+      this.perfectBlock(sessionId, session, player, byEnemyId, source, now);
+      return;
+    }
     const amount = Math.max(1, Math.round(raw * gap.taken * (1 - reduction) * (blocked ? 1 - gap.block : 1)));
     player.health = Math.max(0, player.health - amount);
     // Holding an elite's attention is a share of the fight (see eliteFell).
@@ -2346,6 +2583,9 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
       session.respawnAt = now + PLAYER_RESPAWN_MS;
       player.blocking = false;
       session.pendingCast = undefined;
+      this.endHold(sessionId, session, player, false, now);
+      this.endChannel(sessionId, session, player);
+      session.dash = undefined;
       session.diedAtX = player.x;
       session.diedAtZ = player.z;
       session.combatUntil = 0;
@@ -2360,6 +2600,32 @@ export class OstraRoom extends Room<{ state: WorldState; input: MoveInput }> {
         this.clients.getById(sessionId)?.send("xp", { level: session.level, xp: session.xp, gained: -lost });
       }
     }
+  }
+
+  /**
+   * A perfect block, with Shield Bash learned: the blow does nothing, its
+   * maker staggers and is shoved back, and the guard pays in Fervour — the one
+   * time holding a shield builds it rather than draining it.
+   */
+  private perfectBlock(sessionId: string, session: Session, player: Player, enemyId: string, enemy: Enemy, now: number): void {
+    const bash = SPELLS.shieldBash;
+    const brain = this.brains.get(enemyId);
+    let staggered = false;
+    if (brain && enemy.state !== EnemyState.Dead) {
+      const archetype = this.archetypeFor(enemy);
+      const dx = enemy.x - player.x;
+      const dz = enemy.z - player.z;
+      const length = Math.hypot(dx, dz) || 1;
+      staggered = levelGapEffect(enemy.level, session.level, BLOCK_REDUCTION).staggers && !archetype.staggerImmune;
+      takeHit(brain, archetype, sessionId, 1, dx / length, dz / length, bash.knockback, staggered, now);
+    }
+    if (getClass(session.classId).resource === "fervour") {
+      player.resource = Math.min(player.maxResource, player.resource + (bash.builds ?? 0));
+    }
+    session.combatUntil = now + COMBAT_LINGER_MS;
+    this.broadcastNear(player.x, player.z, "damage", {
+      id: sessionId, amount: 0, by: enemyId, blocked: true, perfect: true, staggered,
+    });
   }
 
   /** Stand the dead back up once their timer is out. */

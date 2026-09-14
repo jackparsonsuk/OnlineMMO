@@ -42,6 +42,18 @@ export const MoveInput = schema({
   heal: t.boolean().default(false),
   /** Right mouse held, for a class whose guard is a block (`ClassDefinition.guard`). */
   block: t.boolean().default(false),
+  /**
+   * A dash ability to start this step (Charge, Heroic Leap), as a wire index;
+   * 0 for none. Sent for one step per press, like `dodge`. It goes along `aim`
+   * for `reach` metres — both chosen by the client from what it can see, and
+   * clamped by the step. The server checks a Charge has something at the end
+   * of it before letting the step see this at all.
+   */
+  dash: t.uint8().default(0),
+  reach: t.float32().default(0),
+  /** Stop a running dash here: the client saw it reach what it was running
+   *  at. In the input, so the server stops it on the same step. */
+  halt: t.boolean().default(false),
 }, "MoveInput");
 export type MoveInput = SchemaType<typeof MoveInput>;
 
@@ -68,6 +80,13 @@ export const Player = schema({
   dodgeX: t.float32().default(0),
   dodgeZ: t.float32().default(0),
   dodgeCooldown: t.uint16().default(0),
+  /** Steps left in a dash (Charge, Heroic Leap), which one as a wire index,
+   *  and its velocity — reconciled like a dodge, and public so everyone
+   *  draws the run or the leap. */
+  dashLeft: t.uint8().default(0),
+  dashKind: t.uint8().default(0),
+  dashX: t.float32().default(0),
+  dashZ: t.float32().default(0),
   /** Guard raised. Public, so everyone draws the pose; the server alone
    *  decides what it stops. */
   blocking: t.boolean().default(false),

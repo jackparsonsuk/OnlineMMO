@@ -148,8 +148,18 @@ smaller entries below; those are the first step towards them.
   way of blows is enough for credit, which is right for a tank and cheap for
   someone who only wants the loot.
 - **World events.** A camp that spills over, a golem that walks the roads.
-- **Taunt and group threat tools.** Threat is damage-only; nothing lets you hold
-  a creature off a friend. The Hollow King is where this will be felt first.
+- **More group threat tools.** Battle Cry taunts once a minute; there is no
+  single-target taunt, no threat reduction, and no way to see who a creature is
+  on. The Hollow King is where this will be felt first.
+- **Tune the Warrior's new kit in play.** Every number in `spells.ts` is a first
+  pass checked against a level-20 wolf pack, not a real levelling run: Charge's
+  12 s, Whirlwind's drain, Execute's threshold, the 350 ms perfect block (at a
+  home-tunnel ping, too). Heroic Leap follows where the reticle meets the
+  ground, so at the usual pitch it only goes its 4 m minimum; if that reads as
+  broken, lean its reach on the camera's pitch instead.
+- **Say whether Charge will go.** A Charge refused ("Too close",
+  "Too far") says so in a toast; the reticle could show whether Charge would go
+  before you press it, as it goes hot for Strike.
 - **Healing.** No class heals, so every group fight is attrition; the
   dungeon's damage is held at Terra's for that reason. A caster, or even a
   bandage, changes what a boss can be.
@@ -161,7 +171,7 @@ smaller entries below; those are the first step towards them.
 
 - **Weapons that change how you fight.** Each weapon family should reshape
   Strike (a dagger fast and short, a maul slow and wide) and, with classes,
-  bring its own abilities — Guild Wars-style, class × weapon. Shield Bash
+  bring its own abilities — Guild Wars-style, class × weapon. A perfect block
   should probably want a shield. Needs the worn weapon replicated so everyone
   draws the right swing.
 - **More sources for mythic and up.** Elites drop mythic and legendary now;

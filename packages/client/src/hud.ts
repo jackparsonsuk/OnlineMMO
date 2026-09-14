@@ -339,7 +339,7 @@ export class Hud {
     this.shownCombo = -1;
     const resource = RESOURCE_NAMES[CLASSES[classId].resource];
 
-    CLASSES[classId].abilities.forEach(({ spell: id, level }, index) => {
+    CLASSES[classId].abilities.filter(({ spell }) => SPELLS[spell].kind !== "passive").forEach(({ spell: id, level }, index) => {
       const spell = SPELLS[id];
       const root = document.createElement("div");
       root.className = index === 0 ? "ability mouse-key" : "ability";
@@ -462,16 +462,12 @@ export class Hud {
     if (this.healCool) this.healCool.style.height = `${h * 100}%`;
   }
 
-  /** Sweep the cooldown shade on each slot. Cheap enough to run every frame. */
-  setCooldowns(now: number, nextCastAt: Map<SpellId, number>): void {
+  /** Sweep the cooldown shade on each slot, from the share of each cooldown
+   *  still to run. Cheap enough to run every frame. */
+  setCooldowns(left: (id: SpellId) => number): void {
     for (const [id, slot] of this.slots) {
-      const ready = nextCastAt.get(id) ?? 0;
-      const remaining = ready - now;
-      if (remaining <= 0) {
-        if (slot.cool.style.height !== "0%") slot.cool.style.height = "0%";
-        continue;
-      }
-      slot.cool.style.height = `${Math.min(1, remaining / SPELLS[id].cooldownMs) * 100}%`;
+      const height = `${Math.min(1, Math.max(0, left(id))) * 100}%`;
+      if (slot.cool.style.height !== height) slot.cool.style.height = height;
     }
   }
 

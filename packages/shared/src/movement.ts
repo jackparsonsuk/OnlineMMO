@@ -12,6 +12,7 @@ import {
   SPRINT_MULTIPLIER,
   STEP_DOWN,
 } from "./constants.js";
+import { msToSteps, spellFromWire } from "./spells.js";
 import { heightAt, MAX_CLIMB_GRADE, MAX_WADE_DEPTH, seaDepthAt, seaRamp, type TerrainSettings } from "./terrain.js";
 
 /**
@@ -36,14 +37,18 @@ export interface MoveState {
   yaw: number;
 }
 
-/** A player's body: a position, plus what a jump and a dodge carry from one
- *  step to the next. Creatures are only `MoveState`. */
+/** A player's body: a position, plus what a jump, a dodge and a dash carry
+ *  from one step to the next. Creatures are only `MoveState`. */
 export interface PlayerMoveState extends MoveState {
   vy: number;
   dodgeLeft: number;
   dodgeX: number;
   dodgeZ: number;
   dodgeCooldown: number;
+  dashLeft: number;
+  dashKind: number;
+  dashX: number;
+  dashZ: number;
 }
 
 /** Structural view of `MoveInput`, so the sim doesn't depend on the schema. */
@@ -59,6 +64,13 @@ export interface MoveCommand {
   cast?: number;
   /** A guard raised this step: slows you more. */
   block?: boolean;
+  /** Which way a dash goes. */
+  aim?: number;
+  /** A dash to start this step (its wire index; 0 for none), and how far. */
+  dash?: number;
+  reach?: number;
+  /** Stop a running dash. */
+  halt?: boolean;
 }
 
 /**
@@ -186,9 +198,17 @@ export function applyInput(
     state.dodgeCooldown = DODGE_COOLDOWN_STEPS;
   }
 
+  startDash(state, command, yaw, dt);
+
   let deltaX = 0;
   let deltaZ = 0;
-  if (state.dodgeLeft > 0) {
+  if (state.dashLeft > 0) {
+    // Committed: steering does nothing until it ends, and a tree stops it the
+    // way it stops anything.
+    state.dashLeft--;
+    deltaX = state.dashX * dt;
+    deltaZ = state.dashZ * dt;
+  } else if (state.dodgeLeft > 0) {
     state.dodgeLeft--;
     deltaX = state.dodgeX * DODGE_SPEED * dt;
     deltaZ = state.dodgeZ * DODGE_SPEED * dt;
@@ -206,6 +226,51 @@ export function applyInput(
   const lastY = state.y;
   moveBody(state, deltaX, deltaZ, world, PLAYER_RADIUS);
   if (world.terrain) fall(state, lastY, command.jump === true, dt);
+  // Landed: forget which dash it was, or the next ordinary jump would read as
+  // the leap still going.
+  if (state.dashKind !== 0 && !isDashing(state)) state.dashKind = 0;
+}
+
+/**
+ * Start or stop a dash (Charge, Heroic Leap) on this step's command.
+ *
+ * Everything the dash will do is decided here, from the command alone: which
+ * way (`aim`), how far (`reach`, clamped to the ability's range) and so how
+ * many steps, and for a leap, how hard it pushes off. So the client's replay
+ * of an input reproduces the dash exactly, and nothing about the creature it
+ * was aimed at — which the client only knows late — ever enters the step.
+ * Whether it was allowed (learned, off cooldown, something to charge at) is
+ * decided before the step sees the command; see the server's `admitDash`.
+ */
+function startDash(state: PlayerMoveState, command: MoveCommand, yaw: number, dt: number): void {
+  if (command.halt === true && state.dashLeft > 0 && spellFromWire(state.dashKind)?.dash?.airMs === undefined) {
+    state.dashLeft = 0;
+  }
+  const spell = command.dash ? spellFromWire(command.dash) : undefined;
+  const rule = spell?.dash;
+  if (!rule) return;
+  const aim = command.aim !== undefined && Number.isFinite(command.aim) ? command.aim : yaw;
+  const asked = command.reach !== undefined && Number.isFinite(command.reach) ? command.reach : rule.maxRange;
+  const reach = clamp(asked, rule.minRange, rule.maxRange);
+  const steps = rule.airMs !== undefined
+    ? msToSteps(rule.airMs)
+    : Math.max(1, Math.ceil(reach / ((rule.speed ?? DODGE_SPEED) * dt)));
+  const speed = reach / (steps * dt);
+  state.dashLeft = steps;
+  state.dashKind = command.dash!;
+  state.dashX = Math.sin(aim) * speed;
+  state.dashZ = Math.cos(aim) * speed;
+  // A dash overrides a dodge in progress rather than waiting for it.
+  state.dodgeLeft = 0;
+  // Up hard enough to come down, on level ground, as the steps run out.
+  if (rule.airMs !== undefined) state.vy = (GRAVITY * steps * dt) / 2;
+}
+
+/** Whether a body is mid-dash, or still in the air from a leap: its landing
+ *  is what the dash's blow waits for. */
+export function isDashing(state: { dashLeft: number; vy: number; dashKind: number }): boolean {
+  if (state.dashLeft > 0) return true;
+  return state.vy !== 0 && spellFromWire(state.dashKind)?.dash?.airMs !== undefined;
 }
 
 /**

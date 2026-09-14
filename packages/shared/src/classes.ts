@@ -81,13 +81,20 @@ export const CLASSES: Record<ClassId, ClassDefinition> = {
     // It stands its ground behind a shield rather than rolling away.
     guard: "block",
     growth: { might: 2, vigour: 2 },
+    // Something new every couple of levels through the first twenty, where
+    // most of the world is: a way in, a crowd, an interrupt, a big blow, a
+    // timing to learn, a way over, a finisher, a spin, and a shout.
     abilities: [
       { spell: "strike", level: 1 },
-      { spell: "throw", level: 3 },
-      { spell: "sunder", level: 6 },
-      { spell: "cleave", level: 10 },
-      { spell: "bash", level: 15 },
-      { spell: "battleCry", level: 22 },
+      { spell: "charge", level: 2 },
+      { spell: "cleave", level: 4 },
+      { spell: "shockwave", level: 6 },
+      { spell: "crushingBlow", level: 8 },
+      { spell: "shieldBash", level: 10 },
+      { spell: "heroicLeap", level: 12 },
+      { spell: "execute", level: 14 },
+      { spell: "whirlwind", level: 17 },
+      { spell: "battleCry", level: 20 },
     ],
     // Plate and leather, anything with an edge or a weight, a shield, and
     // jewellery. Cloth, staves, wands and foci are a caster's.
@@ -157,16 +164,14 @@ export function spellsLearnedAt(classId: ClassId, level: number): SpellId[] {
 // it a little faster. Out of combat it drains away.
 //
 // The big abilities spend it. That is the decision rage never asked of you:
-// every Sunder costs the damage bonus you had built up, so the question is
-// whether to cash it in now or keep it for the long fight. Battle Cry skips the
-// ramp once a minute.
+// every Crushing Blow costs the damage bonus you had built up, so the question
+// is whether to cash it in now or keep it for the long fight. Strike, Charge
+// and a perfect block feed it (`Spell.builds`); Battle Cry skips the ramp once
+// a minute.
 
 export const FERVOUR_MAX = 100;
 /** Per second in combat, from time alone: full in 25 seconds of fighting. */
 export const FERVOUR_PER_SECOND = 4;
-/** Added by each landed blow of an ability that `builds`. Strike lands once
- *  every 1.8 seconds, so each blow is worth a good stoke. */
-export const FERVOUR_PER_BLOW = 4;
 /** Per second out of combat. Gone a few seconds after the fight ends. */
 export const FERVOUR_DRAIN_PER_SECOND = 20;
 /** Extra damage at full Fervour; scales linearly from nothing at empty. */

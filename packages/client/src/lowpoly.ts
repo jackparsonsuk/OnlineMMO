@@ -104,20 +104,24 @@ export function buildObstacle(
 export function buildCastArc(scene: Scene, spell: Spell, colour: number): TransformNode {
   const pivot = new TransformNode(`castPivot:${spell.id}`, scene);
 
-  // A full ring would be a disc with a seam; drawing it as a complete circle
-  // avoids the arc parameter entirely.
+  // A line is a band out ahead: a plane laid flat, pushed forward by half its
+  // length so it starts at your feet. A full ring would be a disc with a seam;
+  // drawing it as a complete circle avoids the arc parameter entirely.
   const full = spell.arc >= Math.PI * 2;
-  const sector = MeshBuilder.CreateDisc(
-    `cast:${spell.id}`,
-    {
-      radius: spell.range,
-      tessellation: full ? 24 : 10,
-      ...(full ? {} : { arc: spell.arc / (Math.PI * 2) }),
-    },
-    scene,
-  );
+  const sector = spell.line !== undefined
+    ? MeshBuilder.CreatePlane(`cast:${spell.id}`, { width: spell.line, height: spell.range }, scene)
+    : MeshBuilder.CreateDisc(
+      `cast:${spell.id}`,
+      {
+        radius: spell.range,
+        tessellation: full ? 24 : 10,
+        ...(full ? {} : { arc: spell.arc / (Math.PI * 2) }),
+      },
+      scene,
+    );
   sector.rotation.x = Math.PI / 2;
-  if (!full) sector.rotation.z = Math.PI / 2 - spell.arc / 2;
+  if (spell.line !== undefined) sector.position.z = spell.range / 2;
+  else if (!full) sector.rotation.z = Math.PI / 2 - spell.arc / 2;
   sector.isPickable = false;
   sector.parent = pivot;
 

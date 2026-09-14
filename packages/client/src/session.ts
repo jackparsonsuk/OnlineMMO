@@ -34,12 +34,17 @@ import {
   type GroundItem,
   heightAt,
   isEnemyKind,
-  isInArc,
+  isInSpellShape,
   isSpellId,
   castSteps,
+  cooldownSteps,
+  holdPower,
+  isDashing,
   isMoving,
   knowsSpell,
+  msToSteps,
   SPELLS,
+  spellFromWire,
   spellToWire,
   type Spell,
   type SpellId,
@@ -82,6 +87,7 @@ import {
   buildEnemyRig,
   buildPlayerRig,
   castContact,
+  castDuration,
   type Rig,
 } from "./rigs.js";
 import {
@@ -272,6 +278,8 @@ interface CastPayload {
   spell: string;
   yaw: number;
   combo: number;
+  /** How far a hold was wound up, 0 to 1. */
+  power?: number;
   hits: Array<{ id: string; amount: number; crit: boolean; killed: boolean; staggered: boolean; missed?: boolean }>;
 }
 
@@ -303,7 +311,9 @@ interface PlayerView {
    * these arrive raw: read straight, the legs would tuck before the body left
    * the ground. Each change is logged and read back that much later.
    */
-  moves: Array<{ at: number; vy: number; dodgeLeft: number }>;
+  moves: Array<{ at: number; vy: number; dodgeLeft: number; dashLeft: number; dashKind: number }>;
+  /** Mid-dash last frame, to notice one starting. */
+  dashing: boolean;
 }
 
 export function createSession(
@@ -318,8 +328,10 @@ export function createSession(
 ): OstraSession {
   const scene = world.scene;
   const born = performance.now();
-  /** Your bar, in order: key N casts `bar[N - 1]`. */
-  const bar = CLASSES[classId].abilities.map((ability) => ability.spell);
+  /** Your bar, in order: key N casts `bar[N - 1]`. Passives are never cast. */
+  const bar = CLASSES[classId].abilities
+    .map((ability) => ability.spell)
+    .filter((id) => SPELLS[id].kind !== "passive");
   const resourceKind = CLASSES[classId].resource;
   /** What right-click does for this class. */
   const guard = CLASSES[classId].guard;
@@ -360,10 +372,14 @@ export function createSession(
   const castArcs = new Map<SpellId, TransformNode>();
   const ARC_COLOURS: Record<SpellId, number> = {
     strike: 0xbfe4ff,
-    throw: 0xd8e6f0,
-    sunder: 0xffb066,
+    charge: 0xbfe4ff,
     cleave: 0xffd28a,
-    bash: 0xbfe4ff,
+    shockwave: 0xffb066,
+    crushingBlow: 0xffd28a,
+    shieldBash: 0xbfe4ff,
+    heroicLeap: 0xffb066,
+    execute: 0xff8a6b,
+    whirlwind: 0xffd28a,
     battleCry: 0xffc46b,
   };
   for (const id of bar) {
@@ -373,11 +389,17 @@ export function createSession(
   let castShownAt = -Infinity;
   let castShownId: SpellId | undefined;
   let castShownYaw = 0;
-  // The client mirrors each spell's cooldown so the effect draws on the
-  // frame you press, not a round trip later. Both sides read the same
-  // table; the server is still the only thing that deals damage or spends
-  // Fervour, so a client that lies to itself only lies about a picture.
-  const nextCastAt = new Map<SpellId, number>();
+  /**
+   * Inputs sent while alive: the same count the server keeps as it applies
+   * them (`Session.step`). Cooldowns are mirrored in these, so the effect
+   * draws on the frame you press rather than a round trip later — and so a
+   * Charge is only ever asked for when the server will agree it is ready,
+   * since a dash it refused would be a rubber band. The server is still the
+   * only thing that deals damage or spends Fervour.
+   */
+  let step = 0;
+  /** The step each spell is ready again at. */
+  const readyAt = new Map<SpellId, number>();
   /** The Strike chain, mirrored the same way. */
   let comboStep = 0;
   let comboAt = -Infinity;
@@ -844,14 +866,16 @@ export function createSession(
   }
 
   /** What a cast from (x, z) facing `yaw` will catch, by the same test the
-   *  server runs — used to draw our own impacts before it confirms them. */
-  function predictHits(spell: Spell, x: number, z: number, yaw: number): string[] {
+   *  server runs — used to draw our own impacts before it confirms them.
+   *  `only` restricts it to one creature, as a Charge's blow is. */
+  function predictHits(spell: Spell, x: number, z: number, yaw: number, only?: string): string[] {
     const caught: Array<{ id: string; range: number }> = [];
     room.state.enemies.forEach((enemy: Enemy, id: string) => {
       if (enemy.state === EnemyState.Dead) return;
+      if (only !== undefined && id !== only) return;
       const ex = predict.value(enemy, "x");
       const ez = predict.value(enemy, "z");
-      if (!isInArc(x, z, yaw, ex, ez, archetypeOf(enemy).radius, spell.range, spell.arc)) return;
+      if (!isInSpellShape(spell, x, z, yaw, ex, ez, archetypeOf(enemy).radius)) return;
       caught.push({ id, range: Math.hypot(ex - x, ez - z) });
     });
     if (caught.length === 0) return [];
@@ -877,8 +901,9 @@ export function createSession(
     );
   }
 
-  /** Draw a cast: body motion, slash or throw or ring. For our own and for
-   *  everyone else's alike; only the prediction of hits is ours alone. */
+  /** Draw a cast: body motion, and the slash, ring or wave it makes. For our
+   *  own and for everyone else's alike; only the prediction of hits is ours
+   *  alone. `power` is how far a hold was wound up. */
   function showCast(
     view: PlayerView,
     spell: Spell,
@@ -887,47 +912,90 @@ export function createSession(
     now: number,
     origin: () => { x: number; y: number; z: number },
     onContact: () => void,
-    boltTarget?: () => Vector3 | undefined,
+    power = 0,
   ): void {
-    view.animator.play({ type: "cast", spell: spell.id, combo, start: now });
-    view.castYaw = yaw;
+    if (castDuration(spell.id, combo) > 0) {
+      view.animator.play({ type: "cast", spell: spell.id, combo, start: now });
+      view.castYaw = yaw;
+    }
     const start = origin();
 
-    if (spell.id === "strike" || spell.id === "bash") {
-      play(combo === STRIKE_COMBO_LENGTH ? "swingHeavy" : "swing", start.x, start.z);
-    } else if (spell.id === "cleave") {
-      play("swingHeavy", start.x, start.z);
-    } else if (spell.id === "throw") {
-      play("throw", start.x, start.z);
+    switch (spell.id) {
+      case "strike":
+        play(combo === STRIKE_COMBO_LENGTH ? "swingHeavy" : "swing", start.x, start.z);
+        break;
+      case "cleave":
+      case "execute":
+      case "crushingBlow":
+        play("swingHeavy", start.x, start.z);
+        break;
+      case "whirlwind":
+        play("swing", start.x, start.z, 0.7);
+        break;
+      default:
+        break;
     }
 
     later(now + castContact(spell.id, combo), () => {
       const at = origin();
       const t = performance.now();
-      if (spell.id === "strike" || spell.id === "bash") {
-        effects.slash(t, at.x, at.y, at.z, yaw, spell.range, combo === 2 ? -1 : 1, combo === STRIKE_COMBO_LENGTH);
-        onContact();
-      } else if (spell.id === "cleave") {
-        // Heavy and wide: the finisher's slash, swept the other way.
-        effects.slash(t, at.x, at.y, at.z, yaw, spell.range, -1, true);
-        onContact();
-      } else if (spell.id === "sunder") {
-        effects.shockwave(t, at.x, at.y, at.z, spell.range);
-        play("sunder", at.x, at.z);
-        onContact();
-      } else if (spell.id === "battleCry") {
-        // A ring that goes out from you and hits nothing: it is the shout.
-        effects.shockwave(t, at.x, at.y, at.z, 3.2, 0xffc46b, 6);
-        play("cry", at.x, at.z);
-        onContact();
-      } else {
-        // Heroic Throw: steel, tumbling, a little slower than a bolt of magic
-        // would be, leaving sparks rather than light.
-        const hand = new Vector3(at.x + Math.sin(yaw) * 0.55, at.y + 1.25, at.z + Math.cos(yaw) * 0.55);
-        const end = boltTarget?.()
-          ?? new Vector3(at.x + Math.sin(yaw) * spell.range, at.y + 0.9, at.z + Math.cos(yaw) * spell.range);
-        effects.bolt(t, hand, end, onContact, 0xd8e0e8, 42, "spark");
+      const fx = Math.sin(yaw);
+      const fz = Math.cos(yaw);
+      switch (spell.id) {
+        case "strike":
+          effects.slash(t, at.x, at.y, at.z, yaw, spell.range, combo === 2 ? -1 : 1, combo === STRIKE_COMBO_LENGTH);
+          break;
+        case "cleave":
+          // Heavy and wide: the finisher's slash, swept the other way.
+          effects.slash(t, at.x, at.y, at.z, yaw, spell.range, -1, true);
+          break;
+        case "execute":
+          effects.slash(t, at.x, at.y, at.z, yaw, spell.range, 1, true);
+          break;
+        case "crushingBlow":
+          // Down into the ground in front of you: the fuller the wind-up, the
+          // wider the ring it throws and the louder.
+          effects.slash(t, at.x, at.y, at.z, yaw, spell.range, 1, true);
+          effects.shockwave(t, at.x + fx * 1.5, at.y, at.z + fz * 1.5, 1 + power * 2, 0xffd28a, Math.round(6 + power * 16));
+          play(power >= 1 ? "quake" : "hitHeavy", at.x, at.z, 0.6 + power * 0.4);
+          break;
+        case "whirlwind":
+          // Two blades round at once: a ring of steel.
+          effects.slash(t, at.x, at.y, at.z, yaw, spell.range, 1, false);
+          effects.slash(t, at.x, at.y, at.z, yaw + Math.PI, spell.range, 1, false);
+          break;
+        case "shockwave": {
+          // A wave that runs out along the ground, a puff at a time.
+          play("quake", at.x, at.z);
+          const beats = 6;
+          for (let i = 0; i < beats; i++) {
+            const d = 1 + (i * (spell.range - 1)) / (beats - 1);
+            const x = at.x + fx * d;
+            const z = at.z + fz * d;
+            later(t + i * 45, () => {
+              effects.shockwave(performance.now(), x, heightAt(x, z, ostra.terrain), z, (spell.line ?? 2) * 0.55, 0xffb066, 7);
+            });
+          }
+          break;
+        }
+        case "heroicLeap":
+          effects.shockwave(t, at.x, at.y, at.z, spell.range, 0xffb066, 26);
+          effects.dust(at.x, at.y, at.z, 18);
+          play("slam", at.x, at.z);
+          break;
+        case "charge":
+          effects.dust(at.x, at.y, at.z, 12);
+          play("hitHeavy", at.x, at.z, 0.8);
+          break;
+        case "battleCry":
+          // A ring that goes out from you and hits nothing: it is the shout.
+          effects.shockwave(t, at.x, at.y, at.z, 3.2, 0xffc46b, 6);
+          play("cry", at.x, at.z);
+          break;
+        case "shieldBash":
+          break;
       }
+      onContact();
     });
   }
 
@@ -964,7 +1032,9 @@ export function createSession(
     const rig = buildPlayerRig(scene, player.colour);
     // Others can be clicked; you clicking yourself would only get in the way.
     if (sessionId !== room.sessionId) for (const mesh of rig.pickables) mesh.metadata = { playerId: sessionId };
-    players.set(sessionId, { rig, animator: new Animator(rig), castYaw: 0, dead: false, level: player.level, dodging: false, moves: [] });
+    players.set(sessionId, {
+      rig, animator: new Animator(rig), castYaw: 0, dead: false, level: player.level, dodging: false, moves: [], dashing: false,
+    });
     meshes.set(sessionId, rig.root);
     nametags.add(
       sessionId,
@@ -989,8 +1059,12 @@ export function createSession(
         // `yaw` stays in the mirrored set because the step writes it, but it is
         // never *read* back for rendering — see the note in `frame`.
         // Everything the step reads from one input to the next: a jump's
-        // speed and a dodge's timers replay like position does.
-        fields: ["x", "y", "z", "yaw", "vy", "dodgeLeft", "dodgeX", "dodgeZ", "dodgeCooldown"],
+        // speed and a dodge's and a dash's timers replay like position does.
+        fields: [
+          "x", "y", "z", "yaw", "vy",
+          "dodgeLeft", "dodgeX", "dodgeZ", "dodgeCooldown",
+          "dashLeft", "dashKind", "dashX", "dashZ",
+        ],
         // What little correction is left eases out over a couple of patches
         // instead of one, so it reads as a drift rather than a hop; anything
         // bigger than a sprint's worth of a patch is a teleport or a respawn,
@@ -1080,15 +1154,14 @@ export function createSession(
         const origin = (): { x: number; y: number; z: number } => ({
           x: predict.value(caster, "x"), y: predict.value(caster, "y"), z: predict.value(caster, "z"),
         });
-        const first = payload.hits[0]?.id;
         showCast(view, spell, payload.combo, payload.yaw, now, origin, () => {
           const at = origin();
           for (const hit of payload.hits) {
             if (hit.missed) continue;
             strikeEnemy(hit.id, at.x, at.z, hit.crit || payload.combo === STRIKE_COMBO_LENGTH, performance.now());
           }
-          if (payload.hits.length > 0) play(spell.id === "throw" ? "throwHit" : "hit", at.x, at.z, 0.6);
-        }, first ? () => enemyPoint(first) : undefined);
+          if (payload.hits.length > 0) play("hit", at.x, at.z, 0.6);
+        }, payload.power ?? 0);
       }
     }
 
@@ -1227,7 +1300,24 @@ export function createSession(
     }
   }
 
-  const offDamage = room.onMessage("damage", (payload: { id: string; amount: number; by?: string; blocked?: boolean }) => {
+  // Someone started winding up a hold or spinning, or stopped. Our own is
+  // drawn from our own cast step; this is everyone else's.
+  const offChannel = room.onMessage("channel", (payload: { by: string; spell: string; on: boolean }) => {
+    if (payload.by === room.sessionId || !isSpellId(payload.spell)) return;
+    const view = players.get(payload.by);
+    const caster = room.state.players.get(payload.by);
+    if (!view || !caster) return;
+    view.animator.holding = payload.on ? payload.spell : undefined;
+    view.animator.holdingSince = performance.now();
+    view.animator.holdPower = 0;
+    if (payload.on && payload.spell === "whirlwind") play("whoosh", predict.value(caster, "x"), predict.value(caster, "z"), 0.6);
+  });
+
+  const offDamage = room.onMessage("damage", (payload: {
+    id: string; amount: number; by?: string; blocked?: boolean;
+    /** A perfect block (Shield Bash): nothing taken, and its maker perhaps staggered. */
+    perfect?: boolean; staggered?: boolean;
+  }) => {
     const now = performance.now();
     const victim = room.state.players.get(payload.id);
     const view = players.get(payload.id);
@@ -1235,11 +1325,32 @@ export function createSession(
     const x = predict.value(victim, "x");
     const y = predict.value(victim, "y");
     const z = predict.value(victim, "z");
-    view.animator.hit(now, 1);
     const attacker = payload.by ? room.state.enemies.get(payload.by) : undefined;
     const fromX = attacker ? predict.value(attacker, "x") : x;
     const fromZ = attacker ? predict.value(attacker, "z") : z - 1;
     const length = Math.hypot(x - fromX, z - fromZ) || 1;
+
+    if (payload.perfect) {
+      // Steel on steel, sparks off the shield, and the shove that went with it.
+      view.animator.play({ type: "cast", spell: "shieldBash", combo: 0, start: now });
+      view.castYaw = Math.atan2(fromX - x, fromZ - z);
+      effects.impact(x - ((x - fromX) / length) * 0.7, y + 1, z - ((z - fromZ) / length) * 0.7, (fromX - x) / length, (fromZ - z) / length, "spark", true);
+      combatText.spawn(now, x, y + 1.9, z, "Perfect block", "note");
+      play("hitHeavy", x, z, 0.9);
+      if (payload.id === room.sessionId) shake(0.16, 180, now);
+      const struck = payload.by ? enemies.get(payload.by) : undefined;
+      if (payload.staggered && struck && attacker) {
+        struck.animator.interrupt();
+        struck.swing++;
+        const ex = predict.value(attacker, "x");
+        const ez = predict.value(attacker, "z");
+        effects.cancelTelegraphNear(ex, ez);
+        combatText.spawn(now, ex, predict.value(attacker, "y") + struck.archetype.height + 0.5, ez, "Staggered", "note");
+      }
+      return;
+    }
+
+    view.animator.hit(now, 1);
     effects.impact(x, y + 0.8, z, (x - fromX) / length, (z - fromZ) / length, "blood", false);
 
     if (payload.blocked) {
@@ -1349,6 +1460,9 @@ export function createSession(
         slot = 0;
       }
       const wanted = blocking ? undefined : bar[slot - 1];
+      const alive = (selfPlayer?.health ?? 0) > 0;
+      // The server counts only the inputs of a living player.
+      if (alive) step++;
       input.data.moveX = axes.x;
       input.data.moveZ = axes.z;
       input.data.yaw = facingYaw();
@@ -1356,7 +1470,7 @@ export function createSession(
       input.data.cast = wanted ? spellToWire(wanted) : 0;
       // A cast under way keeps aiming at its target until it lands, key held
       // or not — the server takes the latest aim.
-      input.data.aim = aimFor(localCast?.spell ?? (wanted ? SPELLS[wanted] : undefined));
+      input.data.aim = aimFor(localCast?.spell ?? localHold?.spell ?? (wanted ? SPELLS[wanted] : undefined));
       // Only asked for when we believe we are out of combat, and predicted as
       // asked: the server honours a request for a moment after a fight starts
       // (SPRINT_GRACE_MS), so the round trip before we hear of it is not a
@@ -1366,6 +1480,15 @@ export function createSession(
       input.data.dodge = keyboard.takeDodge() || (guard === "dodge" && guardPressed);
       input.data.block = blocking;
       input.data.heal = keyboard.healing();
+      input.data.dash = 0;
+      input.data.reach = 0;
+      input.data.halt = false;
+      // A dash goes once per press, not on a held key: holding Charge down
+      // should not charge again the moment it is ready.
+      const pressed = wanted !== lastWanted ? wanted : undefined;
+      lastWanted = wanted;
+      if (alive && pressed && SPELLS[pressed].kind === "dash") requestDash(SPELLS[pressed]);
+      else if (charging) haltCharge();
       // The same step the server will run on this input (`stepCast`).
       stepLocalCast(input.data, wanted, now);
       // The reconciler is subscribed to this handle, so sending is also what
@@ -1429,33 +1552,185 @@ export function createSession(
 
   /** Our own cast with a cast time, under way: inputs left until it lands. */
   let localCast: { spell: Spell; stepsLeft: number } | undefined;
+  /** Our own hold being wound up, and our own channel under way: steps so
+   *  far, counted as the server counts them. */
+  let localHold: { spell: Spell; steps: number } | undefined;
+  let localChannel: { spell: Spell; steps: number } | undefined;
+  /** The ability key held on the last input, to tell a press from a hold. */
+  let lastWanted: SpellId | undefined;
+  /** Our own dash, asked for and not yet landed; for a Charge, what at. */
+  let ownDash: { spell: Spell; target: string | undefined; started: boolean } | undefined;
+  /** A Charge still running at something: when it gets there, we stop it. */
+  let charging: string | undefined;
 
   function cancelLocalCast(): void {
-    if (!localCast) return;
-    // A cancelled cast does not start its cooldown — same as the server.
-    nextCastAt.delete(localCast.spell.id);
-    localCast = undefined;
-    hud.endCast(true);
+    if (localCast) {
+      // A cancelled cast does not start its cooldown — same as the server.
+      readyAt.delete(localCast.spell.id);
+      localCast = undefined;
+      hud.endCast(true);
+    }
+    if (localHold) {
+      localHold = undefined;
+      hud.endCast(true);
+    }
+  }
+
+  /**
+   * Ask for a dash on this input, if the server will agree to it: learned,
+   * ready, and for a Charge, something to run at. Everything about it — which
+   * way, how far — is decided now, from what we can see, and rides in the
+   * input; the step does the rest on both sides alike.
+   */
+  function requestDash(spell: Spell): void {
+    const rule = spell.dash;
+    const state = reconciler?.state;
+    if (!rule || !selfPlayer || !state) return;
+    if (!knowsSpell(classId, selfPlayer.level, spell.id) || step < (readyAt.get(spell.id) ?? 0)) return;
+
+    let aim = facingYaw();
+    let reach = rule.maxRange;
+    let runAt: string | undefined;
+    if (spell.id === "charge") {
+      const enemy = target ? room.state.enemies.get(target) : undefined;
+      if (!enemy || enemy.state === EnemyState.Dead) {
+        hud.flash("Nothing to charge at — look at a creature.");
+        return;
+      }
+      const x = predict.value(enemy, "x");
+      const z = predict.value(enemy, "z");
+      const distance = Math.hypot(x - state.x, z - state.z);
+      const radius = archetypeOf(enemy).radius;
+      if (distance - radius < rule.minRange) {
+        hud.flash("Too close to charge.");
+        return;
+      }
+      if (distance - radius > rule.maxRange) {
+        hud.flash("Too far to charge.");
+        return;
+      }
+      aim = Math.atan2(x - state.x, z - state.z);
+      // To its middle: `haltCharge` stops the run at its edge, and a creature
+      // stepping back as you come is still reached.
+      reach = Math.min(rule.maxRange, distance);
+      runAt = target;
+    } else {
+      const point = reticleGround();
+      if (point) {
+        aim = Math.atan2(point.x - state.x, point.z - state.z);
+        reach = Math.hypot(point.x - state.x, point.z - state.z);
+      }
+    }
+
+    input.data.dash = spellToWire(spell.id);
+    input.data.aim = aim;
+    input.data.reach = Math.fround(reach);
+    readyAt.set(spell.id, step + cooldownSteps(spell));
+    ownDash = { spell, target: runAt, started: false };
+    charging = runAt;
+    if (localCast) cancelLocalCast();
+  }
+
+  /** Stop our Charge on the input where it reaches what it is running at — in
+   *  the input, so the server stops it on the same one. Within a step's run of
+   *  its edge, since the step that halts does not move. */
+  function haltCharge(): void {
+    const state = reconciler?.state;
+    const enemy = charging ? room.state.enemies.get(charging) : undefined;
+    if (!state || !enemy) {
+      charging = undefined;
+      return;
+    }
+    if (state.dashLeft === 0) {
+      // Not begun yet, or already over.
+      if (ownDash?.started) charging = undefined;
+      return;
+    }
+    const rule = SPELLS.charge.dash!;
+    const reach = archetypeOf(enemy).radius + PLAYER_RADIUS + ((rule.speed ?? 0) * stepMs) / 1000;
+    if (Math.hypot(predict.value(enemy, "x") - state.x, predict.value(enemy, "z") - state.z) <= reach) {
+      input.data.halt = true;
+      charging = undefined;
+    }
+  }
+
+  /** Where the reticle meets the ground, if it does within reach of a leap;
+   *  with a cursor out, nowhere. */
+  const groundRay = new Vector3();
+  function reticleGround(): { x: number; z: number } | undefined {
+    if (document.pointerLockElement === null) return undefined;
+    const camera = world.camera;
+    camera.getTarget().subtractToRef(camera.position, groundRay);
+    const length = groundRay.length();
+    if (length < 1e-4) return undefined;
+    groundRay.scaleInPlace(1 / length);
+    const origin = camera.position;
+    const limit = SPELLS.heroicLeap.dash!.maxRange + camera.radius + 4;
+    for (let t = 0.5; t <= limit; t += 0.5) {
+      const x = origin.x + groundRay.x * t;
+      const y = origin.y + groundRay.y * t;
+      const z = origin.z + groundRay.z * t;
+      if (y <= heightAt(x, z, ostra.terrain)) return { x, z };
+    }
+    return undefined;
   }
 
   /**
    * One sent input's worth of our own casting — the same rule the server's
-   * `stepCast` runs on the same input, so a swing lands or is cancelled at the
-   * same step on both sides. Learned, off cooldown and affordable are checked
-   * here too, so a cast the server is about to ignore draws nothing.
+   * `stepCast` runs on the same input, so a hold lets go, a spin pulses and a
+   * swing lands at the same step on both sides. Learned, off cooldown and
+   * affordable are checked here too, so a cast the server is about to ignore
+   * draws nothing.
    */
   function stepLocalCast(
-    command: { moveX: number; moveZ: number; jump?: boolean; dodge?: boolean },
+    command: { moveX: number; moveZ: number; jump?: boolean; dodge?: boolean; block?: boolean; dash?: number },
     wanted: SpellId | undefined,
     now: number,
   ): void {
     if (!selfPlayer || selfPlayer.health === 0) {
-      if (localCast) {
-        localCast = undefined;
+      if (localCast || localHold) hud.endCast(false);
+      localCast = undefined;
+      localHold = undefined;
+      localChannel = undefined;
+      return;
+    }
+    const spell = wanted ? SPELLS[wanted] : undefined;
+    const broken = command.dodge === true || command.block === true || (command.dash ?? 0) !== 0;
+
+    if (localHold) {
+      const held = localHold;
+      if (broken) {
+        cancelLocalCast();
+      } else if (spell?.id === held.spell.id && held.steps < msToSteps(held.spell.hold!.fullMs + held.spell.hold!.graceMs)) {
+        held.steps++;
+      } else {
+        localHold = undefined;
         hud.endCast(false);
+        readyAt.set(held.spell.id, step + cooldownSteps(held.spell));
+        fireLocalCast(held.spell, now, holdPower(held.spell, held.steps));
       }
       return;
     }
+
+    if (localChannel) {
+      const channel = localChannel;
+      if (broken || spell?.id !== channel.spell.id) {
+        localChannel = undefined;
+        readyAt.set(channel.spell.id, step + cooldownSteps(channel.spell));
+        return;
+      }
+      channel.steps++;
+      if (channel.steps % msToSteps(channel.spell.channel!.pulseMs) === 0) {
+        if (selfPlayer.resource < channel.spell.cost) {
+          localChannel = undefined;
+          readyAt.set(channel.spell.id, step + cooldownSteps(channel.spell));
+        } else {
+          fireLocalCast(channel.spell, now);
+        }
+      }
+      return;
+    }
+
     const moving = isMoving(command);
     if (localCast) {
       if (moving) {
@@ -1464,21 +1739,34 @@ export function createSession(
       }
       localCast.stepsLeft--;
       if (localCast.stepsLeft > 0) return;
-      const spell = localCast.spell;
+      const cast = localCast.spell;
       localCast = undefined;
       hud.endCast(false);
+      fireLocalCast(cast, now);
+      return;
+    }
+
+    if (!spell || command.block || command.dodge) return;
+    if (spell.kind === "dash" || spell.kind === "passive") return;
+    if (!knowsSpell(classId, selfPlayer.level, spell.id)) return;
+    if (step < (readyAt.get(spell.id) ?? 0) || selfPlayer.resource < spell.cost) return;
+
+    if (spell.kind === "hold") {
+      localHold = { spell, steps: 0 };
+      hud.startCast(spell.name, spell.hold!.fullMs);
+      return;
+    }
+    if (spell.kind === "channel") {
+      localChannel = { spell, steps: 0 };
+      play("whoosh", selfPosition().x, selfPosition().z, 0.6);
       fireLocalCast(spell, now);
       return;
     }
 
-    if (!wanted) return;
-    const spell = SPELLS[wanted];
-    if (!knowsSpell(classId, selfPlayer.level, wanted)) return;
-    if (now < (nextCastAt.get(wanted) ?? 0) || selfPlayer.resource < spell.cost) return;
     const steps = castSteps(spell);
     // Nothing with a cast time starts on the move.
     if (steps > 0 && moving) return;
-    nextCastAt.set(wanted, now + spell.cooldownMs);
+    readyAt.set(spell.id, step + cooldownSteps(spell));
     if (steps > 0) {
       localCast = { spell, stepsLeft: steps };
       hud.startCast(spell.name, spell.castMs);
@@ -1487,9 +1775,12 @@ export function createSession(
     fireLocalCast(spell, now);
   }
 
-  /** Our own cast lands: the swing, and the impact predicted as the server
-   *  will judge it. */
-  function fireLocalCast(spell: Spell, now: number): void {
+  /**
+   * Our own cast lands: the swing, and the impact predicted as the server
+   * will judge it. `power` is a hold's wind-up; a dash's landing passes the
+   * way it went and, for a Charge, the one creature its blow can find.
+   */
+  function fireLocalCast(spell: Spell, now: number, power = 0, dash?: { yaw: number; only: string | undefined }): void {
     const wanted = spell.id;
     let combo = 0;
     if (wanted === "strike") {
@@ -1498,37 +1789,35 @@ export function createSession(
       comboAt = now;
     }
 
-    const yaw = aimFor(spell);
+    const yaw = dash?.yaw ?? aimFor(spell);
     castShownAt = now;
     castShownId = wanted;
     castShownYaw = yaw;
 
     const view = players.get(room.sessionId);
     if (!view) return;
-    const heavy = wanted === "sunder" || wanted === "cleave" || wanted === "bash" || combo === STRIKE_COMBO_LENGTH;
-    const thrown = wanted === "throw";
-    let thrownAt: string | undefined;
-    if (thrown) {
-      const self = selfPosition();
-      thrownAt = predictHits(spell, self.x, self.z, yaw)[0];
-    }
+    const heavy = combo === STRIKE_COMBO_LENGTH || (wanted !== "strike" && wanted !== "whirlwind"
+      && (wanted !== "crushingBlow" || power >= 0.5));
 
     showCast(view, spell, combo, yaw, now, selfPosition, () => {
       if (spell.targeting === "self") return;
       // The blade connects: judge it the way the server will, against what
       // we can see, and draw the result now rather than a round trip later.
       const self = selfPosition();
-      const hits = thrown && thrownAt ? [thrownAt] : predictHits(spell, self.x, self.z, yaw);
+      const hits = predictHits(spell, self.x, self.z, yaw, dash?.only);
       const t = performance.now();
       for (const id of hits) {
         predictedHits.add(id);
         strikeEnemy(id, self.x, self.z, heavy, t);
       }
       if (hits.length > 0) {
-        audio.play(thrown ? "throwHit" : heavy ? "hitHeavy" : "hit", 1);
-        shake(heavy ? 0.16 : 0.07, heavy ? 180 : 110, t);
+        audio.play(heavy ? "hitHeavy" : "hit", 1);
+        const weight = wanted === "crushingBlow" ? 0.12 + power * 0.22 : wanted === "heroicLeap" ? 0.3 : heavy ? 0.16 : 0.07;
+        shake(weight, heavy ? 180 + power * 120 : 110, t);
+      } else if (wanted === "heroicLeap") {
+        shake(0.22, 220, t);
       }
-    }, thrownAt ? () => enemyPoint(thrownAt!) : undefined);
+    }, power);
   }
 
   function frame(now: number): void {
@@ -1585,6 +1874,37 @@ export function createSession(
       const predicted = mine ? reconciler?.state : undefined;
       const moves = predicted ?? (mine ? player : lateMoves(view, now, player));
       view.animator.vy = moves.vy;
+
+      // A dash: dust and a rush of air as it starts, the run or the leap
+      // while it lasts — and for our own, the blow as it ends, predicted, the
+      // server's numbers following.
+      const dashing = isDashing(moves);
+      const dashSpell = dashing ? spellFromWire(moves.dashKind) : undefined;
+      view.animator.dashing = dashSpell?.id;
+      if (dashing && !view.dashing) {
+        effects.dust(x, y, z, 14);
+        play(dashSpell?.id === "heroicLeap" ? "whoosh" : "charge", x, z, mine ? 0.9 : 0.5);
+      }
+      view.dashing = dashing;
+      if (mine && ownDash) {
+        if (dashing) ownDash.started = true;
+        else if (ownDash.started) {
+          const landed = ownDash;
+          ownDash = undefined;
+          const state = predicted ?? player;
+          fireLocalCast(landed.spell, now, 0, { yaw: Math.atan2(state.dashX, state.dashZ), only: landed.target });
+        }
+      }
+      if (mine) {
+        const held = localHold ?? localChannel;
+        if (view.animator.holding !== held?.spell.id) {
+          view.animator.holding = held?.spell.id;
+          view.animator.holdingSince = now;
+        }
+        view.animator.holdPower = localHold ? holdPower(localHold.spell, localHold.steps) : 0;
+      } else if (view.animator.holding === "crushingBlow") {
+        view.animator.holdPower = Math.min(1, (now - view.animator.holdingSince) / SPELLS.crushingBlow.hold!.fullMs);
+      }
       // The first frame of a dodge: a puff of dust where they pushed off.
       const dodging = moves.dodgeLeft > 0;
       if (dodging && !view.dodging) {
@@ -1766,7 +2086,7 @@ export function createSession(
       }
 
       hud.setResource(resourceKind, selfPlayer.resource, selfPlayer.maxResource);
-      hud.setCooldowns(now, nextCastAt);
+      hud.setCooldowns((id) => Math.max(0, (readyAt.get(id) ?? 0) - step) / Math.max(1, cooldownSteps(SPELLS[id])));
       hud.setUtility(
         predict.value(selfPlayer, "dodgeCooldown") / DODGE_COOLDOWN_STEPS,
         Math.max(0, healReadyAt - now) / HEAL_COOLDOWN_MS,
@@ -1898,11 +2218,12 @@ export function createSession(
     if (reticle.classList.contains("hot") !== hot) reticle.classList.toggle("hot", hot);
   }
 
-  function lateMoves(view: PlayerView, now: number, player: Player): { vy: number; dodgeLeft: number } {
+  function lateMoves(view: PlayerView, now: number, player: Player): PlayerView["moves"][number] {
     const log = view.moves;
     const last = log[log.length - 1];
-    if (!last || last.vy !== player.vy || last.dodgeLeft !== player.dodgeLeft) {
-      log.push({ at: now, vy: player.vy, dodgeLeft: player.dodgeLeft });
+    if (!last || last.vy !== player.vy || last.dodgeLeft !== player.dodgeLeft
+      || last.dashLeft !== player.dashLeft || last.dashKind !== player.dashKind) {
+      log.push({ at: now, vy: player.vy, dodgeLeft: player.dodgeLeft, dashLeft: player.dashLeft, dashKind: player.dashKind });
     }
     const due = now - INTERP_DELAY_MS;
     while (log.length > 1 && log[1]!.at <= due) log.shift();
@@ -1917,6 +2238,7 @@ export function createSession(
     offGroundAdd();
     offGroundRemove();
     offCast();
+    offChannel();
     offSwing();
     offCry();
     offDamage();

@@ -6,10 +6,10 @@
  */
 
 type Action = "forward" | "back" | "left" | "right" | "sprint" | "jump" | "dodge" | "heal" | "guard"
-  | "spell1" | "spell2" | "spell3" | "spell4" | "spell5" | "spell6";
+  | "spell1" | "spell2" | "spell3" | "spell4" | "spell5" | "spell6" | "spell7" | "spell8" | "spell9";
 
 /** How many slots the ability bar has keys for. */
-export const ABILITY_KEYS = 6;
+export const ABILITY_KEYS = 9;
 
 const BINDINGS: Record<string, Action> = {
   KeyW: "forward", ArrowUp: "forward",
@@ -29,6 +29,9 @@ const BINDINGS: Record<string, Action> = {
   Digit4: "spell4",
   Digit5: "spell5",
   Digit6: "spell6",
+  Digit7: "spell7",
+  Digit8: "spell8",
+  Digit9: "spell9",
   // Out of combat only — the server decides, the client predicts the same.
   ShiftLeft: "sprint", ShiftRight: "sprint",
 };
@@ -114,8 +117,8 @@ export class KeyboardInput {
    * edge-triggered — the server gates each ability on its own cooldown and
    * cost, so holding a key auto-repeats and spamming it gains nothing.
    *
-   * A higher slot wins when several are held: reaching for Sunder while
-   * still leaning on 1 should cast Sunder.
+   * A higher slot wins when several are held: reaching for Cleave while
+   * still leaning on 1 should cast Cleave.
    */
   castSlot(): number {
     for (let slot = ABILITY_KEYS; slot >= 1; slot--) {

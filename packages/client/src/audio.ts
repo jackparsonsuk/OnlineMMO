@@ -13,7 +13,7 @@
 
 export type Sound =
   | "swing" | "swingHeavy" | "hit" | "hitHeavy" | "crit"
-  | "throw" | "throwHit" | "sunder" | "cry" | "hurt" | "evade"
+  | "whoosh" | "quake" | "cry" | "hurt" | "evade"
   | "windup" | "kill" | "pickup" | "death" | "levelUp"
   | "growl" | "snort" | "gurgle" | "crackle" | "rumble"
   | "spit" | "charge" | "burst" | "slam"
@@ -163,16 +163,12 @@ export class SoundBoard {
         this.crack(t, 3200 * pitch, 0.06, 0.45 * volume);
         this.tone(t, 1320 * pitch, 1760 * pitch, 0.16, "triangle", 0.18 * volume);
         break;
-      case "throw":
-        // A weapon turning end over end: two quick cuts of air.
+      case "whoosh":
+        // Something big going through the air: two quick cuts of it.
         this.whoosh(t, 600 * pitch, 2200 * pitch, 0.12, 0.3 * volume);
         this.whoosh(t + 0.1, 800 * pitch, 2600 * pitch, 0.12, 0.22 * volume);
         break;
-      case "throwHit":
-        this.thud(t, 140 * pitch, 50, 0.16, 0.8 * volume);
-        this.crack(t, 2000 * pitch, 0.07, 0.4 * volume);
-        break;
-      case "sunder":
+      case "quake":
         this.thud(t, 90 * pitch, 32, 0.45, 1.0 * volume);
         this.rumble(t, 0.5, 0.5 * volume);
         break;

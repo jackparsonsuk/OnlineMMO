@@ -305,7 +305,7 @@ export class Effects {
     }
   }
 
-  /** Sunder's ring, rushing outward along the ground. */
+  /** A ring rushing outward along the ground: a slam, a leap's landing, a shout. */
   shockwave(now: number, x: number, y: number, z: number, radius: number, colour = 0xffb066, dust = 18): void {
     const node = new TransformNode("shockPivot", this.scene);
     node.position.set(x, y + 0.12, z);

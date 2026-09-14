@@ -849,24 +849,34 @@ function keys(t: number, frames: ReadonlyArray<readonly [number, number]>): numb
  *  faces the aim rather than the camera. */
 export function castDuration(spell: SpellId, combo: number): number {
   switch (spell) {
-    case "sunder": return 520;
-    case "throw": return 380;
+    case "strike": return combo === 3 ? 440 : 330;
+    case "charge": return 300;
     case "cleave": return 420;
-    case "bash": return 300;
+    case "shockwave": return 520;
+    case "crushingBlow": return 460;
+    case "shieldBash": return 300;
+    case "heroicLeap": return 420;
+    case "execute": return 440;
+    // A spin has no swing of its own; the spin is the hold pose.
+    case "whirlwind": return 0;
     case "battleCry": return 700;
-    default: return combo === 3 ? 440 : 330;
   }
 }
 
-/** When the blow of a cast visibly connects, ms after it starts. */
+/** When the blow of a cast visibly connects, ms after it starts. A dash's
+ *  blow is its arrival, which has already happened when it is drawn. */
 export function castContact(spell: SpellId, combo: number): number {
   switch (spell) {
-    case "sunder": return 190;
-    case "throw": return 110;
+    case "strike": return combo === 3 ? 150 : 95;
+    case "charge": return 0;
     case "cleave": return 150;
-    case "bash": return 90;
+    case "shockwave": return 180;
+    case "crushingBlow": return 90;
+    case "shieldBash": return 0;
+    case "heroicLeap": return 0;
+    case "execute": return 150;
+    case "whirlwind": return 0;
     case "battleCry": return 160;
-    default: return combo === 3 ? 150 : 95;
   }
 }
 
@@ -910,6 +920,17 @@ export class Animator {
    * reeled in before the rod is put away.
    */
   angling = 0;
+  /**
+   * A hold being wound up or a channel under way (Crushing Blow raised,
+   * Whirlwind spinning), and since when — set by whoever knows: our own
+   * cast step, or the server's word for anyone else.
+   */
+  holding: SpellId | undefined;
+  holdingSince = 0;
+  /** How far a hold is wound up, 0 to 1, for the tremble. */
+  holdPower = 0;
+  /** A dash under way (Charge, Heroic Leap), set each frame like `vy`. */
+  dashing: SpellId | undefined;
   private lastAngling = 0;
   private castAt = -Infinity;
   private biteAt = -Infinity;
@@ -1132,6 +1153,57 @@ export class Animator {
 
     const action = this.action;
     if (this.poseAngling(now, swing)) return;
+
+    // Running at something: low, shoulder first, shield up, blade back to
+    // come round when it gets there. The legs are already a blur.
+    if (this.dashing === "charge") {
+      body.rotation.x += 0.42;
+      chest.rotation.x = 0.2;
+      armL.rotation.x = -1.35;
+      armL.rotation.z = 0.35;
+      armR.rotation.x = 0.55;
+      armR.rotation.z = -0.3;
+      head.rotation.x = -0.3;
+      return;
+    }
+    // In the air on a leap: the blade raised in both hands to come down with
+    // you, lower the nearer the ground.
+    if (this.dashing === "heroicLeap") {
+      const fall = (1 - Math.max(-1, Math.min(1, this.vy / JUMP_SPEED))) / 2;
+      armR.rotation.x = -2.9 + fall * 0.5;
+      armL.rotation.x = -2.7 + fall * 0.5;
+      chest.rotation.x = -0.25 + fall * 0.3;
+      legL.rotation.x = -1.1 + fall * 0.7;
+      legR.rotation.x = 0.4 - fall * 0.3;
+      return;
+    }
+    if (this.holding === "crushingBlow" && action?.type !== "cast") {
+      // Raised behind the head in both hands, leaning back into it, and
+      // shaking harder the more is in it.
+      const up = easeOut((now - this.holdingSince) / 220);
+      const shake = this.holdPower >= 1 ? 0.05 : this.holdPower * 0.025;
+      armR.rotation.x = mix(armR.rotation.x, -3.05, up) + Math.sin(now / 21) * shake;
+      armL.rotation.x = mix(armL.rotation.x, -2.85, up) + Math.sin(now / 23) * shake;
+      chest.rotation.x = mix(chest.rotation.x, -0.32 - this.holdPower * 0.1, up);
+      legL.rotation.x = mix(legL.rotation.x, -0.35, up);
+      legR.rotation.x = mix(legR.rotation.x, 0.3, up);
+      head.rotation.x = -0.15 * up;
+      return;
+    }
+    if (this.holding === "whirlwind") {
+      // Round and round, arms flung out, the blade at full stretch.
+      const t = now - this.holdingSince;
+      body.rotation.y = (t / 380) * Math.PI * 2;
+      const out = easeOut(t / 150);
+      armR.rotation.x = mix(armR.rotation.x, -1.5, out);
+      armR.rotation.z = mix(armR.rotation.z, -0.2, out);
+      armL.rotation.x = mix(armL.rotation.x, -1.3, out);
+      armL.rotation.z = mix(armL.rotation.z, 0.9, out);
+      chest.rotation.x = 0.12;
+      body.position.y -= 0.05;
+      return;
+    }
+
     if (this.guarding && action?.type !== "cast") {
       // Both forearms up across the chest, the blade held crosswise in front,
       // leaning into it: a shield wall of one. The legs keep walking.
@@ -1159,22 +1231,32 @@ export class Animator {
       armR.rotation.z = keys(t, [[0, 0], [60, -0.5 * dir], [130, 0.35 * dir], [330, 0]]);
       armL.rotation.x = keys(t, [[0, 0], [90, -0.5], [330, 0]]);
       legL.rotation.x = keys(t, [[0, swing], [100, -0.35], [330, 0]]);
-    } else if (action.spell === "strike") {
-      // The finisher: both hands overhead, lean back, bring it down.
+    } else if (action.spell === "strike" || action.spell === "execute") {
+      // The finisher, and Execute: both hands overhead, lean back, bring it
+      // down.
       armR.rotation.x = keys(t, [[0, 0], [110, -2.95], [165, -0.65], [440, 0]]);
       armL.rotation.x = keys(t, [[0, 0], [110, -2.7], [165, -0.8], [440, 0]]);
       chest.rotation.x = keys(t, [[0, 0], [110, -0.3], [165, 0.45], [440, 0]]);
       this.rig.body.position.y += keys(t, [[0, 0], [110, 0.12], [165, -0.1], [440, 0]]);
       legL.rotation.x = keys(t, [[0, 0], [165, -0.45], [440, 0]]);
       legR.rotation.x = keys(t, [[0, 0], [165, 0.35], [440, 0]]);
-    } else if (action.spell === "throw") {
-      // Wind the arm back over the shoulder and hurl: the weapon leaves from
-      // the hand at the top of the arc.
-      armR.rotation.x = keys(t, [[0, 0], [70, -2.7], [120, -1.4], [240, -0.9], [380, 0]]);
-      armL.rotation.x = keys(t, [[0, 0], [70, -0.9], [380, 0]]);
-      chest.rotation.y = keys(t, [[0, 0], [70, -0.45], [120, 0.4], [380, 0]]);
-      chest.rotation.x = keys(t, [[0, 0], [70, -0.15], [130, 0.18], [380, 0]]);
-      legL.rotation.x = keys(t, [[0, swing], [120, -0.4], [380, 0]]);
+    } else if (action.spell === "crushingBlow") {
+      // From the raised hold straight down, whole body behind it, into a
+      // crouch.
+      armR.rotation.x = keys(t, [[0, -3.05], [90, -0.35], [200, -0.5], [460, 0]]);
+      armL.rotation.x = keys(t, [[0, -2.85], [90, -0.45], [200, -0.55], [460, 0]]);
+      chest.rotation.x = keys(t, [[0, -0.35], [90, 0.6], [200, 0.5], [460, 0]]);
+      this.rig.body.position.y += keys(t, [[0, 0], [90, -0.14], [220, -0.1], [460, 0]]);
+      legL.rotation.x = keys(t, [[0, -0.35], [90, -0.6], [460, 0]]);
+      legR.rotation.x = keys(t, [[0, 0.3], [90, 0.45], [460, 0]]);
+    } else if (action.spell === "heroicLeap") {
+      // Down out of the leap, blade first, knees taking it.
+      armR.rotation.x = keys(t, [[0, -0.5], [120, -0.4], [420, 0]]);
+      armL.rotation.x = keys(t, [[0, -0.6], [120, -0.5], [420, 0]]);
+      chest.rotation.x = keys(t, [[0, 0.55], [140, 0.45], [420, 0]]);
+      this.rig.body.position.y += keys(t, [[0, -0.22], [140, -0.16], [420, 0]]);
+      legL.rotation.x = keys(t, [[0, -0.8], [420, 0]]);
+      legR.rotation.x = keys(t, [[0, 0.5], [420, 0]]);
     } else if (action.spell === "cleave") {
       // One huge sweep across the whole front, turning the body with it.
       chest.rotation.y = keys(t, [[0, 0], [90, 1.15], [170, -1.25], [420, 0]]);
@@ -1183,8 +1265,9 @@ export class Animator {
       armL.rotation.x = keys(t, [[0, 0], [90, -0.7], [170, -0.4], [420, 0]]);
       legL.rotation.x = keys(t, [[0, swing], [150, -0.45], [420, 0]]);
       legR.rotation.x = keys(t, [[0, -swing], [150, 0.25], [420, 0]]);
-    } else if (action.spell === "bash") {
-      // A short shove with the off hand, shoulder behind it.
+    } else if (action.spell === "shieldBash" || action.spell === "charge") {
+      // A short shove with the off hand, shoulder behind it: a blow turned,
+      // or a run arriving.
       armL.rotation.x = keys(t, [[0, 0], [50, -0.4], [95, -1.55], [300, 0]]);
       chest.rotation.y = keys(t, [[0, 0], [50, 0.3], [95, -0.35], [300, 0]]);
       chest.rotation.x = keys(t, [[0, 0], [95, 0.25], [300, 0]]);
@@ -1197,8 +1280,8 @@ export class Animator {
       armL.rotation.x = keys(t, [[0, 0], [160, -0.9], [700, 0]]);
       chest.rotation.x = keys(t, [[0, 0], [160, -0.35], [520, -0.3], [700, 0]]);
       head.rotation.x = keys(t, [[0, 0], [160, -0.4], [520, -0.35], [700, 0]]);
-    } else {
-      // Sunder: hop, arms up, and slam both fists into the ground.
+    } else if (action.spell === "shockwave") {
+      // Shockwave: hop, arms up, and slam both fists into the ground.
       armR.rotation.x = keys(t, [[0, 0], [140, -2.9], [200, -0.5], [520, 0]]);
       armL.rotation.x = keys(t, [[0, 0], [140, -2.9], [200, -0.5], [520, 0]]);
       chest.rotation.x = keys(t, [[0, 0], [140, -0.22], [200, 0.55], [520, 0]]);
