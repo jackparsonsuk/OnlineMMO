@@ -434,10 +434,22 @@ ground about 2.5 m ahead, where a swing does, and further out as you look up.
 Your own name is hidden while the mouse is held, since it would sit on the
 reticle. (The first reticle was a point pinned 6 m ahead and projected; it
 slid down the screen as you looked up, and hid behind your back looking
-level.) Without a locked target, a blow leans toward
-something within ~40° of where you look (it was ~75° for tab-targeting). Tab
-still locks a target, which turns your swings toward it; clicking things in
-the world (a creature to target, a player to invite) is for a free cursor.
+level.) A blow leans toward something within ~40° of where you look (it was
+~75° for tab-targeting).
+
+**What the reticle is on is your target.** There is no lock: no Tab, no
+clicking a creature, nothing that turns your swings for you. Each frame the
+camera's line through the reticle picks the creature it passes through, or
+nearest to — measured as an angle beyond the edge of its body, so something at
+thirty metres is as easy to pick out as something at three (`underReticle`).
+That creature gets the ring, the target frame and the nametag highlight, and
+is what a one-creature ability prefers when it is in the shape. Look away and
+it stays for 0.7 s, long enough to glance at the one beside it; a dead one
+stays a little longer so the kill lands on the frame. Hitting something with
+the reticle on nothing makes that the target for the same moment. Tab-targeting
+went because it fought the action controls: a lock that turns your blade
+toward one creature is a second aim that disagrees with the first. Clicking a
+player (to invite them) is for a free cursor.
 
 **Hits are lag-compensated.** A client renders creatures 150 ms in the past, so
 a Void Spider closing at 7.2 m/s is nearly a metre from where it appears by the
@@ -460,11 +472,11 @@ creature.
 ### Aim
 
 `MoveInput` carries an `aim` separate from `yaw`. Yaw follows the camera and
-steers movement; aim follows your target, so hitting something off to one side
-doesn't bend the direction you are walking. With a target locked (Tab) every
-cast turns to face it while in reach. Without one, a blow leans toward whatever
-is within ~40° of where you are looking, and Heroic Throw toward anything within
-~17° — reach is its reward, accuracy its price. Aim is computed
+steers movement; aim leans toward what you are hitting, so hitting something
+off to one side doesn't bend the direction you are walking. A blow leans toward
+whatever is in reach within ~40° of where you are looking — the target first,
+if it is one of those — and an ability with reach toward anything within ~17°:
+reach is its reward, accuracy its price. Aim is computed
 from the *drawn* positions, which are exactly what lag compensation rewinds to,
 so aiming at the picture is aiming at the truth.
 

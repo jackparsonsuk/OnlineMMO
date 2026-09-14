@@ -335,13 +335,13 @@ window.addEventListener("keydown", (event) => {
       session?.toggleMap();
       break;
     case "Tab":
-      // Otherwise the browser moves focus off the canvas.
+      // Otherwise the browser moves focus off the canvas. It used to lock a
+      // target; what you look at is the target now.
       event.preventDefault();
-      session?.cycleTarget();
       break;
     case "Escape":
-      // Close whatever is open first; then drop the target; and only with
-      // nothing left to close, the menu — the order every MMO has taught.
+      // Close whatever is open first, and only with nothing left to close,
+      // the menu — the order every MMO has taught.
       if (!gameMenu.hidden) setMenu(false);
       else if (hud.helpOpen) hud.toggleHelp(false);
       else if (session?.mapOpen) session.toggleMap();
@@ -350,7 +350,6 @@ window.addEventListener("keydown", (event) => {
       else if (vendorUI.close()) break;
       else if (questUI.close()) break;
       else if (characterScreen.isOpen) characterScreen.setOpen(false);
-      else if (session?.clearTarget()) break;
       else if (session) setMenu(true);
       break;
   }

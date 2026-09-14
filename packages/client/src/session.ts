@@ -102,10 +102,6 @@ export interface OstraSession {
   /** One render/network frame. Takes `now` so tests can drive it on their own
    *  clock — requestAnimationFrame stops entirely in a background tab. */
   frame(now: number): void;
-  /** Tab: the next creature in front of you. */
-  cycleTarget(): void;
-  /** Escape: let go of the target. Returns whether there was one. */
-  clearTarget(): boolean;
   toggleMap(): void;
   readonly mapOpen: boolean;
   /**
@@ -186,18 +182,25 @@ const ENEMY_DRAW_DISTANCE = 240;
  *  ordinary creatures' red. Matches `.lg-elite` in the legend. */
 const ELITE_BLIP = "#c77dff";
 
-/** Tab only considers creatures this close. */
-const TARGET_RANGE = 36;
+/** The reticle only picks out creatures this close. */
+const TARGET_RANGE = 40;
 
-/** A target further than this is dropped. */
+/** A target further than this is dropped, reticle or not. */
 const TARGET_KEEP_RANGE = 70;
 
-/** How far a spell will turn you toward your target to aim at it, beyond its
- *  own reach — enough to cover a creature stepping back as you swing. */
-const AIM_ASSIST_SLACK = 2.5;
+/**
+ * How far to either side of where you look a creature can be and still be
+ * what you are looking at: radians beyond the edge of its body. Generous,
+ * because the reticle is a point and a spider at thirty metres is a speck.
+ */
+const RETICLE_SLACK = 0.12;
 
-/** Without a target, a blow leans toward anything within this angle of
- *  where you are looking; a Heroic Throw, much less. */
+/** A target the reticle has moved off is kept this long — long enough to
+ *  glance at the one beside it, or to lose it in a flurry of camera shake. */
+const TARGET_LINGER_MS = 700;
+
+/** A blow leans toward anything within this angle of where you are looking;
+ *  an ability with reach, much less. */
 const SOFT_AIM_MELEE = 0.7;
 const SOFT_AIM_RANGED = 0.3;
 
@@ -391,8 +394,13 @@ export function createSession(
    *  the numbers rather than playing the impact twice. */
   const predictedHits = new Set<string>();
 
+  /** What the reticle is on, or was on a moment ago: the target frame, the
+   *  ring, and what a one-creature ability prefers. There is no lock. */
   let target: string | undefined;
+  /** When a dead target stops being shown, so you see the kill land. */
   let targetLostAt = 0;
+  /** When the reticle last rested on the target. */
+  let targetSeenAt = 0;
   let shakeUntil = 0;
   let shakeStrength = 0;
 
@@ -714,54 +722,73 @@ export function createSession(
     }
   }
 
-  function livingEnemy(id: string | undefined): Enemy | undefined {
-    if (!id) return undefined;
-    const enemy = room.state.enemies.get(id);
-    return enemy && enemy.state !== EnemyState.Dead ? enemy : undefined;
-  }
-
-  /** Creatures in front of you, most-in-front first. */
-  function targetCandidates(): string[] {
+  /**
+   * The creature the reticle is on.
+   *
+   * Mostly a matter of which way you face: the camera looks down over your
+   * head, so at the usual pitch the reticle meets the ground a couple of
+   * metres ahead, and a creature fifteen metres off sits well under the line —
+   * a true ray test would only ever find what is at your feet. So the pick is
+   * the creature whose bearing is nearest where you look, as an angle beyond
+   * the edge of its body (a Risen at thirty metres is as easy to pick out as
+   * one at three), and the pitch says how far along that line you mean: of
+   * two in a row, the one nearer where the reticle meets the ground wins, and
+   * looking up reaches past the near one to the far.
+   */
+  const rayDirection = new Vector3();
+  function underReticle(): string | undefined {
+    const camera = world.camera;
     const self = selfPosition();
     const heading = facingYaw();
-    const scored: Array<{ id: string; score: number }> = [];
+    camera.getTarget().subtractToRef(camera.position, rayDirection);
+    const length = rayDirection.length();
+    if (length < 1e-4) return undefined;
+    rayDirection.scaleInPlace(1 / length);
+    // Where the reticle meets the ground, as a distance from you: as far as
+    // targeting goes once you look level or above.
+    let ground = TARGET_RANGE;
+    if (rayDirection.y < -0.02) {
+      const t = (camera.position.y - self.y) / -rayDirection.y;
+      const hx = camera.position.x + rayDirection.x * t;
+      const hz = camera.position.z + rayDirection.z * t;
+      ground = Math.min(TARGET_RANGE, Math.hypot(hx - self.x, hz - self.z));
+    }
+
+    let best: string | undefined;
+    let bestScore = Infinity;
     room.state.enemies.forEach((enemy: Enemy, id: string) => {
       if (enemy.state === EnemyState.Dead) return;
+      const view = enemies.get(id);
+      if (!view) return;
       const x = predict.value(enemy, "x");
       const z = predict.value(enemy, "z");
       const distance = Math.hypot(x - self.x, z - self.z);
       if (distance > TARGET_RANGE) return;
       const bearing = Math.atan2(x - self.x, z - self.z);
-      const off = Math.abs(Math.atan2(Math.sin(bearing - heading), Math.cos(bearing - heading)));
-      // Ahead beats near: Tab should pick what you are looking at.
-      scored.push({ id, score: off * 1.6 + distance / 18 });
+      const off = Math.abs(angleDelta(heading, bearing));
+      // Half its width as seen from here: standing on top of something, it
+      // fills the view whichever way you look.
+      const halfWidth = distance <= view.archetype.radius ? Math.PI : Math.atan((view.archetype.radius + 0.2) / distance);
+      const beyond = Math.max(0, off - halfWidth);
+      if (beyond > RETICLE_SLACK) return;
+      const score = beyond + Math.abs(distance - ground) * 0.012;
+      if (score < bestScore) {
+        best = id;
+        bestScore = score;
+      }
     });
-    return scored.sort((a, b) => a.score - b.score).map((entry) => entry.id);
+    return best;
   }
 
-  function cycleTarget(): void {
-    const candidates = targetCandidates();
-    if (candidates.length === 0) {
-      setTarget(undefined);
-      return;
-    }
-    const index = target ? candidates.indexOf(target) : -1;
-    setTarget(candidates[(index + 1) % candidates.length]);
-  }
-
-  // Click a creature to select it. A tap, not a drag, so orbiting the camera
-  // never changes your target.
+  // Click another player for what can be done with them. A tap, not a drag,
+  // so orbiting the camera never opens a menu. Creatures are not clicked:
+  // what you look at is what you target.
   const pointer = scene.onPointerObservable.add((info) => {
     if (info.type !== PointerEventTypes.POINTERTAP) return;
     // With the mouse captured a click is a swing, and there is no cursor to
     // say what it was pointing at; picking is for a free cursor (Alt).
     if (document.pointerLockElement) return;
-    const pick = scene.pick(
-      scene.pointerX, scene.pointerY,
-      (mesh) => mesh.metadata?.enemyId !== undefined || mesh.metadata?.playerId !== undefined,
-    );
-    const id = pick?.pickedMesh?.metadata?.enemyId as string | undefined;
-    if (id && livingEnemy(id)) setTarget(id);
+    const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) => mesh.metadata?.playerId !== undefined);
     // Another player: offer what can be done with them (for now, a party).
     const playerId = pick?.pickedMesh?.metadata?.playerId as string | undefined;
     const other = playerId ? room.state.players.get(playerId) : undefined;
@@ -782,31 +809,23 @@ export function createSession(
   /**
    * Which way to aim a cast.
    *
-   * Your target if you have one and it is near enough; otherwise, for a blow,
-   * whatever is closest to where you are looking — a melee swing that whiffs
-   * past something slightly off-centre feels like the game's fault, not
-   * yours. Heroic Throw gets a much narrower nudge: reach is its reward, and
-   * accuracy is its price. The server tests against the positions we drew, so
-   * aiming at the picture is aiming at the truth.
+   * Where you are looking, leaning toward whatever is in reach close to it —
+   * a melee swing that whiffs past something slightly off-centre feels like
+   * the game's fault, not yours. What the reticle is on wins the lean when it
+   * is in reach; nothing ever turns you further than the cone. Abilities with
+   * reach get a much narrower nudge: reach is their reward, and accuracy their
+   * price. The server tests against the positions we drew, so aiming at the
+   * picture is aiming at the truth.
    */
   function aimFor(spell: Spell | undefined): number {
     const camera = facingYaw();
     if (!spell || spell.arc >= Math.PI * 2 || spell.targeting === "self" || !selfPlayer) return camera;
     const self = selfPosition();
 
-    const locked = livingEnemy(target);
-    if (locked) {
-      const x = predict.value(locked, "x");
-      const z = predict.value(locked, "z");
-      if (Math.hypot(x - self.x, z - self.z) <= spell.range + archetypeOf(locked).radius + AIM_ASSIST_SLACK) {
-        return Math.atan2(x - self.x, z - self.z);
-      }
-    }
-
     const cone = spell.range > RANGED_REACH ? SOFT_AIM_RANGED : SOFT_AIM_MELEE;
     let best: number | undefined;
     let bestScore = Infinity;
-    room.state.enemies.forEach((enemy: Enemy) => {
+    room.state.enemies.forEach((enemy: Enemy, id: string) => {
       if (enemy.state === EnemyState.Dead) return;
       const x = predict.value(enemy, "x");
       const z = predict.value(enemy, "z");
@@ -815,7 +834,7 @@ export function createSession(
       const bearing = Math.atan2(x - self.x, z - self.z);
       const off = Math.abs(Math.atan2(Math.sin(bearing - camera), Math.cos(bearing - camera)));
       if (off > cone) return;
-      const score = off + distance * 0.15;
+      const score = id === target ? -1 : off + distance * 0.15;
       if (score < bestScore) {
         bestScore = score;
         best = bearing;
@@ -1113,9 +1132,12 @@ export function createSession(
       }
     }
 
-    // Hitting something with nothing selected selects it, so the target frame
-    // shows the fight you just started.
-    if (mine && !target && payload.hits[0] && !payload.hits[0].killed) setTarget(payload.hits[0].id);
+    // Hitting something with the reticle on nothing makes it the target for a
+    // moment, so the target frame shows the fight you just started.
+    if (mine && !target && payload.hits[0] && !payload.hits[0].killed) {
+      setTarget(payload.hits[0].id);
+      targetSeenAt = now;
+    }
     if (mine) predictedHits.clear();
   });
 
@@ -1679,8 +1701,16 @@ export function createSession(
       nametagTargets.push({ sessionId: stone.key, x: stone.x, y: stone.y, z: stone.z, height: 4.9, maxDistance: 160 });
     }
 
-    // The target: kept while it lives and is near, let go shortly after it
-    // dies so you can see the kill land.
+    // The target: whatever the reticle is on, held a moment after it moves
+    // off, and — once it dies — a moment longer so you can see the kill land.
+    // Only while the game holds the mouse: with a cursor out, the middle of
+    // the screen is not where you are looking.
+    const looking = document.pointerLockElement !== null ? underReticle() : undefined;
+    if (looking && looking !== target) {
+      setTarget(looking);
+      targetLostAt = 0;
+    }
+    if (looking) targetSeenAt = now;
     let targetBearing: number | undefined;
     const locked = target ? room.state.enemies.get(target) : undefined;
     if (target && !locked) {
@@ -1691,7 +1721,8 @@ export function createSession(
       const y = predict.value(locked, "y");
       const z = predict.value(locked, "z");
       const dead = locked.state === EnemyState.Dead;
-      if (Math.hypot(x - self.x, z - self.z) > TARGET_KEEP_RANGE || (dead && now > targetLostAt && targetLostAt > 0)) {
+      const kept = dead ? targetLostAt > 0 && now <= targetLostAt : now - targetSeenAt <= TARGET_LINGER_MS;
+      if (Math.hypot(x - self.x, z - self.z) > TARGET_KEEP_RANGE || !kept) {
         targetLostAt = 0;
         setTarget(undefined);
       } else {
@@ -1938,12 +1969,6 @@ export function createSession(
 
   const api: OstraSession = {
     frame,
-    cycleTarget,
-    clearTarget: () => {
-      const had = target !== undefined;
-      setTarget(undefined);
-      return had;
-    },
     toggleMap: () => cartographer.toggleWorld(),
     get mapOpen() { return cartographer.worldOpen; },
     setPortrait,
