@@ -165,7 +165,20 @@ shown by itself the first time a browser enters the world.
 Every panel shares one look — dark glass, a warm gold hairline, a soft shadow
 — set by CSS variables at the top of `style.css`, and names and titles are in a
 book face from the fonts every desktop already has (Palatino, Book Antiqua,
-Georgia), since nothing is loaded from a file.
+Georgia), since no font is loaded from a file.
+
+**Painted art is for the screens around the world, never the world itself.**
+The world stays voxels built at runtime (Art style), and sounds and music stay
+synthesised; the title screen, and in time the loading screens, ability icons
+and portraits, are painted images in `packages/client/public/art/`, listed with
+their prompts in `ART.md`. That line is where it is because the world has to
+agree with the simulation — a creature's model sits beside its collider's
+numbers — and a painting of a Gate has nothing to agree with. Every image is
+dressing: each has a fallback (the title's dark gradient is still under its
+picture), so a missing file costs a picture, never a screen. The title keeps
+its art up while the world loads behind it, and fades once your own body has
+arrived and a few frames are drawn (`worldReady`), rather than cutting to an
+empty canvas.
 
 ## Nametags
 

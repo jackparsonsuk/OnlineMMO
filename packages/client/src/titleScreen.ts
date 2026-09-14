@@ -18,8 +18,34 @@ export async function showTitleScreen(account: AccountClient): Promise<Character
   if (!restored) await signInStep(root, account);
 
   const character = await characterStep(root, account);
-  root.hidden = true;
+  // The art stays up while the world is built behind it: hiding it here
+  // showed an empty canvas for as long as the join and the first ground took.
+  // `leaveTitleScreen` takes it down once there is something to look at.
+  panel(root, `
+    <h1>${escapeHtml(character.name)}</h1>
+    <p class="tagline">Stepping through to ${escapeHtml(getOstra(character.ostraId).name)}…</p>
+    <p class="error" hidden></p>
+  `).classList.add("entering");
   return character;
+}
+
+/** The world is in: fade the title away. */
+export function leaveTitleScreen(): void {
+  const root = document.getElementById("title") as HTMLElement;
+  if (root.hidden) return;
+  root.classList.add("leaving");
+  window.setTimeout(() => {
+    root.hidden = true;
+    root.classList.remove("leaving");
+  }, 600);
+}
+
+/** Entering failed: say so where the player is looking. */
+export function titleScreenError(message: string): void {
+  const error = document.querySelector<HTMLElement>("#title .error");
+  if (!error) return;
+  error.textContent = message;
+  error.hidden = false;
 }
 
 /** Render a panel and hand back its elements. */
@@ -34,8 +60,9 @@ function signInStep(root: HTMLElement, account: AccountClient): Promise<void> {
 
     const draw = (): void => {
       const registering = mode === "register";
+      // The name is in the art above the panel; the panel says what to do.
       const box = panel(root, `
-        <h1>Ostracon</h1>
+        <h1>${registering ? "Create an account" : "Sign in"}</h1>
         <p class="tagline">The Gates are opening again.</p>
         <form>
           <label>Email<input name="email" type="email" autocomplete="username" required /></label>

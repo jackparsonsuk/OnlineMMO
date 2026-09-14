@@ -1173,19 +1173,41 @@ body.spellbook #actionbar :is(#vitals, #xp) { opacity: 0; }
 
 /* --- title screen -------------------------------------------------------- */
 
+/* The key art (ART.md): the Gate and the traveller on the left, the name top
+   right. The panel sits under the name, over the forest, so neither is
+   covered; a shade rises behind it from the bottom right so the form reads
+   on a bright picture. Cover, anchored to the name's corner, so a wider or
+   taller window crops the sky and the foreground rather than the logo. */
 #title {
   position: fixed;
   inset: 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: radial-gradient(ellipse at 50% 35%, #16202b 0%, #0a0e13 70%);
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 0 7vw 7vh 0;
+  background:
+    radial-gradient(ellipse 45% 60% at 88% 92%, rgb(8 11 15 / 72%) 0%, rgb(8 11 15 / 30%) 55%, transparent 80%),
+    url("/art/title-terra.jpg") 82% 18% / cover no-repeat,
+    radial-gradient(ellipse at 50% 35%, #16202b 0%, #0a0e13 70%);
   /* The one screen that must take input before the canvas exists. */
   pointer-events: auto;
   z-index: 10;
+  transition: opacity 600ms ease;
 }
 
 #title[hidden] { display: none; }
+#title.leaving { opacity: 0; pointer-events: none; }
+
+/* A tall or narrow window has no room beside the art: the panel goes to the
+   bottom middle instead. */
+@media (max-aspect-ratio: 5/4) {
+  #title { justify-content: center; padding: 0 0 5vh; }
+}
+
+/* Entering the world: only the name and where to, while it loads. */
+.title-panel.entering { width: auto; min-width: 260px; text-align: center; }
+.title-panel.entering .tagline { margin: 0; }
+.title-panel.entering .error { margin-top: 12px; }
 
 .title-panel {
   width: 340px;

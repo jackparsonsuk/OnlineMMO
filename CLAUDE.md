@@ -161,6 +161,9 @@ packages/client/src/
   British spelling (`colour`, `armour`).
 - Tuning lives in data tables (`ostras.ts`, `enemies.ts`, `spells.ts`,
   `combat.ts`), not in logic.
-- Art is built from primitives at runtime, low-poly and flat-shaded; sounds are
-  synthesised. Nothing is loaded from asset files.
+- The world's art is built from primitives at runtime, low-poly and
+  flat-shaded; sounds are synthesised. No model, texture or sound files.
+  Painted 2D art for screens and UI (title, loading screens, icons,
+  portraits) is the one exception: images in `packages/client/public/art/`,
+  listed in `ART.md`, and the game must still work without any of them.
 - One feature per commit, with a descriptive title (see `git log`).

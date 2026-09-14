@@ -52,7 +52,7 @@ import { questMarksFor } from "./questMarks.js";
 import { QuestUI } from "./questUI.js";
 import { TravelUI } from "./travelUI.js";
 import { VendorUI } from "./vendorUI.js";
-import { showTitleScreen } from "./titleScreen.js";
+import { leaveTitleScreen, showTitleScreen, titleScreenError } from "./titleScreen.js";
 import { Hud, type LevelGains } from "./hud.js";
 import { KeyboardInput } from "./input.js";
 import { MouseLook } from "./mouselook.js";
@@ -538,6 +538,8 @@ async function main(): Promise<void> {
   enter(client, joined, getOstra(character.ostraId));
 
   world.engine.runRenderLoop(() => frame(performance.now()));
+  await worldReady(joined);
+  leaveTitleScreen();
   // The controls, once: the bar that used to list them permanently was the
   // busiest thing on the screen, and you only need it the first time.
   hud.showHelpOnce();
@@ -562,6 +564,27 @@ async function main(): Promise<void> {
       },
     });
   }
+}
+
+/**
+ * Resolves once there is a world worth showing: our own body has arrived
+ * (which builds the ground under it) and a few frames have been drawn, so the
+ * title fades onto the world rather than onto the chunks assembling. Timers,
+ * not animation frames, which never come in a background tab; and never
+ * longer than a few seconds, since a slow world is better than a stuck title.
+ */
+function worldReady(joined: Room<unknown, WorldState>): Promise<void> {
+  const started = performance.now();
+  return new Promise((resolve) => {
+    let settled = 0;
+    const check = (): void => {
+      const arrived = joined.state.players?.get(joined.sessionId) !== undefined && session !== undefined;
+      if (arrived) settled++;
+      if (settled >= 4 || performance.now() - started > 8000) resolve();
+      else window.setTimeout(check, 100);
+    };
+    check();
+  });
 }
 
 /** One frame of everything: the world, then the character screen, which
@@ -808,5 +831,7 @@ async function travel(client: Client, payload: GateMessage): Promise<void> {
 
 main().catch((error: unknown) => {
   console.error(error);
-  hud.setStatus(error instanceof Error ? error.message : "failed to connect", true);
+  const message = error instanceof Error ? error.message : "failed to connect";
+  hud.setStatus(message, true);
+  titleScreenError(`Could not enter: ${message}`);
 });
